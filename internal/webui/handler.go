@@ -65,7 +65,9 @@ func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 // served from other ports of the same address, which the browser counts as
 // the same site, so no other origin may frame the desktop (issue #161). Images
 // stay on the device: Markdown from the assistant must not make the browser
-// fetch an outside address (ADR 0024).
+// fetch an outside address (ADR 0024). Frames load only the desktop's own
+// pages: a shared page in 共享工作区 cannot navigate its sandboxed frame
+// outside (ADR 0040).
 const desktopPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' data: blob:; " +
 	"frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"

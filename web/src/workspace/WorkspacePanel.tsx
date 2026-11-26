@@ -1,7 +1,8 @@
-import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileCode2, PlugZap, Upload, Users } from "lucide-react";
-import { type DragEvent, useCallback, useMemo, useRef, useState } from "react";
+import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import { carriesFiles } from "../lib/pickedFiles";
 import { relativeTime } from "../lib/time";
@@ -21,12 +22,38 @@ import styles from "./workspace.module.css";
 // frame. A member uploads a page by choosing or dropping an HTML file and
 // connects their own agent here; administrators choose who may use it.
 export function WorkspacePanel({ userId, admin }: { userId: string; admin: boolean }) {
-  const [client] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 2_000, refetchOnWindowFocus: false } } }),
-  );
+  // An account an administrator takes out keeps nothing it had read: the
+  // first answer that says so empties the window.
+  const [forbidden, setForbidden] = useState<APIError>();
+  const [client] = useState(() => {
+    const onError = (error: unknown) => {
+      if (error instanceof APIError && error.code === "workspace_forbidden") setForbidden(error);
+    };
+    return new QueryClient({
+      queryCache: new QueryCache({ onError }),
+      // A request the service refused (4xx) is not tried again; one it could
+      // not answer is, once.
+      defaultOptions: {
+        queries: {
+          retry: (failures, error) => failures < 1 && !(error instanceof APIError && error.status < 500),
+          staleTime: 2_000,
+          refetchOnWindowFocus: false,
+        },
+      },
+    });
+  });
+  useEffect(() => {
+    if (forbidden) client.clear();
+  }, [forbidden, client]);
   return (
     <QueryClientProvider client={client}>
-      <Workspace userId={userId} admin={admin} />
+      {forbidden ? (
+        <div className={`${styles.wsApp} ${styles.closed}`}>
+          <Failed error={forbidden} onRetry={() => setForbidden(undefined)} />
+        </div>
+      ) : (
+        <Workspace userId={userId} admin={admin} />
+      )}
     </QueryClientProvider>
   );
 }
@@ -151,7 +178,9 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
           松开以上传为新页面
         </div>
       )}
-      {dialogOpen === "connect" && <ConnectAgent container={root} onClose={() => setDialogOpen(undefined)} />}
+      {dialogOpen === "connect" && (
+        <ConnectAgent account={userId} container={root} onClose={() => setDialogOpen(undefined)} />
+      )}
       {dialogOpen === "members" && (
         <Members container={root} userId={userId} kit={kit} onClose={() => setDialogOpen(undefined)} />
       )}

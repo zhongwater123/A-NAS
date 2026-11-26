@@ -113,7 +113,7 @@ export function AccountSection({
         />
         <Row label="登录记录" anchor="sign-ins" onClick={onShowSignIns} />
       </Group>
-      <AgentTokens />
+      <AgentTokens account={user.id} />
       <Group>
         <button
           className={`${styles.setRow} ${styles.setRowCommand} ${styles.danger}`}
