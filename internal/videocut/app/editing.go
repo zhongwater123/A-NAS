@@ -46,13 +46,13 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 		return domain.Candidates{}, err
 	}
 	state := draft.state
-	i, err := shotAt(state, query.Shot)
+	i, err := domain.ShotAt(state, query.Shot)
 	if err != nil {
 		return domain.Candidates{}, err
 	}
 	shot := state.Shots[i]
 	slot := state.Slots[shot.First]
-	length := state.length(shot)
+	length := state.Length(shot)
 	scenes := src.scenes()
 	answer := domain.Candidates{Shot: query.Shot, Query: src.query(slot.Part, slot.Picture), SameCard: []domain.Candidate{}, Planned: []domain.Candidate{},
 		Results: []domain.Candidate{}, Scenes: scenes}
@@ -69,7 +69,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	}
 	card, _, _ := src.beat(shot.Beat)
 	for n := range card.Times {
-		add(&answer.SameCard, beatID(card.ID, n+1), nil)
+		add(&answer.SameCard, domain.BeatID(card.ID, n+1), nil)
 	}
 	for _, beat := range src.planned.Answer.Parts[slot.Part-1].Pictures[slot.Picture-1].Beats {
 		add(&answer.Planned, beat, nil)
@@ -94,7 +94,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	if !searching {
 		for _, id := range src.catalog {
 			for n := range src.cards[id].Times {
-				add(&results, beatID(id, n+1), nil)
+				add(&results, domain.BeatID(id, n+1), nil)
 			}
 		}
 	} else {
@@ -115,13 +115,13 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	return answer, nil
 }
 
-func (src *editSource) candidate(state draftState, beat string, length float64, score *float64) domain.Candidate {
+func (src *editSource) candidate(state domain.DraftState, beat string, length float64, score *float64) domain.Candidate {
 	card, n, _ := src.beat(beat)
 	about := src.about[card.ID]
 	video, from, to := src.piece(beat, length)
 	candidate := domain.Candidate{Beat: beat, AssetID: video, From: from, To: to, ShotSize: about.Beats[n-1].ShotSize,
 		What: about.Beats[n-1].What, Scene: about.Scene, Portrait: src.portrait(beat), Fits: src.covers(beat, length, slowMost),
-		UsedBy: state.usedBy(beat), Score: score}
+		UsedBy: state.UsedBy(beat), Score: score}
 	if taken := src.videos[video].TakenAt; taken != nil {
 		at := taken.Add(time.Duration(card.Times[n-1] * float64(time.Second)))
 		candidate.TakenAt = &at
@@ -243,7 +243,7 @@ func (s *Store) VersionShots(ctx context.Context, owner, versionID string) ([]by
 	slots := src.slots()
 	var rows [][]string
 	for n, clip := range src.clips {
-		slot := slices.IndexFunc(slots, func(slot draftSlot) bool { return slot.Start == clip.Slot[0] && slot.End == clip.Slot[1] })
+		slot := slices.IndexFunc(slots, func(slot domain.DraftSlot) bool { return slot.Start == clip.Slot[0] && slot.End == clip.Slot[1] })
 		slow := clip.Slow
 		if slow == 0 {
 			slow = 1
@@ -291,7 +291,7 @@ func (s *Store) DraftShots(ctx context.Context, owner, draftID string) ([]byte, 
 		if own.Last > own.First {
 			var taken []string
 			for i := own.First; i <= own.Last; i++ {
-				if state.Slots[i].Beat != state.original(own) {
+				if state.Slots[i].Beat != state.Original(own) {
 					taken = append(taken, strconv.Itoa(i+1))
 				}
 			}

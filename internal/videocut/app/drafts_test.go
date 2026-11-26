@@ -513,7 +513,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 
 func TestTheLastShotCannotBeDeleted(t *testing.T) {
 	src := &editSource{}
-	state := draftState{Slots: []draftSlot{{Start: 0, End: 4}}, Shots: []draftShot{{Beat: "c1/1"}}}
+	state := domain.DraftState{Slots: []domain.DraftSlot{{Start: 0, End: 4}}, Shots: []domain.DraftStateShot{{Beat: "c1/1"}}}
 	_, _, err := (&Store{}).deleteShot(t.Context(), src, state, 1)
 	refusedWith(t, err, "至少要留一个镜头")
 }
@@ -636,10 +636,10 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 			t.Fatalf("beat %s twice: %v", beat, got)
 		}
 		seen[beat] = true
-		if i < 3 && (cardOf(beat) == "c3" || cardOf(beat) == "c4") {
+		if i < 3 && (domain.CardOf(beat) == "c3" || domain.CardOf(beat) == "c4") {
 			t.Fatalf("a 16:9 shot became 竖: %v", got)
 		}
-		if i > 0 && cardOf(beat) == cardOf(got[i-1]) {
+		if i > 0 && domain.CardOf(beat) == domain.CardOf(got[i-1]) {
 			t.Fatalf("two shots of one card in a row: %v", got)
 		}
 	}
@@ -865,28 +865,6 @@ func TestWindowVectorsAreReadAsTheLibraryKeepsThem(t *testing.T) {
 	}
 }
 
-// A beat is written "card/n" and read back as it was written, wherever it
-// is made or taken apart.
-func TestABeatIsReadAsItIsWritten(t *testing.T) {
-	for _, c := range []struct {
-		card string
-		n    int
-	}{{"v1-3", 1}, {"c2", 12}} {
-		id := beatID(c.card, c.n)
-		if card, n, ok := splitBeat(id); !ok || card != c.card || n != c.n || cardOf(id) != c.card {
-			t.Errorf("%s read as %q %d %v, card %q", id, card, n, ok, cardOf(id))
-		}
-	}
-	if beatID("v1-3", 1) != "v1-3/1" {
-		t.Errorf("beatID() = %q", beatID("v1-3", 1))
-	}
-	for _, text := range []string{"", "c1", "c1/", "c1/0", "c1/-1", "c1/01", "c1/+1", "c1/x", "c1/1 "} {
-		if card, n, ok := splitBeat(text); ok {
-			t.Errorf("%q read as beat %d of %q", text, n, card)
-		}
-	}
-}
-
 // A step of a 方案 has one name, whether Go or SQL writes it: the versions'
 // query finds a version's fill step by the name planStep gave it.
 func TestPlanStepsAreNamedAlikeInSQL(t *testing.T) {
@@ -1047,8 +1025,8 @@ func TestThePreviewStaysWithinTheCard(t *testing.T) {
 		videos: map[string]analysedVideo{"v": {Duration: 10}},
 		clips:  []timelineClip{{Card: "c1", Beat: "c1/1", Video: "v", Start: 3, End: 5, Slot: [2]float64{0, 4}}},
 	}
-	state := draftState{Slots: []draftSlot{{Start: 0, End: 4}, {Start: 4, End: 8}},
-		Shots: []draftShot{{Beat: "c1/1", First: 0, Last: 1}}}
+	state := domain.DraftState{Slots: []domain.DraftSlot{{Start: 0, End: 4}, {Start: 4, End: 8}},
+		Shots: []domain.DraftStateShot{{Beat: "c1/1", First: 0, Last: 1}}}
 	if from, to := src.previewPiece(state.Shots[0], state); from != 3 || to != 6 {
 		t.Fatalf("the preview = %v–%v, want 3–6", from, to)
 	}

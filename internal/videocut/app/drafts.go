@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -299,26 +298,11 @@ func (src *editSource) query(part, picture int) string {
 	return src.picked.Parts[part-1].Scenes[picture-1].Query
 }
 
-// beatID names beat n, from 1, of a card: "card/n", as the fill and the
-// plan write a beat (CONTEXT.md, 节拍).
-func beatID(card string, n int) string { return card + "/" + strconv.Itoa(n) }
-
-// splitBeat is the card and the number from 1 that beatID wrote as beat;
-// ok is false for a text it did not write.
-func splitBeat(beat string) (card string, n int, ok bool) {
-	card, number, found := strings.CutLast(beat, "/")
-	n, err := strconv.Atoi(number)
-	if !found || err != nil || n < 1 || strconv.Itoa(n) != number {
-		return "", 0, false
-	}
-	return card, n, true
-}
-
 // beat is a beat's card and its number from 1, and reports whether it is a
 // beat of a described card. Only the catalog's cards may be cut from
 // (cuttable): the fill is given no other.
 func (src *editSource) beat(beat string) (videocutcompute.CatalogCard, int, bool) {
-	id, n, ok := splitBeat(beat)
+	id, n, ok := domain.SplitBeat(beat)
 	card, described := src.cards[id]
 	if !ok || !described || n > len(card.Times) {
 		return videocutcompute.CatalogCard{}, 0, false
@@ -330,7 +314,7 @@ func (src *editSource) beat(beat string) (videocutcompute.CatalogCard, int, bool
 // version may cut from, of one of its videos. What is shown, searched,
 // exported and saved of a draft reads its beats so; one whose beats the
 // source no longer names cannot be edited.
-func (src *editSource) holds(state draftState) bool {
+func (src *editSource) holds(state domain.DraftState) bool {
 	for _, shot := range state.Shots {
 		card, _, ok := src.beat(shot.Beat)
 		if _, video := src.videos[card.Video]; !ok || !video || !src.cuttable(card.ID) {
@@ -395,69 +379,29 @@ func (src *editSource) span(beat string) (string, float64, float64) {
 
 // --- the draft ---
 
-// draftSlot is a slot of the version: where it is in the film, the plan's
-// part and picture it belongs to, and the beat that led it.
-type draftSlot struct {
-	Part    int     `json:"part"`
-	Picture int     `json:"picture"`
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
-	Beat    string  `json:"beat"`
-}
-
-// draftShot is a shot of the draft: a beat over slots First to Last. A
-// shot over more than one slot took a deleted shot's slots; Home is the
-// slot that was its own, whose beat the version had there.
-type draftShot struct {
-	Beat   string `json:"beat"`
-	First  int    `json:"first"`
-	Last   int    `json:"last"`
-	Home   int    `json:"home"`
-	Locked bool   `json:"locked,omitempty"`
-}
-
-// draftState is a revision of a draft: the version's slots, and the shots
-// that cover them in film order. Only the shots are kept (encode): the
-// slots are the version's, read from its timeline (slots).
-type draftState struct {
-	Slots []draftSlot
-	Shots []draftShot
-}
-
-// keptShots is a revision as it is kept.
-type keptShots struct {
-	Shots []draftShot `json:"shots"`
-}
-
-// encode is the state as a revision keeps it.
-func (state draftState) encode() (string, error) {
-	encoded, err := json.Marshal(keptShots{Shots: state.Shots})
-	return string(encoded), err
-}
-
 // stateOf is a kept revision over the version's slots; ok is false when its
 // shots do not cover them.
-func (src *editSource) stateOf(kept string) (draftState, bool) {
-	var shots keptShots
+func (src *editSource) stateOf(kept string) (domain.DraftState, bool) {
+	var shots domain.KeptShots
 	if err := json.Unmarshal([]byte(kept), &shots); err != nil {
-		return draftState{}, false
+		return domain.DraftState{}, false
 	}
-	state := draftState{Slots: src.slots(), Shots: shots.Shots}
-	return state, state.valid()
+	state := domain.DraftState{Slots: src.slots(), Shots: shots.Shots}
+	return state, state.Valid()
 }
 
 // slots are the version's slots in film order, each with the beat that
 // leads it: the first clip of a slot, but the last of the film's last slot,
 // where the ending picture's beat closes the film (fill.py).
-func (src *editSource) slots() []draftSlot {
-	var slots []draftSlot
+func (src *editSource) slots() []domain.DraftSlot {
+	var slots []domain.DraftSlot
 	var pieces [][]timelineClip
 	for _, clip := range src.clips {
 		if n := len(slots); n > 0 && slots[n-1].Start == clip.Slot[0] && slots[n-1].End == clip.Slot[1] {
 			pieces[n-1] = append(pieces[n-1], clip)
 			continue
 		}
-		slots = append(slots, draftSlot{Part: clip.Part, Picture: clip.Picture, Start: clip.Slot[0], End: clip.Slot[1], Beat: clip.Beat})
+		slots = append(slots, domain.DraftSlot{Part: clip.Part, Picture: clip.Picture, Start: clip.Slot[0], End: clip.Slot[1], Beat: clip.Beat})
 		pieces = append(pieces, []timelineClip{clip})
 	}
 	last := len(slots) - 1
@@ -469,62 +413,16 @@ func (src *editSource) slots() []draftSlot {
 }
 
 // newDraftState is a version as it was made: a shot a slot.
-func (src *editSource) newDraftState() draftState {
-	state := draftState{Slots: src.slots()}
+func (src *editSource) newDraftState() domain.DraftState {
+	state := domain.DraftState{Slots: src.slots()}
 	for i, slot := range state.Slots {
-		state.Shots = append(state.Shots, draftShot{Beat: slot.Beat, First: i, Last: i, Home: i})
+		state.Shots = append(state.Shots, domain.DraftStateShot{Beat: slot.Beat, First: i, Last: i, Home: i})
 	}
 	return state
 }
 
-// valid checks a stored state still fits its version.
-func (state draftState) valid() bool {
-	next := 0
-	for _, shot := range state.Shots {
-		if shot.First != next || shot.Last < shot.First || shot.Last >= len(state.Slots) {
-			return false
-		}
-		next = shot.Last + 1
-	}
-	return next == len(state.Slots) && next > 0
-}
-
-func (state draftState) clone() draftState {
-	return draftState{Slots: state.Slots, Shots: slices.Clone(state.Shots)}
-}
-
-func (state draftState) length(shot draftShot) float64 {
-	return state.Slots[shot.Last].End - state.Slots[shot.First].Start
-}
-
-// usedBy is the number, from 1, of the shot whose beat is beat; 0 none.
-func (state draftState) usedBy(beat string) int {
-	for i, shot := range state.Shots {
-		if shot.Beat == beat {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// original is the beat the version had where the shot is: its own slot's,
-// not that of a deleted shot whose slots it took.
-func (state draftState) original(shot draftShot) string {
-	home := shot.First
-	if shot.Home > shot.First && shot.Home <= shot.Last {
-		home = shot.Home
-	}
-	return state.Slots[home].Beat
-}
-
-// changed reports whether the shot's beat is not the one the version had
-// there.
-func (state draftState) changed(shot draftShot) bool {
-	return state.original(shot) != shot.Beat
-}
-
 // view turns a draft's state into what is answered.
-func (src *editSource) view(id string, revision int, canUndo bool, state draftState, updated time.Time) domain.Draft {
+func (src *editSource) view(id string, revision int, canUndo bool, state domain.DraftState, updated time.Time) domain.Draft {
 	draft := domain.Draft{ID: id, VersionID: src.versionID, ProjectID: src.projectID, VersionNumber: src.number, Revision: revision,
 		CanUndo: canUndo, SongStart: src.excerpt.Start, SongTranscode: src.songTranscode, Seconds: state.Slots[len(state.Slots)-1].End, UpdatedAt: updated,
 		Plan:  domain.DraftPlan{Design: src.picked.Design, Opening: src.picked.Opening, Ending: src.picked.Ending},
@@ -543,7 +441,7 @@ func (src *editSource) view(id string, revision int, canUndo bool, state draftSt
 		about := src.about[card.ID].Beats[n-1]
 		view := domain.DraftShot{Number: i + 1, Beat: shot.Beat, AssetID: card.Video, Part: first.Part, Picture: first.Picture,
 			Start: first.Start, End: state.Slots[shot.Last].End, Query: src.query(first.Part, first.Picture),
-			ShotSize: about.ShotSize, What: about.What, Locked: shot.Locked, Changed: state.changed(shot),
+			ShotSize: about.ShotSize, What: about.What, Locked: shot.Locked, Changed: state.Changed(shot),
 			Extended: shot.Last > shot.First, Portrait: src.portrait(shot.Beat)}
 		for slot := shot.First; slot <= shot.Last; slot++ {
 			view.Slots = append(view.Slots, slot+1)
@@ -597,8 +495,8 @@ func (src *editSource) unmet() []string {
 // the beat's card: a shot longer than what is left of it (slowed in the
 // version, or taking a deleted shot's slots) plays to the card's end, not on
 // into the footage after it or past the video's end.
-func (src *editSource) previewPiece(shot draftShot, state draftState) (float64, float64) {
-	length := state.length(shot)
+func (src *editSource) previewPiece(shot domain.DraftStateShot, state domain.DraftState) (float64, float64) {
+	length := state.Length(shot)
 	start, end := state.Slots[shot.First].Start, state.Slots[shot.Last].End
 	for _, clip := range src.clips {
 		if clip.Beat == shot.Beat && clip.Slot[0] >= start-1e-6 && clip.Slot[1] <= end+1e-6 {
@@ -627,7 +525,7 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (doma
 	}
 	id, err := s.db.DraftID(ctx, owner, versionID)
 	if errors.Is(err, sql.ErrNoRows) {
-		encoded, err := src.newDraftState().encode()
+		encoded, err := src.newDraftState().Encode()
 		if err != nil {
 			return domain.Draft{}, err
 		}
@@ -681,7 +579,7 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 // revision and when that was written.
 type keptDraft struct {
 	revision int
-	state    draftState
+	state    domain.DraftState
 	updated  time.Time
 }
 
@@ -764,7 +662,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		return domain.Draft{}, domain.ErrDraftConflict
 	}
 	state := draft.state
-	var next draftState
+	var next domain.DraftState
 	var message string
 	var seed sql.NullInt64
 	back := sql.NullInt64{Int64: int64(base), Valid: true}
@@ -804,10 +702,10 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	}
 	// The shots must still cover every slot end to end: a step that broke
 	// that would leave a draft no read accepts.
-	if !next.valid() {
+	if !next.Valid() {
 		return domain.Draft{}, fmt.Errorf("draft %s: a %s step left shots that do not cover the slots", draftID, op.Type)
 	}
-	encoded, err := next.encode()
+	encoded, err := next.Encode()
 	if err != nil {
 		return domain.Draft{}, err
 	}

@@ -137,7 +137,7 @@ func (plan recutPlan) cards() []string {
 			list, _ := picture["beats"].([]any)
 			for _, item := range list {
 				if beat, ok := item.(string); ok {
-					named = append(named, cardOf(beat))
+					named = append(named, domain.CardOf(beat))
 				}
 			}
 		})
@@ -156,12 +156,12 @@ func (plan recutPlan) rename(to func(card string) (string, bool)) {
 	for _, part := range plan.Shots {
 		forEachIn(part["pictures"], "", func(picture map[string]any) {
 			renameIn(picture, "beats", func(beat string) (string, bool) {
-				card, n, ok := splitBeat(beat)
+				card, n, ok := domain.SplitBeat(beat)
 				if !ok {
 					return "", false
 				}
 				card, ok = to(card)
-				return beatID(card, n), ok
+				return domain.BeatID(card, n), ok
 			})
 		})
 	}

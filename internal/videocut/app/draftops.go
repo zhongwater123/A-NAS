@@ -24,41 +24,33 @@ func randomSeed() int64 {
 	return mathrand.Int64()
 }
 
-// shotAt is shot number n of state, from 1.
-func shotAt(state draftState, n int) (int, error) {
-	if n < 1 || n > len(state.Shots) {
-		return 0, domain.ErrInvalid
-	}
-	return n - 1, nil
-}
-
 // apply makes a step that needs nothing beyond the draft and its source.
-func (src *editSource) apply(state draftState, op domain.DraftOp) (draftState, string, error) {
-	next := state.clone()
+func (src *editSource) apply(state domain.DraftState, op domain.DraftOp) (domain.DraftState, string, error) {
+	next := state.Clone()
 	switch op.Type {
 	case "replace":
-		i, err := shotAt(state, op.Shot)
+		i, err := domain.ShotAt(state, op.Shot)
 		if err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		card, _, ok := src.beat(op.Beat)
 		if !ok {
-			return draftState{}, "", domain.ErrInvalid
+			return domain.DraftState{}, "", domain.ErrInvalid
 		}
 		if !src.cuttable(card.ID) {
-			return draftState{}, "", refuse("这个节拍不在这一版能用的素材里")
+			return domain.DraftState{}, "", refuse("这个节拍不在这一版能用的素材里")
 		}
 		if err := src.fits(state, i, op.Beat); err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		next.Shots[i].Beat = op.Beat
 		return next, fmt.Sprintf("第 %d 镜已替换", op.Shot), nil
 	case "move":
 		return src.move(state, op.Shot, op.To)
 	case "lock", "unlock":
-		i, err := shotAt(state, op.Shot)
+		i, err := domain.ShotAt(state, op.Shot)
 		if err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		next.Shots[i].Locked = op.Type == "lock"
 		if op.Type == "lock" {
@@ -66,34 +58,34 @@ func (src *editSource) apply(state draftState, op domain.DraftOp) (draftState, s
 		}
 		return next, fmt.Sprintf("第 %d 镜已解锁", op.Shot), nil
 	case "revert":
-		i, err := shotAt(state, op.Shot)
+		i, err := domain.ShotAt(state, op.Shot)
 		if err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		shot := state.Shots[i]
-		if !state.changed(shot) {
-			return draftState{}, "", refuse("第 %d 镜没有改过", op.Shot)
+		if !state.Changed(shot) {
+			return domain.DraftState{}, "", refuse("第 %d 镜没有改过", op.Shot)
 		}
-		original := state.original(shot)
+		original := state.Original(shot)
 		if err := src.fits(state, i, original); err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		next.Shots[i].Beat = original
 		return next, fmt.Sprintf("第 %d 镜已还原", op.Shot), nil
 	case "reset":
 		return src.newDraftState(), "已全部还原", nil
 	}
-	return draftState{}, "", domain.ErrInvalid
+	return domain.DraftState{}, "", domain.ErrInvalid
 }
 
 // fits checks that beat can lead shot i: not another shot's, and long
 // enough for the shot's slots slowed as the fill may slow it.
-func (src *editSource) fits(state draftState, i int, beat string) error {
-	if used := state.usedBy(beat); used != 0 && used != i+1 {
+func (src *editSource) fits(state domain.DraftState, i int, beat string) error {
+	if used := state.UsedBy(beat); used != 0 && used != i+1 {
 		return refuse("这个节拍已用在第 %d 镜", used)
 	}
-	if !src.covers(beat, state.length(state.Shots[i]), slowMost) {
-		return refuse("这个节拍不够第 %d 镜的 %.1f 秒", i+1, state.length(state.Shots[i]))
+	if !src.covers(beat, state.Length(state.Shots[i]), slowMost) {
+		return refuse("这个节拍不够第 %d 镜的 %.1f 秒", i+1, state.Length(state.Shots[i]))
 	}
 	return nil
 }
@@ -101,24 +93,24 @@ func (src *editSource) fits(state draftState, i int, beat string) error {
 // move moves shot from among its part's shots to where shot to is. The
 // locked shots stay; the others take the unlocked places in their new
 // order (ADR 0039, decision 2: 拖动).
-func (src *editSource) move(state draftState, from, to int) (draftState, string, error) {
-	i, err := shotAt(state, from)
+func (src *editSource) move(state domain.DraftState, from, to int) (domain.DraftState, string, error) {
+	i, err := domain.ShotAt(state, from)
 	if err != nil {
-		return draftState{}, "", err
+		return domain.DraftState{}, "", err
 	}
-	j, err := shotAt(state, to)
+	j, err := domain.ShotAt(state, to)
 	if err != nil {
-		return draftState{}, "", err
+		return domain.DraftState{}, "", err
 	}
 	part := state.Slots[state.Shots[i].First].Part
 	if state.Slots[state.Shots[j].First].Part != part {
-		return draftState{}, "", refuse("只能在同一个段落里换顺序")
+		return domain.DraftState{}, "", refuse("只能在同一个段落里换顺序")
 	}
 	if state.Shots[i].Locked || state.Shots[j].Locked {
-		return draftState{}, "", refuse("锁定的镜头不动")
+		return domain.DraftState{}, "", refuse("锁定的镜头不动")
 	}
 	if i == j {
-		return draftState{}, "", refuse("位置没有变")
+		return domain.DraftState{}, "", refuse("位置没有变")
 	}
 	var places []int // the part's unlocked shots, in film order
 	for k, shot := range state.Shots {
@@ -126,7 +118,7 @@ func (src *editSource) move(state draftState, from, to int) (draftState, string,
 			places = append(places, k)
 		}
 	}
-	moving := make([]draftShot, len(places))
+	moving := make([]domain.DraftStateShot, len(places))
 	for n, k := range places {
 		moving[n] = state.Shots[k]
 	}
@@ -134,11 +126,11 @@ func (src *editSource) move(state draftState, from, to int) (draftState, string,
 	shot := moving[a]
 	moving = slices.Delete(moving, a, a+1)
 	moving = slices.Insert(moving, b, shot)
-	next := state.clone()
+	next := state.Clone()
 	for n, k := range places {
 		next.Shots[k].Beat = moving[n].Beat
-		if !src.covers(moving[n].Beat, state.length(next.Shots[k]), slowMost) {
-			return draftState{}, "", refuse("换到第 %d 镜位置的镜头不够 %.1f 秒", k+1, state.length(next.Shots[k]))
+		if !src.covers(moving[n].Beat, state.Length(next.Shots[k]), slowMost) {
+			return domain.DraftState{}, "", refuse("换到第 %d 镜位置的镜头不够 %.1f 秒", k+1, state.Length(next.Shots[k]))
 		}
 	}
 	return next, fmt.Sprintf("第 %d 镜已换到第 %d 镜的位置", from, to), nil
@@ -147,13 +139,13 @@ func (src *editSource) move(state draftState, from, to int) (draftState, string,
 // deleteShot takes a shot out: the one before or after it takes its slots,
 // whichever card covers both; when both do, the one that looks more like
 // it (likeness). A film keeps at least one shot.
-func (s *Store) deleteShot(ctx context.Context, src *editSource, state draftState, n int) (draftState, string, error) {
-	i, err := shotAt(state, n)
+func (s *Store) deleteShot(ctx context.Context, src *editSource, state domain.DraftState, n int) (domain.DraftState, string, error) {
+	i, err := domain.ShotAt(state, n)
 	if err != nil {
-		return draftState{}, "", err
+		return domain.DraftState{}, "", err
 	}
 	if len(state.Shots) == 1 {
-		return draftState{}, "", refuse("至少要留一个镜头")
+		return domain.DraftState{}, "", refuse("至少要留一个镜头")
 	}
 	gone := state.Shots[i]
 	var sides []int
@@ -168,24 +160,24 @@ func (s *Store) deleteShot(ctx context.Context, src *editSource, state draftStat
 		}
 	}
 	if len(sides) == 0 {
-		return draftState{}, "", refuse("前后两镜都不够长，换一个镜头代替")
+		return domain.DraftState{}, "", refuse("前后两镜都不够长，换一个镜头代替")
 	}
 	keep := sides[0]
 	if len(sides) == 2 {
 		vectors := s.beatVectors(ctx, src)
 		before, err := s.likeness(ctx, vectors, gone.Beat, state.Shots[sides[0]].Beat)
 		if err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		after, err := s.likeness(ctx, vectors, gone.Beat, state.Shots[sides[1]].Beat)
 		if err != nil {
-			return draftState{}, "", err
+			return domain.DraftState{}, "", err
 		}
 		if after > before {
 			keep = sides[1]
 		}
 	}
-	next := state.clone()
+	next := state.Clone()
 	next.Shots[keep].First = min(next.Shots[keep].First, gone.First)
 	next.Shots[keep].Last = max(next.Shots[keep].Last, gone.Last)
 	next.Shots = slices.Delete(next.Shots, i, i+1)
@@ -301,7 +293,7 @@ func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string
 	for _, id := range src.catalog {
 		card := src.cards[id]
 		for n := range card.Times {
-			beat := beatID(id, n+1)
+			beat := domain.BeatID(id, n+1)
 			_, from, to := src.span(beat)
 			beats[card.Video] = append(beats[card.Video], beatSpan{beat: beat, start: from, end: to})
 		}
@@ -342,7 +334,7 @@ const shuffleFrom = 4
 // whose description the plan left empty or too long to search for stays as
 // it is: the plan wrote it, not the member, so it is not their request that
 // is wrong.
-func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, seed int64) (draftState, string, error) {
+func (s *Store) shuffle(ctx context.Context, src *editSource, state domain.DraftState, seed int64) (domain.DraftState, string, error) {
 	var texts []string
 	// asks is which of texts each shot is picked again from; -1 for a shot
 	// that stays as it is, locked or with nothing to search for.
@@ -366,18 +358,18 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 		}
 	}
 	if locked == len(state.Shots) {
-		return draftState{}, "", refuse("镜头都锁定了，没有可以重洗的")
+		return domain.DraftState{}, "", refuse("镜头都锁定了，没有可以重洗的")
 	}
 	if len(texts) == 0 {
-		return draftState{}, "", refuse("没锁的镜头在规划里都没有可以搜索的画面描述，重洗换不了")
+		return domain.DraftState{}, "", refuse("没锁的镜头在规划里都没有可以搜索的画面描述，重洗换不了")
 	}
 	found, err := s.searchBeats(ctx, src, texts)
 	if err != nil {
-		return draftState{}, "", err
+		return domain.DraftState{}, "", err
 	}
 	//nolint:gosec // G404: the seed makes a shuffle again as it was (kept with its revision); nothing rests on guessing it.
 	random := mathrand.New(mathrand.NewPCG(uint64(seed), bits.ReverseBytes64(uint64(seed))))
-	next := state.clone()
+	next := state.Clone()
 	changed := 0
 	for i, shot := range state.Shots {
 		if asks[i] < 0 {
@@ -386,14 +378,14 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 		ranked := found[asks[i]]
 		var before string
 		if i > 0 {
-			before = cardOf(next.Shots[i-1].Beat)
+			before = domain.CardOf(next.Shots[i-1].Beat)
 		}
 		var after string
 		if i+1 < len(next.Shots) {
 			// Nor of the next shot's card: that shot may stay as it is,
 			// locked, with nothing to search for, or finding nothing to pick
-			// (as taken keeps its beat).
-			after = cardOf(next.Shots[i+1].Beat)
+			// (as domain.Taken keeps its beat).
+			after = domain.CardOf(next.Shots[i+1].Beat)
 		}
 		landscape := !src.portrait(shot.Beat)
 		var picks []string
@@ -401,9 +393,9 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 			if len(picks) == shuffleFrom {
 				break
 			}
-			card := cardOf(candidate.beat)
-			if taken(next, i, candidate.beat) || card == before || card == after || (landscape && src.portrait(candidate.beat)) ||
-				!src.covers(candidate.beat, state.length(shot), slowMost) {
+			card := domain.CardOf(candidate.beat)
+			if domain.Taken(next, i, candidate.beat) || card == before || card == after || (landscape && src.portrait(candidate.beat)) ||
+				!src.covers(candidate.beat, state.Length(shot), slowMost) {
 				continue
 			}
 			picks = append(picks, candidate.beat)
@@ -427,20 +419,4 @@ func (s *Store) shuffle(ctx context.Context, src *editSource, state draftState, 
 func searchable(query string) bool {
 	_, ok := photos.QueryText(query)
 	return ok
-}
-
-// taken reports whether beat leads a shot of a shuffle other than the i-th:
-// one before it as shuffled, or one after it as it is, which may stay so
-// (locked, with nothing to search for, or finding nothing to pick).
-func taken(next draftState, i int, beat string) bool {
-	leads := func(shot draftShot) bool { return shot.Beat == beat }
-	return slices.ContainsFunc(next.Shots[:i], leads) || slices.ContainsFunc(next.Shots[i+1:], leads)
-}
-
-// cardOf is the card of a beat.
-func cardOf(beat string) string {
-	if card, _, ok := splitBeat(beat); ok {
-		return card
-	}
-	return beat
 }
