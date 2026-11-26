@@ -19,7 +19,10 @@ import (
 // space's snapshots, which the Host Agent can only do while it still knows
 // the space; the Host Agent removes the space and the account from the host;
 // the other services forget the account last. The step names are stored with
-// a deletion in progress, so they must not change.
+// a deletion in progress: a deletion under way across an update skips the
+// steps stored as done, so it runs a renamed step a second time. Only a step
+// that can run twice may be renamed; the videocut step, once named montage,
+// can: run again, it only forgets the member's projects once more.
 func accountDeletionSteps(config Config, users *accounts.Service, photoService *photos.Service, fileService *files.Service,
 	removeShares, removeFamily, removeVideoCut, removeWorkspace func(context.Context, string) error,
 	musicService *music.Service, mediaService *media.Service, transferService *transfers.Service) []accounts.DeletionStep {
