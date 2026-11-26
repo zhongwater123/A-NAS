@@ -229,10 +229,10 @@ func (s *Store) register(ctx context.Context, owner, session string, b db.BatchR
 		}
 	}
 	return s.db.Update(ctx, func(tx *db.Tx) error {
-		now := sqlitedb.FormatTime(s.now())
+		at := s.now()
+		now := sqlitedb.FormatTime(at)
 		for _, asset := range looked {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO project_assets(project_id, asset_id, object_id, batch_id, added_at)
-				VALUES(?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, b.ProjectID, asset.AssetID, asset.ObjectID, b.ID, now); err != nil {
+			if err := tx.AddProjectAsset(ctx, b.ProjectID, asset.AssetID, asset.ObjectID, b.ID, at); err != nil {
 				return err
 			}
 		}
@@ -306,25 +306,7 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 
 // heldAssets reports which of ids the project holds.
 func (s *Store) heldAssets(ctx context.Context, projectID string, ids []string) (map[string]bool, error) {
-	args := []any{projectID}
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? AND asset_id IN ("+
-		sqlitedb.Placeholders(len(ids))+")", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	held := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		held[id] = true
-	}
-	return held, rows.Err()
+	return s.db.HeldAssets(ctx, projectID, ids)
 }
 
 // defaultName names a new project by its videos' dates, as "2026-08-02 至
@@ -465,20 +447,8 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (domain.Proj
 
 // previews picks up to previewCount of a project's videos, evenly spread.
 func (s *Store) previews(ctx context.Context, projectID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
+	all, err := s.db.ProjectAssetIDs(ctx, projectID)
 	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var all []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		all = append(all, id)
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	n := min(len(all), previewCount)
@@ -500,29 +470,18 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 	if row.state != projectReady {
 		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT asset_id, object_id, added_at FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
+	kept, err := s.db.ProjectAssets(ctx, projectID)
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	defer rows.Close()
 	detail := domain.ProjectDetail{ID: row.id, Name: row.name, CreatedAt: row.created, Ask: row.ask,
 		Chronological: row.chronological, Assets: []domain.ProjectAsset{}}
 	objects := map[string]string{}
 	var ids []string
-	for rows.Next() {
-		var asset domain.ProjectAsset
-		var object, added string
-		if err := rows.Scan(&asset.AssetID, &object, &added); err != nil {
-			return domain.ProjectDetail{}, err
-		}
-		if asset.AddedAt, err = time.Parse(time.RFC3339Nano, added); err != nil {
-			return domain.ProjectDetail{}, err
-		}
-		objects[asset.AssetID], ids = object, append(ids, asset.AssetID)
+	for _, k := range kept {
+		asset := domain.ProjectAsset{AssetID: k.AssetID, AddedAt: k.AddedAt}
+		objects[asset.AssetID], ids = k.ObjectID, append(ids, asset.AssetID)
 		detail.Assets = append(detail.Assets, asset)
-	}
-	if err := rows.Err(); err != nil {
-		return domain.ProjectDetail{}, err
 	}
 	detail.AssetCount = len(detail.Assets)
 	if detail.Versions, err = s.versions(ctx, projectID); err != nil {

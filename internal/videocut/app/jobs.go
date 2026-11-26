@@ -134,8 +134,8 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if err := projectIdle(ctx, tx, projectID); err != nil {
 			return err
 		}
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM project_assets WHERE project_id = ?", projectID).Scan(&count); err != nil {
+		count, err := tx.ProjectAssetCount(ctx, projectID)
+		if err != nil {
 			return err
 		}
 		if count == 0 {
@@ -471,7 +471,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 			if _, err := tx.ExecContext(ctx, "DELETE FROM job_assets WHERE job_id = ? AND asset_id = ?", jobID, id); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "DELETE FROM project_assets WHERE project_id = ? AND asset_id = ?", job.ProjectID, id); err != nil {
+			if err := tx.DeleteProjectAsset(ctx, job.ProjectID, id); err != nil {
 				return err
 			}
 		}
