@@ -84,8 +84,8 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		if err := projectIdle(ctx, tx, src.projectID); err != nil {
 			return err
 		}
-		var revision int
-		if err := tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision); err != nil {
+		revision, err := tx.DraftRevision(ctx, draftID)
+		if err != nil {
 			return err
 		}
 		if revision != draft.revision {
@@ -208,9 +208,7 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 // OpenDraftSongAudio opens the song of the version owner's draft edits, as
 // its job had it: the project may have another song since.
 func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (domain.SongAudio, error) {
-	var jobID string
-	err := s.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
-		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
+	jobID, err := s.db.DraftJob(ctx, owner, draftID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.SongAudio{}, domain.ErrNotFound
 	}

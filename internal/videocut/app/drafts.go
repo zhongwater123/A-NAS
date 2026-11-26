@@ -655,32 +655,21 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (doma
 	if err := s.checkAnalysis(ctx, src); err != nil {
 		return domain.Draft{}, err
 	}
-	var id string
-	err = s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
+	id, err := s.db.DraftID(ctx, owner, versionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		encoded, err := src.newDraftState().encode()
 		if err != nil {
 			return domain.Draft{}, err
 		}
 		id = newID("draft")
-		now := sqlitedb.FormatTime(s.now())
+		now := s.now()
 		err = s.db.Update(ctx, func(tx *db.Tx) error {
-			result, err := tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
-				VALUES(?, ?, ?, ?, 0, ?, ?) ON CONFLICT (base_version_id) DO NOTHING`, id, owner, src.projectID, versionID, encoded, now)
-			if err != nil {
-				return err
-			}
-			if n, err := result.RowsAffected(); err != nil || n == 0 {
-				return err // another request made it first
-			}
-			_, err = tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, shots_json, created_at) VALUES(?, 0, 'create', ?, ?)`,
-				id, encoded, now)
-			return err
+			return tx.CreateDraft(ctx, id, owner, src.projectID, versionID, encoded, now)
 		})
 		if err != nil {
 			return domain.Draft{}, err
 		}
-		if err := s.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id); err != nil {
+		if id, err = s.db.DraftID(ctx, owner, versionID); err != nil {
 			return domain.Draft{}, err
 		}
 	} else if err != nil {
@@ -729,10 +718,10 @@ type keptDraft struct {
 // openDraft reads owner's draft as it stands and what its version was cut
 // from, which src is when known.
 func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editSource) (*editSource, keptDraft, error) {
-	var versionID, stateJSON, updated string
 	var draft keptDraft
-	err := s.db.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
-		draftID, owner).Scan(&versionID, &draft.revision, &stateJSON, &updated)
+	row, err := s.db.Draft(ctx, owner, draftID)
+	versionID, stateJSON, updated := row.VersionID, row.Shots, row.Updated
+	draft.revision = row.Revision
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, keptDraft{}, domain.ErrNotFound
 	}
@@ -780,9 +769,8 @@ type undone struct {
 // when there is none, or it is more than keptRevisions steps back and no
 // longer kept.
 func (s *Store) undoTarget(ctx context.Context, draftID string, revision int) (target undone, ok bool, err error) {
-	err = s.db.QueryRowContext(ctx, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
-		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
-		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.revision, &target.shots, &target.back)
+	kept, err := s.db.UndoTarget(ctx, draftID, revision)
+	target = undone{revision: kept.Revision, shots: kept.Shots, back: kept.Back}
 	if errors.Is(err, sql.ErrNoRows) {
 		return undone{}, false, nil
 	}
@@ -855,18 +843,14 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	}
 	now := s.now()
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, shots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
-			encoded, sqlitedb.FormatTime(now), draftID, owner, base)
+		advanced, err := tx.AdvanceDraft(ctx, owner, draftID, base, encoded, now)
 		if err != nil {
 			return err
 		}
-		if n, err := result.RowsAffected(); err != nil {
-			return err
-		} else if n == 0 {
+		if !advanced {
 			return domain.ErrDraftConflict
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-			draftID, base+1, op.Type, seed, back, encoded, sqlitedb.FormatTime(now)); err != nil {
+		if err := tx.AddRevision(ctx, draftID, base+1, op.Type, seed, back, encoded, now); err != nil {
 			return err
 		}
 		return trimRevisions(ctx, tx, draftID, base+1)
@@ -889,7 +873,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 // from latest goes back through, so that the last keptRevisions steps can
 // be undone however many of them were undos themselves.
 func trimRevisions(ctx context.Context, tx *db.Tx, draftID string, latest int) error {
-	backs, err := revisionBacks(ctx, tx, draftID)
+	backs, err := tx.RevisionBacks(ctx, draftID)
 	if err != nil {
 		return err
 	}
@@ -906,29 +890,9 @@ func trimRevisions(ctx context.Context, tx *db.Tx, draftID string, latest int) e
 		if revision > latest-keptRevisions || keep[revision] {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, revision); err != nil {
+		if err := tx.DeleteRevision(ctx, draftID, revision); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// revisionBacks is each kept revision of a draft with the one undoing it
-// goes back to.
-func revisionBacks(ctx context.Context, tx *db.Tx, draftID string) (map[int]sql.NullInt64, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	backs := map[int]sql.NullInt64{}
-	for rows.Next() {
-		var revision int
-		var back sql.NullInt64
-		if err := rows.Scan(&revision, &back); err != nil {
-			return nil, err
-		}
-		backs[revision] = back
-	}
-	return backs, rows.Err()
 }
