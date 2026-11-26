@@ -445,7 +445,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 		detail.Assets = append(detail.Assets, asset)
 	}
 	detail.AssetCount = len(detail.Assets)
-	if detail.Versions, err = s.versions(ctx, projectID); err != nil {
+	if detail.Versions, err = versionsOf(s.db.ProjectVersions(ctx, projectID)); err != nil {
 		return domain.ProjectDetail{}, err
 	}
 	for _, version := range detail.Versions {
@@ -810,9 +810,4 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	defer s.songs.Unlock()
 	s.removeUnusedCopies(ctx)
 	return nil
-}
-
-// versions lists a project's films, newest first.
-func (s *Store) versions(ctx context.Context, projectID string) ([]domain.Version, error) {
-	return s.versionsOf(ctx, "project_id", projectID, "number DESC")
 }

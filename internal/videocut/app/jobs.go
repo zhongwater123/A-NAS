@@ -263,7 +263,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 	if job.Missing, err = s.missingOf(ctx, jobID); err != nil {
 		return domain.Job{}, err
 	}
-	if job.Versions, err = s.versionsOf(ctx, "job_id", jobID, "plan"); err != nil {
+	if job.Versions, err = versionsOf(s.db.JobVersions(ctx, jobID)); err != nil {
 		return domain.Job{}, err
 	}
 	if len(job.Versions) == 0 && job.Kind == KindEdit {
@@ -274,7 +274,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 			return domain.Job{}, err
 		}
 		if key != "" {
-			if job.Versions, err = s.versionsOf(ctx, "version_key", key, "plan"); err != nil {
+			if job.Versions, err = versionsOf(s.db.KeyVersions(ctx, key)); err != nil {
 				return domain.Job{}, err
 			}
 		}
@@ -294,9 +294,8 @@ func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
 	return missing, json.Unmarshal([]byte(raw.String), &missing)
 }
 
-// versionsOf lists the versions whose column is value, ordered by order.
-func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]domain.Version, error) {
-	kept, err := s.db.Versions(ctx, column, value, order)
+// versionsOf are versions as the domain reads them, in their order.
+func versionsOf(kept []db.VersionRow, err error) ([]domain.Version, error) {
 	if err != nil {
 		return nil, err
 	}
