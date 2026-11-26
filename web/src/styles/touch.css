@@ -1,0 +1,25 @@
+/* Touch screens (phones and tablets). In no layer, so it wins over the
+   windows' own rules.
+
+   iOS Safari zooms the whole page into any text field smaller than 16px as it
+   takes the focus, and the desktop does not scroll, so the page stays cropped
+   until the person pinches it back. Fields are 16px on touch screens instead. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* A long press opens an item's menu (lib/touch.ts), not iOS's callout or a
+     text selection. Fields and text people read in full keep both. */
+  body {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    -webkit-touch-callout: default;
+  }
+}
