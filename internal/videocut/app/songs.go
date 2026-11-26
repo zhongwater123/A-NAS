@@ -458,7 +458,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	}
 	if changed == 0 {
 		// The member chose another song meanwhile.
-		return domain.SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
+		return domain.SongDetail{}, domain.ErrSongNotReady
 	}
 	return s.Song(ctx, owner, projectID)
 }

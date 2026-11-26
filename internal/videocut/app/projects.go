@@ -558,7 +558,7 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		return domain.ProjectDetail{}, err
 	}
 	if changed == 0 {
-		return domain.ProjectDetail{}, errors.Join(domain.ErrNotFound, err)
+		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
 	return s.Project(ctx, owner, projectID)
 }
