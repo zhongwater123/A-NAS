@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -55,8 +54,8 @@ type timelineResult struct {
 // grey frames the FFmpeg Worker takes, kept, and the fill asked again.
 func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	known := map[string][2]float64{}
-	var saved sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ?", run.id, planStep("fill", run.plan)).Scan(&saved); err != nil {
+	saved, err := s.db.StepResult(ctx, run.id, planStep("fill", run.plan))
+	if err != nil {
 		return nil, err
 	}
 	if saved.Valid {
@@ -701,8 +700,7 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		if err := tx.AddVersion(ctx, newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, at, timeline); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
-			fmt.Sprintf(`{"filmAssetId":%q}`, assetID), now, run.id, step); err != nil {
+		if err := tx.FinishStep(ctx, run.id, step, fmt.Sprintf(`{"filmAssetId":%q}`, assetID), at); err != nil {
 			return err
 		}
 		if !last {

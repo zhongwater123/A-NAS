@@ -262,26 +262,18 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 	}
 	job.FinishedAt = scanTime(finished)
 	done := map[string]domain.Step{}
-	rows, err := s.db.QueryContext(ctx, "SELECT name, state, started_at, finished_at FROM steps WHERE job_id = ?", jobID)
+	kept, err := s.db.JobSteps(ctx, jobID)
 	if err != nil {
 		return domain.Job{}, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var st domain.Step
-		var started, ended sql.NullString
-		if err := rows.Scan(&st.Name, &st.State, &started, &ended); err != nil {
-			return domain.Job{}, err
-		}
-		st.Started, st.Finished = scanTime(started), scanTime(ended)
+	for _, row := range kept {
+		st := domain.Step{Name: row.Name, State: row.State}
+		st.Started, st.Finished = scanTime(row.Started), scanTime(row.Finished)
 		if st.State == JobRunning && job.State != JobRunning {
 			// The step stopped with the job: it shows why.
 			st.State = job.State
 		}
 		done[st.Name] = st
-	}
-	if err := rows.Err(); err != nil {
-		return domain.Job{}, err
 	}
 	// The steps of as many 方案 as the job started with.
 	for _, name := range s.stepNames(job.Kind, plans) {
@@ -300,8 +292,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 	if len(job.Versions) == 0 && job.Kind == KindEdit {
 		// The same revision saved again: its film was saved once, by the
 		// job before, under the same version key.
-		var key string
-		err := s.db.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = 'save' AND state = 'done'", jobID).Scan(&key)
+		key, err := s.db.DoneSaveKey(ctx, jobID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return domain.Job{}, err
 		}

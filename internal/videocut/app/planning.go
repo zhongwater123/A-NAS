@@ -491,9 +491,8 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 		if err != nil {
 			return err
 		}
-		var excerpt sql.NullString
-		if err := tx.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
-			claim.JobID).Scan(&excerpt); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		excerpt, err := tx.DoneExcerpt(ctx, claim.JobID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		claim.TargetSeconds = excerptSeconds(excerpt.String)

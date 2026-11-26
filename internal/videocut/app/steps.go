@@ -276,8 +276,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 				return err
 			}
 			run.keys[st.name] = key
-			if _, err := s.db.ExecContext(ctx, "UPDATE steps SET input_key = ? WHERE job_id = ? AND name = ? AND input_key <> ?",
-				key, job.id, st.name, key); err != nil {
+			if err := s.db.RekeyStep(ctx, job.id, st.name, key); err != nil {
 				return err
 			}
 			continue
@@ -368,10 +367,7 @@ func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, e
 }
 
 func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte, bool, error) {
-	var stored, state string
-	var result sql.NullString
-	err := s.db.QueryRowContext(ctx, "SELECT input_key, state, result_json FROM steps WHERE job_id = ? AND name = ?", jobID, name).
-		Scan(&stored, &state, &result)
+	stored, state, result, err := s.db.StoredStep(ctx, jobID, name)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -389,20 +385,17 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 	at := s.now()
 	now := sqlitedb.FormatTime(at)
 	return s.db.Update(ctx, func(tx *db.Tx) error {
-		var stored string
-		err := tx.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&stored)
+		stored, err := tx.StepInputKey(ctx, jobID, name)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			_, err = tx.ExecContext(ctx, "INSERT INTO steps(job_id, name, input_key, state, started_at) VALUES(?, ?, ?, 'running', ?)",
-				jobID, name, key, now)
+			err = tx.AddRunningStep(ctx, jobID, name, key, at)
 		case err != nil:
 		case stored == key:
 			// The same input: keep what the step saved as it went (the
 			// fill's clear spans).
-			_, err = tx.ExecContext(ctx, "UPDATE steps SET state = 'running', finished_at = NULL WHERE job_id = ? AND name = ?", jobID, name)
+			err = tx.RestartStep(ctx, jobID, name)
 		default:
-			_, err = tx.ExecContext(ctx, `UPDATE steps SET input_key = ?, state = 'running', result_json = NULL, started_at = ?, finished_at = NULL
-				WHERE job_id = ? AND name = ?`, key, now, jobID, name)
+			err = tx.RerunStep(ctx, jobID, name, key, at)
 		}
 		if err != nil {
 			return err
@@ -414,7 +407,7 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 					continue
 				}
 				if affected.name != name {
-					if _, err := tx.ExecContext(ctx, "DELETE FROM steps WHERE job_id = ? AND name = ?", jobID, affected.name); err != nil {
+					if err := tx.DeleteStep(ctx, jobID, affected.name); err != nil {
 						return err
 					}
 				}
@@ -433,10 +426,10 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 // finishStep stores the step's result; the next step's attempts start
 // from none.
 func (s *Store) finishStep(ctx context.Context, jobID, name string, result []byte) error {
-	now := sqlitedb.FormatTime(s.now())
+	at := s.now()
+	now := sqlitedb.FormatTime(at)
 	return s.db.Update(ctx, func(tx *db.Tx) error {
-		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
-			string(result), now, jobID, name); err != nil {
+		if err := tx.FinishStep(ctx, jobID, name, string(result), at); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE jobs SET attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?", now, jobID)
@@ -450,8 +443,7 @@ func (s *Store) saveProgress(ctx context.Context, jobID, name string, progress a
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, "UPDATE steps SET result_json = ? WHERE job_id = ? AND name = ? AND state = 'running'", string(encoded), jobID, name)
-	return err
+	return s.db.SaveStepProgress(ctx, jobID, name, string(encoded))
 }
 
 // The photo library bounds each call, while a project may span several batches.

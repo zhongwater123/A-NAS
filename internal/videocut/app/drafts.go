@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -286,25 +285,7 @@ func (s *Store) redoneSince(ctx context.Context, jobID string, plan int) (bool, 
 // doneResults are what the named steps of a job kept when they were done,
 // by name; a step that is not done, or that kept nothing, is not among them.
 func (s *Store) doneResults(ctx context.Context, jobID string, names []string) (map[string][]byte, error) {
-	args := []any{jobID}
-	for _, name := range names {
-		args = append(args, name)
-	}
-	rows, err := s.db.QueryContext(ctx, "SELECT name, result_json FROM steps WHERE job_id = ? AND state = 'done' AND result_json IS NOT NULL AND name IN ("+
-		sqlitedb.Placeholders(len(names))+")", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	results := map[string][]byte{}
-	for rows.Next() {
-		var name, result string
-		if err := rows.Scan(&name, &result); err != nil {
-			return nil, err
-		}
-		results[name] = []byte(result)
-	}
-	return results, rows.Err()
+	return s.db.DoneResults(ctx, jobID, names)
 }
 
 func (src *editSource) pictureKnown(part, picture int) bool {

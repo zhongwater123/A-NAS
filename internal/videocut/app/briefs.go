@@ -121,17 +121,16 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (round
 // cards, the excerpt and the member's settings.
 func (s *Store) storedInput(ctx context.Context, jobID string) (domain.PlanInput, error) {
 	input := domain.PlanInput{JobID: jobID}
-	var catalogJSON, songJSON string
 	var err error
 	if input.Settings, err = jobSettings(ctx, s.db, jobID); err != nil {
 		return domain.PlanInput{}, err
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",
-		jobID).Scan(&catalogJSON); err != nil {
+	catalogJSON, err := s.db.DoneCatalog(ctx, jobID)
+	if err != nil {
 		return domain.PlanInput{}, fmt.Errorf("the job has no catalog yet: %w", err)
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
-		jobID).Scan(&songJSON); err != nil {
+	songJSON, err := s.db.DoneExcerpt(ctx, jobID)
+	if err != nil {
 		return domain.PlanInput{}, fmt.Errorf("the job has no excerpt yet: %w", err)
 	}
 	var catalog catalogResult
