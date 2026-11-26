@@ -1,7 +1,7 @@
 # 剪辑中心首版实施方案
 
 状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来）
-更新时间：2026-11-25
+更新时间：2026-11-26
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
@@ -98,6 +98,64 @@ anas-photos
 - 素材进回收站：任务暂停，恢复后继续。
 - 素材被永久删除：报告缺了哪些；已存进相册的成片不受影响。
 - 取消：不再调度新步骤，终止正在进行的渲染，不存回成片。
+
+## 代码结构
+
+剪辑中心在每种语言里各收进一个文件夹，内部按同样的四层分目录，依赖只能往下；越层引用由检查工具在 `make check` 里拦下。重构的步骤、迁移与验收见 [#639](https://github.com/zhongwater123/A-NAS/issues/639)；本节只写结构与规则，各步完成时更新。
+
+| 层 | 管什么 | 不能做什么 |
+|---|---|---|
+| 页面层 / 通信协议 | 页面、布局、用户操作；HTTP 接口与 VNAS 套接字 | 直接调接口（网页）、写业务规则 |
+| 中间层 | 一个个功能（建项目、改镜头、出片、导出），把下面几层串起来 | 关心界面长什么样 |
+| 底层接口 | 和外部打交道：数据库、相册、FFmpeg、计算工人、VNAS、HTTP | 写业务规则 |
+| 纯算法 | 规则和计算本身 | 任何输入输出 |
+
+页面层 → 中间层 → 底层接口，纯算法谁都能用。
+
+| 层 | 网页 `web/src/videocut/` | 服务端 `internal/videocut/` | 算法 `ai/anas_videocut/` |
+|---|---|---|---|
+| 入口与组装 | `VideoCutPanel.tsx` | `videocut.go` | `worker.py` 的启动部分 |
+| 页面层 / 通信协议 | `screens/`、`ui/` | `protocol/` | `worker.py`（收发消息） |
+| 中间层 | `app/` | `app/` | `ops/` |
+| 外部与数据 | `api/` | `db/`、`external/` | 没有：只算不存 |
+| 规则与算法 | `lib/` | `domain/` | `algo/` |
+
+**服务端（Go）**：
+
+```text
+internal/videocut/
+├── AGENTS.md        局部规则
+├── videocut.go      组件的 main：读配置、开数据库、接上外部能力、启动后台出片与各个监听；cmd/anas-api 只调它的 Run
+├── assistant.go     VNAS 规划用的助手套接字：按对端 UID 认成员
+├── protocol/        HTTP 接口，以及助手套接字上的规划接口
+├── app/             用例，一件事一个文件，也包括后台出片任务；ports.go 定义外部能力的接口
+├── domain/          数据类型、修改稿操作的规则、共用的错误
+├── db/              自己的数据库：Update(ctx, func(*db.Tx) error)，每类数据的读写是 db.Tx 上的方法
+└── external/        实现 app/ports.go 的接口：相册、FFmpeg、计算工人、配乐工人、规划记号
+internal/videocutcompute/   计算工人的客户端与消息类型
+```
+
+- 2026-11-26 [#670](https://github.com/zhongwater123/A-NAS/issues/670) 搬完家：`app/` 仍是原来的整个 `internal/montage`，`domain/`、`db/`、`external/` 在 [#665](https://github.com/zhongwater123/A-NAS/issues/665) 里从它拆出。
+- `protocol` → `app` → `domain`、`db`；`external` 实现 `app` 定义的接口（谁用接口谁定义，测 `app` 时直接放替身）；`db`、`external` 不引用 `app`、`protocol`；`domain` 不引用其他层；只有 `videocut.go` 认识各层的具体实现。`ports.go` 签名里出现的类型都放在 `domain` 或协议类型包里。
+- 事务跨 `app`/`db`：`app` 在 `db.Update` 的回调里按业务顺序调 `db.Tx` 的方法、做判断，自己不写 SQL；修改稿“读修订号、核对、写一步、加修订号”仍由 `app` 主导。`db` 不抽成接口，测试用临时 SQLite。
+- 错误到 HTTP 状态码的对应只在 `protocol` 写一处。
+- `internal/videocutcompute` 留在 `internal/videocut/` 外面，因为相册服务也用它切卡片、算画质。它和 Python 工人之间的消息类型、常量与错误（`PlanBrief`、`FillRequest`、`MusicRequest`、`ErrWorkerRefused` 等）定义在它里面，它不引用 `internal/videocut/...`，相册经它不会依赖剪辑中心。
+
+**分层检查（Go，golangci-lint 的 depguard）**：只约束内层 `domain`、`db`、`app`，规则按包的类别写；外层可以引用 HTTP、账号、服务代理等需要的包，只受 `internal/videocut` 内部的方向约束。
+
+| 类别 | 包 | 谁能引用 |
+|---|---|---|
+| 协议类型包 | `internal/photosapi`、`internal/videocutcompute` | `domain`、`db`、`app` |
+| FFmpeg 工人 | `internal/ffmpegworker`：客户端在 `cmd/anas-api` 建好传进 `videocut.Run`，经 `app.Editing`、`app.Media` 交给 `app` | 只有 `app`；它直接用 `Client`、`Local` 这一点 depguard 拦不住，由评审核对 |
+| 基础库 | `internal/sqlitedb`、`internal/atomicfile`、`internal/keylock`、`internal/capacity` | `db`、`app` |
+| 相册实现包 | `internal/photos`：剪辑用到它的值类型（`Grant`、`WindowMatch` 等） | 按文件放行，清单在 `.golangci.yml`；值类型挪进 `photosapi` 后删掉 |
+| 其他模块 | 以上之外的 `internal/...` | `domain`、`db`、`app` 都不能用 |
+
+另外，`internal/videocutcompute` 与 `internal/photoservice` 不引用 `internal/videocut/...`。
+
+**网页**：只有 `api/` 调后端，类型来自生成的 `api.generated.ts`；`lib/` 引用 `api/` 只能是 `import type`，也不引用 React（Oxlint 的 `no-restricted-imports`）。页面现在还直接引用 `api/`，“页面层不直接调接口”的检查等新界面把调用挪进 `app/` 后再加。
+
+**算法（Python）**：`algo/` 只引用标准库、NumPy 和自己，`ops/` 不引用 `worker.py`，由 `ai/tests/test_videocut_layers.py` 检查。
 
 ## 数据归属
 
@@ -216,7 +274,7 @@ montage/
 | `analysis(grantId, assetId)` | 返回分析结果：窗口（时间、是否纯色）、卡片、画质与描述，附各自的分析身份。JSON 只带状态、身份与计数，其余在封口的只读 memfd 里，格式与读取上限见 [`GrantAnalysis`](../../internal/photos/montagewindows.go) 与 `ReadWindows`；某个阶段在读取期间过期时只答它的状态，见[相册本地 AI](photo-ai.md#任务与调度) |
 | `open(grantId, assetId)` | 原片的只读描述符，经 `SCM_RIGHTS` 传出。剪辑中心把它原样转给 FFmpeg Worker，不复制文件；同一个描述符同一时刻只用于一个请求 |
 | `saveFilm(grantId, versionKey, name, fd)` | 相册把成片导入主人的个人图库，返回资产 ID，并把成片加进这条授权。幂等：先按 `(主人, versionKey)` 查有没有存过、并按这个键加锁，再暂存文件；`importStaged` 增加一个钩子，在建资产的同一个事务里写 `montage_films`（`(owner_user_id, version_key)` 唯一），所以提交与记录之间崩溃也不会多存一条。拍摄时间由 `assemble` 写进 MP4 的 `creation_time`，相册照常读取。相册照常检查容量，不够时回答 `insufficient_storage` |
-| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。同一个内容对象在授权里有几个资产时（同一个文件放在两个图库里），一个窗口按资产 ID 的先后给每个资产各回一条命中，每条都计入 k：剪辑中心按资产认视频，只回其中一个时，用另一个资产做的版本搜不到这段视频。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。搜哪些视频、何时回答 `model_mismatch`、何时改读 Catalog（结果相同）只写在[向量索引](vector-index.md#剪辑中心的窗口集合)的“读者”一条；AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)）。剪辑中心把相册的回答换成给成员的错误码，候选与重洗共用（[`grantsearch.go`](../../internal/montage/grantsearch.go) 的 `GrantSearch`）：`model_mismatch` 是 409 `search_model_changed`；`ai_unavailable`、相册答不了（连不上、`photos_unavailable`、主人的账号停用）是 503 `search_unavailable`；相册不搜的文字（空白或超过 200 字，`invalid_request`）是 400 `validation_failed`；其余照其他授权调用（`grantError`），其中授权已撤销是 409 `grant_revoked`，相册回了剪辑中心不认识的错误码是 503 `photos_unavailable` |
+| `searchWindows(grantId, texts, k)` | 二次编辑的文字搜镜头（#596，[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项）：相册用自己的 `embedQuery` 编码每段文字，只在这条授权的内容对象里检索窗口集合，回答每段文字最像的 k 个窗口（资产、窗口序号、分数）。同一个内容对象在授权里有几个资产时（同一个文件放在两个图库里），一个窗口按资产 ID 的先后给每个资产各回一条命中，每条都计入 k：剪辑中心按资产认视频，只回其中一个时，用另一个资产做的版本搜不到这段视频。一次至多 32 段文字、k 至多 200、文字段数乘 k 至多 1600，客户端把更多的文字分批发。搜哪些视频、何时回答 `model_mismatch`、何时改读 Catalog（结果相同）只写在[向量索引](vector-index.md#剪辑中心的窗口集合)的“读者”一条；AI Worker 编不出文字时回答 `ai_unavailable`（[`windowsearch.go`](../../internal/photos/windowsearch.go)）。剪辑中心把相册的回答换成给成员的错误码，候选与重洗共用（[`grantsearch.go`](../../internal/videocut/app/grantsearch.go) 的 `GrantSearch`）：`model_mismatch` 是 409 `search_model_changed`；`ai_unavailable`、相册答不了（连不上、`photos_unavailable`、主人的账号停用）是 503 `search_unavailable`；相册不搜的文字（空白或超过 200 字，`invalid_request`）是 400 `validation_failed`；其余照其他授权调用（`grantError`），其中授权已撤销是 409 `grant_revoked`，相册回了剪辑中心不认识的错误码是 503 `photos_unavailable` |
 | `list()` | 列出剪辑中心的全部授权（grantId、主人、项目 ID、是否撤销），供启动对账 |
 | `revoke(grantId)` | 标记撤销，幂等 |
 
@@ -724,7 +782,7 @@ montage/
 确认一版、修改镜头与一句话重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。为什么这样做见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)，子 issue 见 ADR 的“交付”。界面 2026-11-24 起按新的交互重新设计，规格随新界面改写，本节记的是已经实现的服务端；新界面的子 issue 随 [#632](https://github.com/zhongwater123/A-NAS/issues/632) 另定。在首版闭环（M10）之后实施。
 
 **版本的时间线**：二次编辑都从一个版本出发，所以存回时把这一版的时间线（`fill` 的 `clips`，连同段落、画面与小节槽的划分）写进 `versions.timeline_json`，与写版本行在同一个事务里。之前的版本没有这一列，第一次读这一版（概要、修改稿、镜头清单或重剪）时从它的任务的填槽步骤结果补上；步骤结果也没有时，这一版只能播放，不能修改或重剪。
-- 分析、目录与歌曲三步是任务的，两个方案共用：方案一存好后、方案二还在做时移除了视频或素材重新分析过，这几步会重做并覆盖结果，卡片重新编号，方案一的卡片号与节拍号就指向了别的画面。所以读一个版本的规划时，它所来自的规划所在任务的分析、目录、歌曲与这一方案的规划两步，有哪一步在那个方案的版本存好之后又完成过，这一版只能播放，回答 409 `not_editable`，也不能重剪。生成改成一次只出一版（2026-11-24 决定）后，存版本就是任务的最后一步，不会再出现这种情况；已经按两个方案存下的版本仍按这一条判断（[`drafts.go`](../../internal/montage/drafts.go) 的 `redoneSince`）。读版本（修改稿、概要、镜头清单、重剪）与编辑任务的第一步用同一个 `loadPlan` 读这几步，分析只读每个视频的概要与窗口，不读卡片：卡片以目录为准。
+- 分析、目录与歌曲三步是任务的，两个方案共用：方案一存好后、方案二还在做时移除了视频或素材重新分析过，这几步会重做并覆盖结果，卡片重新编号，方案一的卡片号与节拍号就指向了别的画面。所以读一个版本的规划时，它所来自的规划所在任务的分析、目录、歌曲与这一方案的规划两步，有哪一步在那个方案的版本存好之后又完成过，这一版只能播放，回答 409 `not_editable`，也不能重剪。生成改成一次只出一版（2026-11-24 决定）后，存版本就是任务的最后一步，不会再出现这种情况；已经按两个方案存下的版本仍按这一条判断（[`drafts.go`](../../internal/videocut/app/drafts.go) 的 `redoneSince`）。读版本（修改稿、概要、镜头清单、重剪）与编辑任务的第一步用同一个 `loadPlan` 读这几步，分析只读每个视频的概要与窗口，不读卡片：卡片以目录为准。
 
 **修改稿**
 - `GET /versions/{id}/draft` 没有就按版本建一份：从 `timeline_json` 读出音乐段落与槽，每个槽记它首段的节拍（结尾画面的最后一个槽记末段的：结尾选的节拍收尾），修订号 0。槽按成片顺序排列，各记段落号、画面号与起止秒数；`fill` 的 `pins` 也这样指一个槽。
@@ -769,10 +827,10 @@ montage/
 - 填槽要读窗口向量。`generate` 与 `recut` 的分析步骤先看过各视频的分析状态；`edit` 任务没有分析步骤，由第一步 `source` 照同一套规则（`analysisReady`）看目录里还有卡片的视频的窗口：没做或正在排队就请相册分析并等待（`analysis`），做失败了停下等成员（`analysis_failed`，可以重新分析；超过时长上限的是 `video_too_long`），本地模型不可用停下（`model_unavailable`）。不会一直等一个没人在做的分析。填槽时窗口又变得没做完或换了内容，按可重试故障处理，任务从第一步重新判断。`edit` 任务读到的窗口已做完、身份或维度却与来源版本的分析结果不同，直接失败，原因与 `analysis_changed` 相同，不渲染也不存回；`generate` 与 `recut` 任务照旧当作分析正在变化、按可重试故障处理。
 
 **重剪的规划**
-- `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
-- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。卡片号按视频在任务里的先后编号（`v{n}-{序号}`），重剪任务移除了视频、或视频重新分析过时，卡片重新编号，`base` 里的旧编号会指向别的画面。所以建任务时同时记下 `base` 用到的每张卡片在视频里的位置（`settings_json` 的 `recut.cards`：视频、起止与各节拍的时刻），到出 brief 时按这一次的目录对齐：同一个视频里同一位置的卡片还在，就换成它现在的编号；不在了（视频已移除，或重新切过、重新描述过），就从大纲各场的 `cards` 与各画面的 `beats` 里去掉，一场或一个画面一张都不剩时去掉这一项，模板写明这时照它的 `query`、`shows` 与 `link` 从这一次的卡片里重新挑，其余照 `base` 保留（[`recut.go`](../../internal/montage/recut.go) 的 `alignBase`）。重剪要等素材分析做完才出 brief，所以正在分析的素材也按做完后的卡片对齐。
+- `POST /versions/{id}/recut` 加进 `protocol.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
+- brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。卡片号按视频在任务里的先后编号（`v{n}-{序号}`），重剪任务移除了视频、或视频重新分析过时，卡片重新编号，`base` 里的旧编号会指向别的画面。所以建任务时同时记下 `base` 用到的每张卡片在视频里的位置（`settings_json` 的 `recut.cards`：视频、起止与各节拍的时刻），到出 brief 时按这一次的目录对齐：同一个视频里同一位置的卡片还在，就换成它现在的编号；不在了（视频已移除，或重新切过、重新描述过），就从大纲各场的 `cards` 与各画面的 `beats` 里去掉，一场或一个画面一张都不剩时去掉这一项，模板写明这时照它的 `query`、`shows` 与 `link` 从这一次的卡片里重新挑，其余照 `base` 保留（[`recut.go`](../../internal/videocut/app/recut.go) 的 `alignBase`）。重剪要等素材分析做完才出 brief，所以正在分析的素材也按做完后的卡片对齐。
 - 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_montage_worker.py`](../../ai/tests/test_montage_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
-- 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
+- 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/videocut/app/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`
 - 资产要在这个项目的素材里；经 `open` 与 FFmpeg `frames` 取一帧 JPEG，长边 320。不是这个项目的资产、相册里已经没有或进了回收站的视频、内容对象换了的视频，都回答 404 `not_found`：没有这一帧，和“不能加进项目的视频”不是一回事。授权已撤销回答 409 `grant_revoked`。
@@ -789,7 +847,7 @@ montage/
 
 **确认这一版**：`POST /versions/{id}/confirm` 写 `projects.chosen_version_id`，可以改写；项目列表与主页优先用它。不删除任何成片（[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)）。
 
-**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM；段落名、备注等文字来自模型，以 `=`、`+`、`-`、`@`、制表符或回车开头的单元格前加一个单引号，电子表格按文字显示而不当公式执行；有哪些列见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的“镜头清单的格式”，表头在 [`editing.go`](../../internal/montage/editing.go) 的 `shotListHeader`。
+**镜头清单**：`GET /versions/{id}/shots` 与 `GET /drafts/{id}/shots` 用 Go 的 `encoding/csv` 写，前面加 UTF-8 的 BOM；段落名、备注等文字来自模型，以 `=`、`+`、`-`、`@`、制表符或回车开头的单元格前加一个单引号，电子表格按文字显示而不当公式执行；有哪些列见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)的“镜头清单的格式”，表头在 [`editing.go`](../../internal/videocut/app/editing.go) 的 `shotListHeader`。
 
 ## 原型缺陷的修复
 
@@ -904,5 +962,5 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；
   - 助手：[`ai/assistant/managed-config.yaml`](../../ai/assistant/managed-config.yaml)、[`internal/assistantapi`](../../internal/assistantapi/rpc.go)；
-  - 规划：[`montage-planner.py`](../../ai/assistant/montage-planner.py)、[`anas_montage_mcp.py`](../../ai/assistant/anas_montage_mcp.py)、[`planning.go`](../../internal/montage/planning.go)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)。
+  - 规划：[`montage-planner.py`](../../ai/assistant/montage-planner.py)、[`anas_montage_mcp.py`](../../ai/assistant/anas_montage_mcp.py)、[`planning.go`](../../internal/videocut/app/planning.go)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)。
 - **调查**：[剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)。

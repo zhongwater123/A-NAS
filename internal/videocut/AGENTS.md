@@ -1,6 +1,6 @@
-# 剪辑中心（internal/montage/ 等）
+# 剪辑中心（internal/videocut/ 等）
 
-剪辑中心的服务端：项目、持久任务、规划的轮次、填槽与渲染；也适用于 `internal/montageapi`、`internal/montageservice`、`internal/montagecompute` 与 `ai/anas_montage`。根目录的 [AGENTS.md](../../AGENTS.md) 仍然适用。权威说明：[规格](../../docs/specs/montage-center.md)、[技术设计](../../docs/architecture/montage-center.md)、[ADR 0038](../../docs/adr/0038-keep-montage-media-in-the-photo-library.md)、[ADR 0039](../../docs/adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)。
+剪辑中心的服务端：项目、持久任务、规划的轮次、填槽与渲染；适用于 `internal/videocut/` 下的各个包、`internal/videocutcompute` 与 `ai/anas_videocut`；目录与分层见[技术设计的“代码结构”](../../docs/architecture/montage-center.md#代码结构)。根目录的 [AGENTS.md](../../AGENTS.md) 仍然适用。权威说明：[规格](../../docs/specs/montage-center.md)、[技术设计](../../docs/architecture/montage-center.md)、[ADR 0038](../../docs/adr/0038-keep-montage-media-in-the-photo-library.md)、[ADR 0039](../../docs/adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)。
 
 - **素材归相册：** 原片、分析与成片只在相册，剪辑中心凭项目授权经相册读写，不存副本与会话，也不绕过相册直连 AI Worker。改卡片或画质规则就是改相册的分析身份并重算（ADR 0038 决定 2–4）。
 - **规划不由剪辑中心发起：** 它只留记号、经工具给数据、校验答案（[规划会话](../../docs/architecture/montage-planning-session.md)）。会触发规划的请求由 anas-api 先登记规划授权再转发，新增这类请求两边一起改。规则只在 `ai/anas_montage/prompts/` 的模板里；不合格回答 `rejected` 而不是 `isError`（会触发熔断）。云端只看文字。只有成员的操作能改变结果时才停下等成员；规划没有完成就自动重来，同一任务对同样的输入最多 3 轮，仍没完成就让任务失败并通知成员（[决定记录](../../docs/decisions/2026-11-25-montage-planning-retries.md)）。

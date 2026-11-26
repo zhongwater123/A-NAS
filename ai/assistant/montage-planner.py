@@ -23,7 +23,7 @@ INTERVAL seconds it gives one member with a job waiting for a plan a round, one 
    called a montage tool and the conversation did not complete, which planned nothing.
 
 When the montage center's socket does not answer, nothing is claimed for 2, 4, 8 and then 15 minutes, or until a
-member registers a new grant. Anything else that waits is the montage center's to say (internal/montage/planning.go).
+member registers a new grant. Anything else that waits is the montage center's to say (internal/videocut/app/planning.go).
 """
 import asyncio
 import contextlib
@@ -52,7 +52,7 @@ INTERVAL = int(os.environ.get("ANAS_MONTAGE_PLANNER_INTERVAL", "15"))
 
 ACCOUNT = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 # The montage center's round and job ids are a prefix and crypto/rand.Text (26 base32 letters), its tokens 16 random
-# bytes in hex (internal/montage); internal/montage/planner_ids_test.go holds them to these.
+# bytes in hex (internal/videocut/app); internal/videocut/app/planner_ids_test.go holds them to these.
 ROUND_ID = re.compile(r"round:[A-Z2-7]{26}")
 JOB_ID = re.compile(r"job:[A-Z2-7]{26}")
 TOKEN = re.compile(r"[0-9a-f]{32}")

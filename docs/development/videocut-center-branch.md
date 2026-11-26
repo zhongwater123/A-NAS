@@ -22,7 +22,7 @@
 
 | 类别 | 范围 | 去向 |
 |---|---|---|
-| 剪辑中心代码 | 下面的 `<名>` 是 `montage` 或 `videocut`：`internal/<名>*`（现在是 `internal/montage`、`montageapi`、`montagecompute`、`montageservice`）；`ai/anas_<名>*`；`web/src/<名>`；`deploy/<名>-*`；`api/paths/<名>.yaml`、`api/components/<名>.yaml`；`ai/tests/test_<名>_*.py`、`ai/eval/<名>_*.py`；`scripts/` 和 `docs/` 下文件名带 montage 或 videocut 的 | 合进 `videocut-center` |
+| 剪辑中心代码 | 下面的 `<名>` 是 `montage` 或 `videocut`：`internal/<名>*`（现在是 `internal/videocut` 与 `internal/videocutcompute`）；`ai/anas_<名>*`；`web/src/<名>`；`deploy/<名>-*`；`api/paths/<名>.yaml`、`api/components/<名>.yaml`；`ai/tests/test_<名>_*.py`、`ai/eval/<名>_*.py`；`scripts/` 和 `docs/` 下文件名带 montage 或 videocut 的 | 合进 `videocut-center` |
 | 生成文件 | `api/openapi.bundle.yaml`、`web/src/api.generated.ts`、`web/src/api.validators.generated.ts`、`web/package-lock.json` | 不手工解决冲突：接口文件重新运行 `make api`，锁文件重新运行 `npm install` |
 | 公共代码：登记 | 其余文件里，只新增、不改已有行，而且只是把剪辑中心挂上去：比如 `api/openapi.yaml` 加路径引用、加一条路由、`web/package.json` 加依赖、系统测试加剪辑中心的检查 | 可以留在 `videocut-center`，阶段完成时一起合回 |
 | 公共代码：改动 | 其余文件里，改了已有的逻辑、数据表、接口或共用组件，或者新加了公共模块的逻辑：比如在相册里加一种分析任务、改 AI Worker、改相册的调度、改共用的播放器 | 尽快合进 `main`，见下一节 |

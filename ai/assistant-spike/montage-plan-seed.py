@@ -8,7 +8,7 @@ steps look up none in the photo library; its song step, its keys from there on a
 
   montage-plan-seed.py STORE JOB VIDEO   STORE is montage.db, JOB the job's id, VIDEO the asset the cards are of
 
-Runs as the montage service's account, which owns the store. The keys follow internal/montage/steps.go (digest, the
+Runs as the montage service's account, which owns the store. The keys follow internal/videocut/app/steps.go (digest, the
 analysis and catalog steps' keys, catalogVersion): a change there leaves the job without footage, and the system test
 says where the job stopped.
 """
@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 
 def digest(*parts):
-    """internal/montage/steps.go's digest: each part's length in bytes, a colon, the part and a line break."""
+    """internal/videocut/app/steps.go's digest: each part's length in bytes, a colon, the part and a line break."""
     sum_ = hashlib.sha256()
     for part in parts:
         sum_.update(f"{len(part.encode())}:{part}\n".encode())
