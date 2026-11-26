@@ -1,11 +1,11 @@
 ---
 name: check-in-wsl
-description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check 的全部检查）。Go、Node 与 gcc 只装在 WSL 中，而在 /mnt 下的 Windows 盘上跑时 vitest worker 会超时，所以先把检出复制到 WSL 自己的 ext4 目录再运行。Go 代码、构建、CI 或跨模块契约变更后，或用户要求跑 make check 时使用。
+description: 在 Windows 开发机的 WSL 中运行 A-NAS 的完整门禁（make check 的全部检查）。Go、Node 与 gcc 只装在 WSL 中，而在 /mnt 下的 Windows 盘上跑时 vitest worker 会超时，所以先把检出复制到 WSL 自己的 ext4 目录再运行。共享开发服务器连不上，或要在本机复现服务器上的失败时使用；平常用 check-on-shared-server。
 ---
 
 # 在 WSL 的 ext4 副本中运行门禁
 
-什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[Windows 与 WSL 环境](../../../docs/development/environments/windows.md)。
+完整门禁默认在共享开发服务器上跑（[check-on-shared-server](../check-on-shared-server/SKILL.md)），本技能是服务器连不上时的备用。什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[Windows 与 WSL 环境](../../../docs/development/environments/windows.md)。
 
 ## 为什么用副本
 

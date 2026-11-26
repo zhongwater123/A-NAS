@@ -9,9 +9,10 @@
 | 我要做什么 | 在哪里开始 | 怎样算完成 |
 |---|---|---|
 | 第一次打开网页桌面 | Linux 或 Windows 的 WSL2 终端按[快速开始](README.md#快速开始)运行；Mac 在本机终端按 [Colima 预览](docs/development/environments/macos.md#fake-预览)启动并初始化测试管理员 | 在本机浏览器打开预览地址，用测试账号进入桌面 |
-| Windows 上跑完整检查 | 在检出根目录打开 **Git Bash**，按 [Windows 完整检查步骤](.agents/skills/check-in-wsl/SKILL.md#步骤)启动；测试在 WSL 的 ext4 副本里执行 | 记录 `PASS` 和日志路径；失败时记录失败项和同一份日志 |
+| 跑完整检查（默认） | 提交改动后，在检出根目录按[共享开发服务器上的门禁步骤](.agents/skills/check-on-shared-server/SKILL.md#步骤)把提交拷到服务器上运行 | 记录 `PASS`、提交号和拷回本机的日志路径；失败时记录失败项和同一份日志 |
+| 服务器连不上时在 Windows 上跑完整检查 | 在检出根目录打开 **Git Bash**，按 [Windows 完整检查步骤](.agents/skills/check-in-wsl/SKILL.md#步骤)启动；测试在 WSL 的 ext4 副本里执行 | 记录 `PASS` 和日志路径；失败时记录失败项和同一份日志 |
 | Mac 上检查改动 | 在本机终端按 [macOS 运行检查](docs/development/environments/macos.md#运行检查)把任务交给 Colima 虚拟机 | 记录实际通过的目标；ARM64 完整门禁受 Qdrant 限制，需要全量结果时用 Windows/WSL 或 CI |
-| 复测共享模型，或本机资源不足 | 按[共享开发服务器接入说明](docs/development/LOCAL_ENVIRONMENT.md#共享开发服务器)向维护者申请个人账号，在服务器的个人工作目录检出待测提交 | 用指定输入复现结果，留下提交号、输入清单和运行命令 |
+| 复测共享模型，或本机资源不足 | 按[共享开发服务器](docs/development/environments/shared-dev-server.md#申请账号)向维护者申请个人账号，在服务器的个人工作目录检出待测提交 | 用指定输入复现结果，留下提交号、输入清单和运行命令 |
 | 改了文件权限，自动测试 Linux 账号、ACL 或 Samba | 在有 Docker 的开发环境按 [Root 集成测试](docs/development/testing.md#root-集成测试)构建并启动一次性 Debian 容器；创建账号和修改 Samba 配置都在容器内执行 | 对应测试通过，能报告哪个提交通过了检查 |
 | 验收已安装版本的 Web 与 SMB 共享 | 先按[前提与停止条件](docs/runbooks/provision-v1.0.1-experimental-storage.md#前提与停止条件)核对实验 NAS 和可丢弃的测试数据；已安装设备直接做同页的[功能验收](docs/runbooks/provision-v1.0.1-experimental-storage.md#功能验收)，用浏览器与 SMB 客户端访问 | 记录设备版本、测试账号和两种客户端的读写结果 |
 
