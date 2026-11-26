@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { onLocalConsoleActive } from "../lib/localConsole";
+import {
+  localConsoleDismissed,
+  localConsoleScreenSaverIdleMs,
+  onLocalConsoleActive,
+  setLocalConsoleCovered,
+} from "../lib/localConsole";
 import { readLocalDisplay } from "./api";
 import styles from "./localConsoleScreenSaver.module.css";
 
-export const localConsoleScreenSaverIdleMs = 180_000;
 export const localConsoleScreenSaverManifest = "/local-console/screensavers";
 // defaultSleepAfterMinutes applies when the setting cannot be read, so the
 // screen never stays lit just because the service was unreachable.
@@ -17,29 +21,6 @@ const activityEvents = ["pointerdown", "pointermove", "keydown", "wheel", "touch
 
 // awake shows the page; saver plays a video over it; asleep is plain black.
 type Phase = "awake" | "saver" | "asleep";
-
-let covered = false;
-const dismissedListeners = new Set<() => void>();
-
-// localConsoleCovered tells whether either cover is up over the page: nobody
-// sees what the companion would do then, so VNAS hears that it is paused
-// (companion/commands.ts).
-export function localConsoleCovered(): boolean {
-  return covered;
-}
-
-// onLocalConsoleDismissed calls listener with each input that takes either
-// cover away. That input stops here, and a wheel or a pointer move has no
-// release that reaches the page after it, so the page would not know the
-// member is back until the next input (companion/petCard.tsx).
-export function onLocalConsoleDismissed(listener: () => void): () => void {
-  dismissedListeners.add(listener);
-  return () => {
-    dismissedListeners.delete(listener);
-  };
-}
-
-export { isLocalConsole } from "../lib/localConsole";
 
 export async function loadScreenSaverVideos(): Promise<string[]> {
   const response = await fetch(localConsoleScreenSaverManifest, { cache: "no-store" });
@@ -73,7 +54,9 @@ export function selectScreenSaverVideo(
 // the screen black once the video has played the minutes set in 设置 →
 // 个性化. Without videos (or on the sign-in page, where videos is false) the
 // screen goes black at the same moment. The first input after either only
-// wakes the page.
+// wakes the page. Only the device's own screen loads this module
+// (DeviceScreenSaver.tsx), so other visitors download neither its code nor its
+// styles.
 //
 // Both covers are children of <body>, next to the page rather than inside it,
 // so that the stylesheet can stop the page beneath from rendering while they
@@ -107,7 +90,7 @@ export function LocalConsoleScreenSaver({
 
   const setPhase = useCallback((next: Phase) => {
     phaseRef.current = next;
-    covered = next !== "awake";
+    setLocalConsoleCovered(next !== "awake");
     setPhaseState(next);
   }, []);
 
@@ -185,7 +168,7 @@ export function LocalConsoleScreenSaver({
         event.stopPropagation();
         event.stopImmediatePropagation();
         setPhase("awake");
-        for (const listener of dismissedListeners) listener();
+        localConsoleDismissed();
       }
       schedule();
     };

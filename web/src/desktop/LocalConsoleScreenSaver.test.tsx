@@ -2,16 +2,18 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { localConsoleActive } from "../lib/localConsole";
-import { http, server } from "../test/server";
 import {
-  defaultSleepAfterMinutes,
   isLocalConsole,
-  LocalConsoleScreenSaver,
-  loadScreenSaverVideos,
+  localConsoleActive,
   localConsoleCovered,
   localConsoleScreenSaverIdleMs,
   onLocalConsoleDismissed,
+} from "../lib/localConsole";
+import { http, server } from "../test/server";
+import {
+  defaultSleepAfterMinutes,
+  LocalConsoleScreenSaver,
+  loadScreenSaverVideos,
   selectScreenSaverVideo,
 } from "./LocalConsoleScreenSaver";
 

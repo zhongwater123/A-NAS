@@ -23,7 +23,7 @@ import {
 
 // The local console's screen saver, up or not.
 const cover = vi.hoisted(() => ({ up: false }));
-vi.mock("../desktop/LocalConsoleScreenSaver", () => ({
+vi.mock("../lib/localConsole", () => ({
   localConsoleCovered: () => cover.up,
   isLocalConsole: () => false,
 }));

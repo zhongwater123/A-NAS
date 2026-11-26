@@ -3,8 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
-import { onLocalConsoleActive } from "../lib/localConsole";
+import { localConsoleScreenSaverIdleMs, onLocalConsoleActive } from "../lib/localConsole";
 import { session } from "../test/fixtures";
 import {
   addVersion,

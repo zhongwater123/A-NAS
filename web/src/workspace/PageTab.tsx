@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { onSessionEnded, setSession } from "../api/client";
 import type { Session } from "../api.generated";
 import { currentSession } from "../auth/api";
-import { LocalConsoleScreenSaver } from "../desktop/LocalConsoleScreenSaver";
+import { DeviceScreenSaver } from "../desktop/DeviceScreenSaver";
 import { isLocalConsole } from "../lib/localConsole";
 import { loadPeople } from "../people/people";
 import { getPage } from "./api";
@@ -20,9 +20,8 @@ const tabClass = styles.wsApp;
 // sandboxed frame as ever (ADR 0040), under a thin bar. The tab signs in with
 // the desktop's session. On the device's own screen a tab has no browser
 // bar, so 关闭 takes the member back to the desktop, and the tab is what the
-// screen shows, so it keeps the desktop's screen saver and 息屏. The screen
-// saver is imported, not loaded on demand: the desktop imports it too, so
-// both share its chunk and the desktop's first load keeps one stylesheet.
+// screen shows, so it keeps the desktop's screen saver and 息屏, which only
+// the device's own screen downloads (DeviceScreenSaver.tsx).
 export function PageTab({ pageId }: { pageId: string }) {
   // undefined while it asks, null when nobody is signed in.
   const [session, setSessionState] = useState<Session | null>();
@@ -30,7 +29,7 @@ export function PageTab({ pageId }: { pageId: string }) {
     <>
       <SignedIn pageId={pageId} session={session} onSession={setSessionState} />
       {/* The sign-in message has no screen saver but still goes black, as on the desktop. */}
-      <LocalConsoleScreenSaver enabled={isLocalConsole()} videos={Boolean(session)} />
+      <DeviceScreenSaver videos={Boolean(session)} />
     </>
   );
 }
