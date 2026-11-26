@@ -24,9 +24,12 @@ import (
 var embedded embed.FS
 
 type handler struct {
-	api                  http.Handler
-	assets               fs.FS
-	index                []byte
+	api    http.Handler
+	assets fs.FS
+	index  []byte
+	// pageTab is a shared page on its own in a browser tab (ADR 0040,
+	// web/workspace.html), at pageTabPrefix and the page's ID.
+	pageTab              []byte
 	etags                map[string]string
 	screensaverDirectory string
 	companionDirectory   string
@@ -55,8 +58,12 @@ func NewWithOptions(api http.Handler, options Options) (http.Handler, error) {
 	if err != nil {
 		return nil, errors.New("embedded web UI is not built")
 	}
+	pageTab, err := fs.ReadFile(assets, "workspace.html")
+	if err != nil {
+		return nil, errors.New("embedded web UI is not built")
+	}
 	return &handler{
-		api: api, assets: assets, index: index, etags: assetTags(assets),
+		api: api, assets: assets, index: index, pageTab: pageTab, etags: assetTags(assets),
 		screensaverDirectory: options.ScreensaverDirectory, companionDirectory: options.CompanionDirectory,
 	}, nil
 }
@@ -89,12 +96,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", desktopPolicy)
 	switch {
 	case r.URL.Path == "/":
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		if r.Method == http.MethodGet {
-			_, _ = w.Write(h.index)
-		}
+		serveHTML(w, r, h.index)
+	case isPageTab(r.URL.Path):
+		serveHTML(w, r, h.pageTab)
 	case strings.HasPrefix(r.URL.Path, "/assets/"):
 		h.serveAsset(w, r)
 	case r.URL.Path == "/local-console/screensavers":
@@ -109,6 +113,25 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveCompanionAnimation(w, r)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+// pageTabPrefix and a page's ID open that shared page in a tab of its own.
+const pageTabPrefix = "/workspace/"
+
+func isPageTab(path string) bool {
+	id, ok := strings.CutPrefix(path, pageTabPrefix)
+	return ok && id != "" && !strings.Contains(id, "/")
+}
+
+// serveHTML answers with one of the web UI's pages, which name the hashed
+// assets of this release and so are never cached.
+func serveHTML(w http.ResponseWriter, r *http.Request, page []byte) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodGet {
+		_, _ = w.Write(page)
 	}
 }
 

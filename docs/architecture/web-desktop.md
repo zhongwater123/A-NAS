@@ -16,9 +16,11 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 | 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`、`todos`（家庭待办，另有外壳上的待办提醒）、`scoring`（可移除模块照片打分，模块未安装时不显示）、`workspace`（共享工作区，管理员加入的成员才显示；隔离框架里的辅助脚本在 `workspace/frame/`，由 `vite.frame.config.ts` 单独构建）；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
 | 领域目录 | 不是窗口的领域：`auth`（登录与会话，登录画面的样式在 `auth.module.css`）、`people`（各账号的名字与头像）、`boot`（开机画面） |
 | `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、家庭中心与待办共用的表单对话框（`modal`，挂到调用方给出的容器里）、列表行末的“更多操作”菜单（`RowMenu`）、各功能留在桌面上的提示（`DeskNotice`，桌面把它们上下排开）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、窗口最小化时停止轮询（`useWindowShown`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
-| `lib/` | 不依赖 React 与接口的函数：容量、时间、纯日期与人民币金额的格式化，文件名与类型、剪贴板、读取拖入的文件、只在窗口的滚动区内滚到某一项（`scroll`）、页面是否开在本机屏幕上与屏保是否盖住页面（`localConsole`） |
+| `lib/` | 不依赖 React 与接口的函数：容量、时间、纯日期与人民币金额的格式化，文件名与类型、剪贴板、读取拖入的文件、只在窗口的滚动区内滚到某一项（`scroll`）、页面是否开在本机屏幕上、屏保是否盖住页面、框架里的输入告诉屏保（`localConsole`） |
 | `test/` | 测试基础设施：按领域的请求处理器、测试数据与渲染帮助函数 |
 | `assets/` | 静态图片 |
+
+第二个网页入口是 `web/workspace.html`（`src/workspace/tab.tsx`）：共享工作区的一个页面单独占一个浏览器标签页，`internal/webui` 在 `/workspace/{pageId}` 返回它。它只加载这个页面要的代码，不加载桌面，也不计入首屏体积（[共享工作区技术设计](shared-workspace.md#页面的标签页)）。
 
 功能目录内部：
 

@@ -1,5 +1,6 @@
-/* The device screen's screen saver and 息屏 (LocalConsoleScreenSaver.tsx),
-   which load only on the device's own screen. */
+/* The device screen's screen saver and 息屏 (LocalConsoleScreenSaver.tsx), on
+   the desktop and on a shared page's own tab, which loads none of the
+   desktop's styles. */
 .local-console-screensaver {
   position: fixed;
   z-index: 1000;

@@ -1,20 +1,17 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronDown, Crosshair, Download, Globe, TriangleAlert, X } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { localConsoleActive } from "../lib/localConsole";
 import { relativeTime } from "../lib/time";
-import { RowMenu, type RowMenuItem } from "../ui/RowMenu";
 import {
   clearSelection,
-  deletePage,
   fileURL,
   getPage,
-  renamePage,
   reportViewing,
-  saveVersion,
   setSelection,
   stopViewing,
   viewURL,
@@ -22,13 +19,12 @@ import {
   type WorkspaceVersion,
 } from "./api";
 import { type Blocked, type Picked, readFromFrame, type ToFrame } from "./frame/protocol";
-import type { Kit } from "./kit";
-import { Failed, HTMLPicker } from "./parts";
+import { Presence } from "./Presence";
+import { Failed } from "./parts";
 import { arrivalText, savedText } from "./words";
 import styles from "./workspace.module.css";
 
 export const pageKey = (pageId: string) => ["workspace", "page", pageId] as const;
-export const pagesKey = ["workspace", "pages"] as const;
 
 // Load is what the frame shows: a version, the elements its change touched
 // for the helper to point at, and where the reader was.
@@ -40,31 +36,27 @@ interface Load {
 
 type Selected = { picked: Picked; version: number; state: "saving" | "saved" | "failed"; error?: string };
 
-// PageView shows one shared page in its sandboxed frame (ADR 0040) with its
-// versions, and follows new ones: the reader's own (an upload, or their
-// agent's change) replace the page at once and point at what changed;
-// another member's are announced above it. It reads the page every 3
-// seconds while the window can be seen.
+// PageView shows one shared page in its sandboxed frame (ADR 0040), filling
+// its own browser tab, with its versions, and follows new ones: the reader's
+// own (an upload, or their agent's change) replace the page at once and point
+// at what changed; another member's are announced above it. It reads the
+// page every 3 seconds while the tab can be seen. onClose is the device's own
+// screen's way back to the desktop.
 export function PageView({
   pageId,
   userId,
-  admin,
-  shown,
-  kit,
   onGone,
+  onClose,
 }: {
   pageId: string;
   userId: string;
-  admin: boolean;
-  shown: boolean;
-  kit: Kit;
   onGone: () => void;
+  onClose?: () => void;
 }) {
-  const queries = useQueryClient();
   const query = useQuery({
     queryKey: pageKey(pageId),
     queryFn: ({ signal }) => getPage(pageId, signal),
-    refetchInterval: shown ? 3_000 : false,
+    refetchInterval: 3_000,
     refetchIntervalInBackground: false,
   });
   const page = query.data;
@@ -86,27 +78,44 @@ export function PageView({
       setIncoming(latest);
     }
   }
-  // The list says who saved last; it follows the open page's new versions.
-  const latestVersion = page?.latest.version;
-  useEffect(() => {
-    if (latestVersion) void queries.invalidateQueries({ queryKey: pagesKey });
-  }, [latestVersion, queries]);
   const missing = query.error instanceof APIError && query.error.status === 404;
   useEffect(() => {
     if (missing) onGone();
   }, [missing, onGone]);
-  // What the window shows is "this page" to the member's agent: said again
-  // every minute while it is open (the service forgets it after three
-  // quiet minutes) and taken back when it closes.
+  // The tab the member used last is "this page" to their agent, and every
+  // member sees who has a page open. The tab says so when it is shown or gets
+  // the focus and every minute while it can be seen, and takes it back when
+  // it is hidden or closes; the service forgets a tab after three quiet
+  // minutes.
   const version = load?.version;
   useEffect(() => {
     if (!version) return;
-    const report = () => void reportViewing(pageId, version).catch(() => undefined);
+    const report = () => {
+      if (!document.hidden) void reportViewing(pageId, version, document.hasFocus()).catch(() => undefined);
+    };
+    const shownOrHidden = () => {
+      if (document.hidden) void stopViewing(true).catch(() => undefined);
+      else report();
+    };
     report();
     const again = setInterval(report, 60_000);
-    return () => clearInterval(again);
+    document.addEventListener("visibilitychange", shownOrHidden);
+    window.addEventListener("focus", report);
+    return () => {
+      clearInterval(again);
+      document.removeEventListener("visibilitychange", shownOrHidden);
+      window.removeEventListener("focus", report);
+    };
   }, [pageId, version]);
-  useEffect(() => () => void stopViewing(pageId).catch(() => undefined), [pageId]);
+  useEffect(() => {
+    // keepalive: a closing tab does not wait for the answer.
+    const leave = () => void stopViewing(true).catch(() => undefined);
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [pageId]);
 
   if (!page || !load) {
     if (query.isError && !missing) return <Failed error={query.error} onRetry={() => void query.refetch()} />;
@@ -121,50 +130,39 @@ export function PageView({
     if (next.version === page.latest.version) setIncoming(undefined);
     setLoad(next);
   };
-  const refresh = () => void queries.invalidateQueries({ queryKey: ["workspace"] });
   return (
     <Viewer
       key={pageId}
       page={page}
+      userId={userId}
       load={load}
       incoming={incoming}
-      canDelete={admin || page.createdBy.id === userId}
-      kit={kit}
       onShow={show}
       onDismiss={() => setIncoming(undefined)}
       onScrolled={setScrollY}
-      onChanged={refresh}
-      onDeleted={() => {
-        queries.removeQueries({ queryKey: pageKey(pageId) });
-        refresh();
-        onGone();
-      }}
+      onClose={onClose}
     />
   );
 }
 
 function Viewer({
   page,
+  userId,
   load,
   incoming,
-  canDelete,
-  kit,
   onShow,
   onDismiss,
   onScrolled,
-  onChanged,
-  onDeleted,
+  onClose,
 }: {
   page: WorkspacePage;
+  userId: string;
   load: Load;
   incoming?: WorkspaceVersion;
-  canDelete: boolean;
-  kit: Kit;
   onShow: (load: Load) => void;
   onDismiss: () => void;
   onScrolled: (y: number) => void;
-  onChanged: () => void;
-  onDeleted: () => void;
+  onClose?: () => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const src = viewURL(page.id, load.version, { highlight: load.highlight, scroll: load.scroll });
@@ -178,8 +176,6 @@ function Viewer({
   const [selected, setSelected] = useState<Selected>();
   const capture = useRef<{ id: number; selection: Selected }>(undefined);
   const captures = useRef(0);
-  const upload = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
 
   const post = useCallback((message: ToFrame) => {
     // The frame's origin is opaque: only "*" reaches it.
@@ -242,6 +238,7 @@ function Viewer({
         case "anas:picked": {
           // One element each time the member asks to pick.
           if (!armed.current) break;
+          localConsoleActive();
           pick(false);
           const { type: _, ...picked } = message;
           const selection: Selected = { picked, version: load.version, state: "saving" };
@@ -261,6 +258,8 @@ function Viewer({
           }
           break;
         case "anas:scrolled":
+          // Reading a page is input its tab's window never sees.
+          localConsoleActive();
           onScrolled(message.y);
           break;
       }
@@ -276,78 +275,15 @@ function Viewer({
     void clearSelection().catch(() => undefined);
   };
 
-  const uploadVersion = async (file: File, base: number) => {
-    setBusy(true);
-    try {
-      const saved = await saveVersion(page.id, base, file);
-      onChanged();
-      onShow({ version: saved.version });
-      kit.toast({ text: `已保存为 v${saved.version}` });
-    } catch (error) {
-      if (error instanceof APIError && error.code === "page_changed") {
-        const latest = await fetchLatest(page.id);
-        if (latest) {
-          setBusy(false);
-          const again = await kit.confirm({
-            title: "页面已有新版本",
-            message: `${latest.savedBy.name} 刚保存了 v${latest.version}。仍然上传，你的文件会成为 v${latest.version + 1}，v${latest.version} 的修改不在里面。`,
-            confirm: `上传为 v${latest.version + 1}`,
-          });
-          if (again) await uploadVersion(file, latest.version);
-          return;
-        }
-      }
-      kit.toast({ text: errorText(error, "workspace"), tone: "error" });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const rename = async () => {
-    const title = await kit.prompt({
-      title: "改名",
-      label: "标题",
-      value: page.title,
-      confirm: "保存",
-      maxLength: 200,
-    });
-    if (title === undefined || title.trim() === page.title) return;
-    try {
-      await renamePage(page.id, title.trim());
-      onChanged();
-    } catch (error) {
-      kit.toast({ text: errorText(error, "workspace"), tone: "error" });
-    }
-  };
-  const remove = async () => {
-    const ok = await kit.confirm({
-      title: `删除“${page.title}”？`,
-      message: `全部 ${page.versions.length} 个版本一起删除，所有人都看不到，不能恢复。`,
-      confirm: "删除",
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await deletePage(page.id);
-      kit.toast({ text: `已删除“${page.title}”` });
-      onDeleted();
-    } catch (error) {
-      kit.toast({ text: errorText(error, "workspace"), tone: "error" });
-    }
-  };
-  const more: RowMenuItem[] = [
-    { label: "上传新版本…", run: () => upload.current?.click() },
-    { label: "改名…", run: () => void rename() },
-    ...(canDelete ? [{ label: "删除…", run: () => void remove() }] : []),
-  ];
-
   const current = page.versions.find((item) => item.version === load.version);
   return (
     <section className={styles.wsViewer} aria-label={page.title}>
       <header className={styles.wsBar}>
-        <h2 className={styles.wsTitle} title={page.title}>
+        <h1 className={styles.wsTitle} title={page.title}>
           {page.title}
-        </h2>
+        </h1>
         <VersionMenu page={page} version={load.version} onPick={(version) => onShow({ version })} />
+        <Presence presence={page.presence} userId={userId} latest={page.latest.version} />
         <button
           type="button"
           className={`${styles.wsButton} ${picking ? styles.on : ""}`}
@@ -362,13 +298,12 @@ function Viewer({
           <Download size={15} aria-hidden="true" />
           导出
         </a>
-        <RowMenu label={`更多操作：${page.title}`} items={more} triggerClassName={styles.wsIconButton} />
-        <HTMLPicker
-          ref={upload}
-          disabled={busy}
-          toast={kit.toast}
-          onFile={(file) => void uploadVersion(file, load.version)}
-        />
+        {onClose && (
+          <button type="button" className={styles.wsButton} onClick={onClose}>
+            <X size={15} aria-hidden="true" />
+            关闭
+          </button>
+        )}
       </header>
       {incoming && (
         <div className={`${styles.wsNotice} ${styles.news}`} role="status">
@@ -496,12 +431,4 @@ function merge(current: Blocked[], more: Blocked[]): Blocked[] {
     if (!next.some((seen) => seen.uri === item.uri && seen.directive === item.directive)) next.push(item);
   }
   return next.slice(0, 50);
-}
-
-async function fetchLatest(pageId: string): Promise<WorkspaceVersion | undefined> {
-  try {
-    return (await getPage(pageId)).latest;
-  } catch {
-    return undefined;
-  }
 }
