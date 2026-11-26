@@ -489,7 +489,7 @@ func excerptSeconds(stored string) int {
 	if stored == "" || json.Unmarshal([]byte(stored), &excerpt) != nil || excerpt.Frames <= 0 {
 		return 0
 	}
-	return (excerpt.Frames + FilmRate/2) / FilmRate
+	return (excerpt.Frames + domain.FilmRate/2) / domain.FilmRate
 }
 
 func (s *Store) round(ctx context.Context, tx *db.Tx, owner, roundID string) (db.RoundRow, error) {

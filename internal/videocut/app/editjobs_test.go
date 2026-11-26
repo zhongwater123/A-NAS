@@ -77,8 +77,8 @@ func (e *editFrames) Assemble(_ context.Context, video, _ *os.File, _ ffmpegwork
 }
 
 func (e *editFrames) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
-	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Duration: float64(e.rendered) / FilmRate}, Streams: []ffmpegworker.ProbeStream{
-		{Type: "video", Width: FilmWidth, Height: FilmHeight, FrameRate: FilmRate}, {Type: "audio"},
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Duration: float64(e.rendered) / domain.FilmRate}, Streams: []ffmpegworker.ProbeStream{
+		{Type: "video", Width: domain.FilmWidth, Height: domain.FilmHeight, FrameRate: domain.FilmRate}, {Type: "audio"},
 	}}, nil
 }
 
@@ -376,29 +376,6 @@ func TestAnEditOfAMissingVideoNeedsTheMember(t *testing.T) {
 	}
 	if _, err := env.store.DropAssets(ctx, editOwner, job.ID, []string{videoB}); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("dropping an edit's video = %v", err)
-	}
-}
-
-// A timeline that does not show a beat where the draft has it is not the
-// draft's film: the member is told which shots to change (#609 review).
-func TestAnEditsTimelineIsCutWithTheDraftsBeats(t *testing.T) {
-	pins := []videocutcompute.FillPin{
-		{Part: 1, Picture: 1, Slot: [2]float64{0, 4}, Beat: "c1/1"},
-		{Part: 1, Picture: 1, Slot: [2]float64{4, 8}, Beat: "c1/2"},
-		{Part: 2, Picture: 1, Slot: [2]float64{8, 14}, Beat: "c2/2"},
-	}
-	slots := [][2]int{{0, 120}, {120, 240}, {240, 420}}
-	if err := checkPinnedSlots(pins, slots, [][]string{{"c1/1"}, {"c1/2", "c3/1"}, {"c3/2", "c2/2"}}); err != nil {
-		t.Fatalf("a timeline with every pin = %v", err)
-	}
-	err := checkPinnedSlots(pins, slots, [][]string{{"c1/1"}, {"c1/3"}, {"c3/2"}})
-	var stopped *domain.StepFailed
-	if !errors.As(err, &stopped) || !strings.Contains(err.Error(), "第 2、3 镜选的节拍放不进它的位置") {
-		t.Fatalf("a timeline without two pins = %v", err)
-	}
-	short := []json.RawMessage{json.RawMessage(`[1, 1, 4.0, 8.0, 10]`)}
-	if err := shortOfPins(pins, short); !errors.As(err, &stopped) || !strings.Contains(err.Error(), "第 2 镜选的节拍不够长") {
-		t.Fatalf("a slot left short = %v", err)
 	}
 }
 

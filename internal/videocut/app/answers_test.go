@@ -52,16 +52,3 @@ func TestAnOutlinesTextIsCountedInCharactersWithoutCardNames(t *testing.T) {
 		t.Fatalf("a field of %d characters = %v", maxAnswerRunes+1, reasons)
 	}
 }
-
-// An excerpt's frames are counted as the fill counts its slots' frames
-// (Python's round, half to even) and as validateTimeline checks them: one
-// count rounding a half frame up made 90.15 s 2705 frames against the
-// fill's 2704, and the job failed at its fill. About one excerpt length in
-// twenty has a half frame at 30 fps.
-func TestAnExcerptsFramesRoundAHalfFrameAsTheFillDoes(t *testing.T) {
-	for seconds, want := range map[float64]int{90.15: 2704, 90.05: 2702, 90.25: 2708, 90: 2700} {
-		if got := filmFrame(seconds); got != want {
-			t.Errorf("filmFrame(%v) = %d, want %d as Python's round(%v * 30)", seconds, got, want, seconds)
-		}
-	}
-}

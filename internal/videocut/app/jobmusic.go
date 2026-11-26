@@ -92,7 +92,7 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 // excerptVersion is how an excerpt is worked out from the song's analysis:
 // a new one makes the jobs' song steps, and what follows them, again.
 // frames-even: Excerpt.Frames rounds a half frame to even, as the fill
-// (ai/anas_videocut/algo/fill.py) and filmFrame do; it rounded away from
+// (ai/anas_videocut/algo/fill.py) and domain.FilmFrame do; it rounded away from
 // zero, and an excerpt of 90.15 s was 2705 frames against the fill's 2704,
 // which failed the job at its fill.
 const excerptVersion = "frames-even"
@@ -198,7 +198,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		return domain.Excerpt{}, err
 	}
 	return domain.Excerpt{Key: row.excerptKey(start), Music: music, Start: selection.Excerpt[0],
-		Frames: filmFrame(selection.Seconds)}, nil
+		Frames: domain.FilmFrame(selection.Seconds)}, nil
 }
 
 // Audio opens owner's song's copy, for the film's sound.

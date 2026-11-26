@@ -36,15 +36,7 @@ const (
 	// slowMost is how much the fill may slow a shot (fill.SLOW_MOST): a beat
 	// whose card fills a slot that much slowed may be chosen for it.
 	slowMost = 2.5
-	// narrowBy: a video narrower than 16:9 by more than this is shown on a
-	// blurred background (renderClip), and counts as 竖.
-	narrowBy = 0.01
 )
-
-// narrow reports whether a video is narrower than the film.
-func narrow(width, height int) bool {
-	return width > 0 && height > 0 && float64(width)/float64(height) < 16.0/9.0-narrowBy
-}
 
 // --- what a version was cut from ---
 
@@ -359,7 +351,7 @@ func (src *editSource) portrait(beat string) bool {
 		return false
 	}
 	video := src.videos[card.Video]
-	return narrow(video.Width, video.Height)
+	return domain.Narrow(video.Width, video.Height)
 }
 
 // span is the part of its card a beat covers: from its keyframe (the

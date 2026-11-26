@@ -11,8 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -67,7 +65,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	request := videocutcompute.FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]videocutcompute.CatalogCard{}, Catalog: run.catalog.Catalog,
+	request := videocutcompute.FillRequest{FPS: domain.FilmRate, Rows: rows, Cards: map[string]videocutcompute.CatalogCard{}, Catalog: run.catalog.Catalog,
 		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins()}
 	for _, id := range run.catalog.Catalog {
 		request.Cards[id] = run.catalog.Cards[id]
@@ -254,9 +252,6 @@ func (s *Store) openVideo(ctx context.Context, run *jobRun, assetID string) (*os
 	return file, nil
 }
 
-// clipFrames is how many frames of the film a shot takes.
-func clipFrames(clip domain.Clip) int { return int(math.Round(clip.Share * FilmRate)) }
-
 func finite(values ...float64) bool {
 	for _, v := range values {
 		if math.IsNaN(v) || math.IsInf(v, 0) {
@@ -272,7 +267,7 @@ func finite(values ...float64) bool {
 func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	if len(answer.Short) > 0 {
 		if pins := run.pins(); pins != nil {
-			return shortOfPins(pins, answer.Short)
+			return domain.ShortOfPins(pins, answer.Short)
 		}
 		return domain.Failed("%d slots were left empty", len(answer.Short))
 	}
@@ -306,7 +301,7 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 		if clip.Slow != 0 && (clip.Slow < 1 || clip.Slow > 2.5) {
 			return domain.Failed("shot %d is slowed %v times", i+1, clip.Slow)
 		}
-		frames := clipFrames(clip)
+		frames := domain.ClipFrames(clip)
 		if frames <= 0 || clip.Slot[0] >= clip.Slot[1] {
 			return domain.Failed("shot %d is empty", i+1)
 		}
@@ -314,10 +309,10 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 		// to three decimal places, so allow that rounding in the span.
 		slow := max(1, clip.Slow)
 		if clip.Start < card.Start-0.001 || clip.End > card.End+0.001 ||
-			float64(frames)/FilmRate > (clip.End-clip.Start)*(slow+0.0005)+0.000001 {
+			float64(frames)/domain.FilmRate > (clip.End-clip.Start)*(slow+0.0005)+0.000001 {
 			return domain.Failed("shot %d reads beyond its source span", i+1)
 		}
-		thisSlot := [2]int{filmFrame(clip.Slot[0]), filmFrame(clip.Slot[1])}
+		thisSlot := [2]int{domain.FilmFrame(clip.Slot[0]), domain.FilmFrame(clip.Slot[1])}
 		if thisSlot != slot || len(slots) == 0 {
 			if thisSlot[0] != total || thisSlot[0] != slot[1] || thisSlot[1] <= thisSlot[0] {
 				return domain.Failed("slot %v does not follow frame %d", clip.Slot, total)
@@ -337,98 +332,16 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	}
 	if pins := run.pins(); pins != nil {
 		// An edit keeps its draft's slots, in the draft's order.
-		if err := checkPinnedSlots(pins, slots, beats); err != nil {
+		if err := domain.CheckPinnedSlots(pins, slots, beats); err != nil {
 			return err
 		}
-	} else if err := checkPlannedSlots(run.planned, slots); err != nil {
+	} else if err := domain.CheckPlannedSlots(run.planned, slots); err != nil {
 		return err
 	}
 	if total != run.excerpt.Frames {
 		return domain.Failed("the shots take %d frames, the excerpt %d", total, run.excerpt.Frames)
 	}
 	return nil
-}
-
-// The Python fill rounds beat positions to the nearest even frame.
-func filmFrame(seconds float64) int { return int(math.RoundToEven(seconds * FilmRate)) }
-
-// Within a picture the Worker may reorder whole slots to follow shooting
-// order. Each picture must still use exactly its planned slot lengths.
-func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
-	var layout struct{ Slots [][][][2]float64 }
-	if err := json.Unmarshal(plan, &layout); err != nil {
-		return domain.Failed("invalid planned slots: %v", err)
-	}
-	at := 0
-	for _, part := range layout.Slots {
-		for _, picture := range part {
-			if len(picture) == 0 || len(picture) > len(filled)-at {
-				return domain.Failed("the picture has unfilled slots")
-			}
-			lengths := map[int]int{}
-			for _, slot := range picture {
-				lengths[filmFrame(slot[1])-filmFrame(slot[0])]++
-			}
-			for _, slot := range filled[at : at+len(picture)] {
-				length := slot[1] - slot[0]
-				if lengths[length] == 0 {
-					return domain.Failed("unexpected %d-frame slot in picture", length)
-				}
-				lengths[length]--
-			}
-			at += len(picture)
-		}
-	}
-	if at != len(filled) {
-		return domain.Failed("the timeline has %d unplanned slots", len(filled)-at)
-	}
-	return nil
-}
-
-// checkPinnedSlots checks an edit's timeline fills its pins' slots, each
-// in its place, and that each is cut with the beat the member chose for it:
-// beats are the beats of each slot's shots. The fill passes over a pin whose
-// card has no footage left around its keyframe, as when the shots beside it
-// took it; a film that silently shows another beat there is not the draft,
-// so the member is told which shots to change.
-func checkPinnedSlots(pins []videocutcompute.FillPin, filled [][2]int, beats [][]string) error {
-	if len(pins) != len(filled) {
-		return domain.Failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
-	}
-	var passed []string
-	for i, pin := range pins {
-		if want := [2]int{filmFrame(pin.Slot[0]), filmFrame(pin.Slot[1])}; filled[i] != want {
-			return domain.Failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
-		}
-		if !slices.Contains(beats[i], pin.Beat) {
-			passed = append(passed, strconv.Itoa(i+1))
-		}
-	}
-	if len(passed) > 0 {
-		return domain.Failed("第 %s 镜选的节拍放不进它的位置：同一段录像里相邻的镜头已经用到了那段画面。换一个节拍后再存", strings.Join(passed, "、"))
-	}
-	return nil
-}
-
-// shortOfPins says which of an edit's shots the fill could not fill: short
-// are the fill's unfilled slots, each [part, picture, start, end, frames].
-func shortOfPins(pins []videocutcompute.FillPin, short []json.RawMessage) error {
-	var shots []string
-	for _, raw := range short {
-		var slot []float64
-		if err := json.Unmarshal(raw, &slot); err != nil || len(slot) < 4 {
-			continue
-		}
-		for i, pin := range pins {
-			if filmFrame(pin.Slot[0]) == filmFrame(slot[2]) {
-				shots = append(shots, strconv.Itoa(i+1))
-			}
-		}
-	}
-	if len(shots) == 0 {
-		return domain.Failed("%d slots were left empty", len(short))
-	}
-	return domain.Failed("第 %s 镜选的节拍不够长，也没有别的画面能补上。换一个节拍后再存", strings.Join(shots, "、"))
 }
 
 // --- render ---
@@ -474,7 +387,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	}
 	total := 0
 	for _, clip := range clips {
-		total += clipFrames(clip)
+		total += domain.ClipFrames(clip)
 	}
 	if ok, err := s.admits(dir, int64(total)*filmBytesPerFrame); err != nil {
 		return nil, err
@@ -491,7 +404,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 		if err := s.renderClip(ctx, run, segments, clip, i == len(clips)-1, offset); err != nil {
 			return nil, storage(err)
 		}
-		offset += clipFrames(clip)
+		offset += domain.ClipFrames(clip)
 	}
 	if err := segments.Sync(); err != nil {
 		return nil, storage(err)
@@ -547,9 +460,9 @@ func (s *Store) renderClip(ctx context.Context, run *jobRun, segments *os.File, 
 		return err
 	}
 	defer func() { _ = file.Close() }()
-	frames := clipFrames(clip)
+	frames := domain.ClipFrames(clip)
 	request := ffmpegworker.SegmentRequest{Start: clip.Start, Frames: frames, Offset: offset,
-		Blurred: narrow(video.Width, video.Height)}
+		Blurred: domain.Narrow(video.Width, video.Height)}
 	if clip.Slow > 1 {
 		request.Slow = clip.Slow
 	}
@@ -600,7 +513,7 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 	if err != nil {
 		return err
 	}
-	want := float64(frames) / FilmRate
+	want := float64(frames) / domain.FilmRate
 	if !finite(probe.Format.Duration) || math.Abs(probe.Format.Duration-want) > durationTolerance {
 		return domain.Failed("the film lasts %.3f seconds, the timeline %.3f", probe.Format.Duration, want)
 	}
@@ -608,7 +521,7 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 	for _, stream := range probe.Streams {
 		switch stream.Type {
 		case "video":
-			if stream.Width != FilmWidth || stream.Height != FilmHeight || !finite(stream.FrameRate) || math.Abs(stream.FrameRate-FilmRate) > 0.01 {
+			if stream.Width != domain.FilmWidth || stream.Height != domain.FilmHeight || !finite(stream.FrameRate) || math.Abs(stream.FrameRate-domain.FilmRate) > 0.01 {
 				return domain.Failed("the film is %d×%d at %v frames a second", stream.Width, stream.Height, stream.FrameRate)
 			}
 			picture = true
