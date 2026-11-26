@@ -1,5 +1,6 @@
 import { call, client, rawBody } from "../api/client";
 import type { components } from "../api.generated";
+import { isLocalConsole } from "../lib/localConsole";
 
 export type WorkspacePage = components["schemas"]["WorkspacePage"];
 export type WorkspacePageSummary = components["schemas"]["WorkspacePageSummary"];
@@ -51,13 +52,24 @@ export function viewURL(pageId: string, version: number, options: { highlight?: 
   return `${versionPath(pageId, version)}/view${rest ? `?${rest}` : ""}`;
 }
 
+// tabURL is a page on its own in a browser tab (workspace.html, served at
+// /workspace/{pageId}); the device's own screen passes its flag on, so that
+// the tab offers a way back. tabName names that tab: opening the page again
+// returns to it.
+export function tabURL(pageId: string, localConsole = isLocalConsole()) {
+  return `/workspace/${encodeURIComponent(pageId)}${localConsole ? "?local-console=1" : ""}`;
+}
+export const tabName = (pageId: string) => `anas-workspace-${pageId}`;
+
 // fileURL downloads a version as the file it was saved as.
 export const fileURL = (pageId: string, version: number) => `${versionPath(pageId, version)}/file`;
 
 export const reportViewing = (pageId: string, version: number) =>
   call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version } }));
 
-export const stopViewing = (pageId: string) => call(client.DELETE("/api/v1/workspace/viewing/{pageId}", page(pageId)));
+// stopViewing takes it back; keepalive lets a closing tab send it.
+export const stopViewing = (pageId: string, keepalive = false) =>
+  call(client.DELETE("/api/v1/workspace/viewing/{pageId}", { ...page(pageId), keepalive }));
 
 export const setSelection = (selection: WorkspaceSelection) =>
   call(client.PUT("/api/v1/workspace/selection", { body: selection }));

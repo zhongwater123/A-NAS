@@ -38,9 +38,7 @@ export function onLocalConsoleDismissed(listener: () => void): () => void {
   };
 }
 
-export function isLocalConsole(search = window.location.search): boolean {
-  return new URLSearchParams(search).get("local-console") === "1";
-}
+export { isLocalConsole } from "../lib/localConsole";
 
 export async function loadScreenSaverVideos(): Promise<string[]> {
   const response = await fetch(localConsoleScreenSaverManifest, { cache: "no-store" });
