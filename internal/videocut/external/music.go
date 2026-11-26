@@ -40,7 +40,7 @@ type workerError struct {
 }
 
 // streamsComplete is the frame that tells a Worker the streams it read to
-// their end were written whole (anas_montage_music.worker, "confirm").
+// their end were written whole (anas_videocut_music.worker, "confirm").
 var streamsComplete = map[string]string{"streams": "complete"}
 
 // callWorker sends request with files to the Worker on socket and decodes

@@ -4,7 +4,7 @@ It runs allin1's harmonix-all on one song at a time and answers the song's
 tempo, beats, downbeats and labelled sections, as the eighth version's
 structure-<song>.json, with the song's loudness curve. allin1 needs PyTorch,
 Demucs, NATTEN and madmom, which the AI Worker's runtime does not have, so it
-runs from a runtime of its own (scripts/build-montage-music-runtime.sh). It has no
+runs from a runtime of its own (scripts/build-videocut-music-runtime.sh). It has no
 network and no data volume: the song arrives as two streams of samples, and
 the models from the content the device installed, checked against their
 manifests' digests.
@@ -55,7 +55,7 @@ import numpy as np
 
 from anas_ai import protocol
 
-log = logging.getLogger("anas_montage_music")
+log = logging.getLogger("anas_videocut_music")
 
 SYSTEMD_FIRST_FD = 3
 IDLE_SECONDS = 300

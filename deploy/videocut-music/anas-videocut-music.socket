@@ -6,7 +6,7 @@ Documentation=https://github.com/zhongwater123/A-NAS
 # The first connection starts anas-videocut-music.service, which analyses one
 # song at a time and exits when idle. Only the montage service reaches it
 # (docs/architecture/montage-music.md); the directory is root's.
-ListenStream=/run/a-nas-montage-music/music.sock
+ListenStream=/run/a-nas-videocut-music/music.sock
 SocketUser=a-nas-videocut
 SocketGroup=a-nas-videocut
 SocketMode=0600

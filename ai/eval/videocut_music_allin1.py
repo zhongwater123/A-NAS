@@ -15,7 +15,7 @@ structure file:
   sampled every 0.1 s, whose label is the same;
 - the tempo.
 
-Run it with the music runtime's Python (scripts/build-montage-music-runtime.sh), from ai/:
+Run it with the music runtime's Python (scripts/build-videocut-music-runtime.sh), from ai/:
 
     python -m eval.videocut_music_allin1 --songs ~/Music/QQ音乐 \\
       --structures "~/A-NAS-datasets/剪辑对比/规划与成片" \\
@@ -86,7 +86,7 @@ def analyse(args, song):
     mono = decode(args.ffmpeg, song, 1, 22050)
     folder = tempfile.mkdtemp()
     path = os.path.join(folder, "music.sock")
-    command = [args.python, "-m", "anas_montage_music.worker", "--socket", path, "--idle-seconds", "1",
+    command = [args.python, "-m", "anas_videocut_music.worker", "--socket", path, "--idle-seconds", "1",
                "--allin1", args.allin1, "--allin1-manifest", args.allin1_manifest,
                "--demucs", args.demucs, "--demucs-manifest", args.demucs_manifest]
     if args.threads:
@@ -137,7 +137,7 @@ def analyse(args, song):
 
 def check_separation(args, song):
     """separate against demucs' own path (worker.separation_matches_demucs), in this process."""
-    from anas_montage_music import worker
+    from anas_videocut_music import worker
 
     models = worker.Models(args.allin1_manifest, args.allin1, args.demucs_manifest, args.demucs, args.threads)
     _, separator = models.load()

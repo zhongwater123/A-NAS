@@ -2,11 +2,11 @@
 # Builds the runtime of the montage center's music analysis Worker on a
 # development machine (docs/architecture/montage-music.md), as
 # scripts/build-ai-runtime.sh builds the AI Worker's: a virtual environment
-# for Debian 13's Python 3 with the wheels deploy/montage-music/requirements.txt
+# for Debian 13's Python 3 with the wheels deploy/videocut-music/requirements.txt
 # pins by hash, packed as a tarball that a content package unpacks into
-# /opt/a-nas/montage-music-runtimes/<id> (scripts/build-content-packages.sh
-# --montage-music). NATTEN and madmom publish no wheels for that Python:
-# deploy/montage-music/sources.json pins their sources, which this script
+# /opt/a-nas/videocut-music-runtimes/<id> (scripts/build-content-packages.sh
+# --videocut-music). NATTEN and madmom publish no wheels for that Python:
+# deploy/videocut-music/sources.json pins their sources, which this script
 # downloads, checks and compiles in the builder image. madmom's source is
 # GitHub's archive of a commit, without the git submodule of model files
 # (CC BY-NC-SA 4.0); an empty madmom/models/__init__.py takes its place, and
@@ -14,17 +14,17 @@
 # lock, the sources and the Python version (scripts/lib/content.sh); an
 # existing tarball for that ID is reused.
 #
-# Usage: scripts/build-montage-music-runtime.sh [IMAGE]
-#        scripts/build-montage-music-runtime.sh --lock [UV-OPTION...]
+# Usage: scripts/build-videocut-music-runtime.sh [IMAGE]
+#        scripts/build-videocut-music-runtime.sh --lock [UV-OPTION...]
 # IMAGE is a Debian 13 image with python3-venv, by default anas-ai-dev:trixie
 # (ai/dev.Dockerfile); the build installs the compilers into its container
 # from Debian. The NAS is x86_64, so build where Docker runs x86_64: NATTEN is
 # compiled for the builder's processor. ANAS_NATTEN_JOBS (2) is how many
 # files compile at once; each takes some 2 GiB. The first form writes
-# build/montage-music-runtime/<id>.tar.gz and build/montage-music-runtime.json,
+# build/videocut-music-runtime/<id>.tar.gz and build/videocut-music-runtime.json,
 # whose manifest also lists the SHA-256 of the NATTEN and madmom wheels the
-# build compiled, kept beside the tarball in build/montage-music-runtime/<id>.wheels/;
-# --lock resolves deploy/montage-music/requirements.txt. Both need uv, the
+# build compiled, kept beside the tarball in build/videocut-music-runtime/<id>.wheels/;
+# --lock resolves deploy/videocut-music/requirements.txt. Both need uv, the
 # version ai/requirements-dev.txt pins; the first also Docker, curl and jq.
 set -euo pipefail
 
@@ -32,7 +32,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source=lib/python-runtime.sh
 . "$repo/scripts/lib/python-runtime.sh"
 require_uv "$repo"
-music=$repo/deploy/montage-music
+music=$repo/deploy/videocut-music
 # The lock's resolution, which its header repeats: PyTorch for the processor
 # from PyTorch's index, and antlr4's runtime, pure Python, from its source.
 lock_options=(--no-binary antlr4-python3-runtime --extra-index-url https://download.pytorch.org/whl/cpu
@@ -42,7 +42,7 @@ if [[ "${1:-}" == --lock ]]; then
   shift
   cd "$music"
   lock_runtime requirements.in requirements.txt "${lock_options[@]}" "$@"
-  echo "updated deploy/montage-music/requirements.txt"
+  echo "updated deploy/videocut-music/requirements.txt"
   exit
 fi
 
@@ -56,7 +56,7 @@ if [[ "$python" != "$TARGET_PYTHON" ]]; then
 fi
 
 # The sources, each checked against sources.json.
-sources=$repo/build/montage-music-sources
+sources=$repo/build/videocut-music-sources
 mkdir -p "$sources"
 while IFS=$'\t' read -r -u 3 url file size sha; do
   target=$sources/$file
@@ -65,7 +65,7 @@ while IFS=$'\t' read -r -u 3 url file size sha; do
     curl --fail --location --silent --show-error --proto '=https' --retry 3 --output "$target.partial" "$url"
     if [[ "$(stat -c %s "$target.partial")" != "$size" ]] ||
       ! printf '%s  %s\n' "$sha" "$target.partial" | sha256sum --check --quiet - >/dev/null 2>&1; then
-      echo "the download does not match deploy/montage-music/sources.json: $url" >&2
+      echo "the download does not match deploy/videocut-music/sources.json: $url" >&2
       exit 4
     fi
     mv -f -- "$target.partial" "$target"
@@ -74,8 +74,8 @@ done 3< <(jq -r '.packages[] | [.source, .file, .sizeBytes, .sha256] | @tsv' "$m
 natten=$(jq -er '.packages[] | select(.name == "natten") | .file' "$music/sources.json")
 madmom=$(jq -er '.packages[] | select(.name == "madmom") | .file' "$music/sources.json")
 
-id=$(montage_music_runtime_id "$repo")
-out=$repo/build/montage-music-runtime
+id=$(videocut_music_runtime_id "$repo")
+out=$repo/build/videocut-music-runtime
 tarball=$out/$id.tar.gz
 mkdir -p "$out"
 if [[ ! -f "$tarball" ]]; then
@@ -88,7 +88,7 @@ if [[ ! -f "$tarball" ]]; then
     set -euo pipefail
     apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends build-essential cmake python3-dev >/dev/null
-    runtime=/opt/a-nas/montage-music-runtimes/$id
+    runtime=/opt/a-nas/videocut-music-runtimes/$id
     python3 -m venv \"\$runtime\"
     uv pip install --quiet --python \"\$runtime/bin/python\" --require-hashes --only-binary :all: \
       ${lock_options[*]} --compile-bytecode -r /music/requirements.txt
@@ -98,7 +98,7 @@ if [[ ! -f "$tarball" ]]; then
       echo 'madmom/models is not empty in the archive' >&2
       exit 1
     fi
-    printf '%s\n' '# Left empty by scripts/build-montage-music-runtime.sh: madmom'\"'\"'s model files' \
+    printf '%s\n' '# Left empty by scripts/build-videocut-music-runtime.sh: madmom'\"'\"'s model files' \
       '# (CC BY-NC-SA 4.0) are not part of the A-NAS runtime.' > /tmp/madmom/madmom/models/__init__.py
     rm -rf /out/wheels.partial && mkdir /out/wheels.partial
     \"\$runtime/bin/python\" -m pip wheel --quiet --no-deps --no-build-isolation --wheel-dir /out/wheels.partial \
@@ -122,10 +122,10 @@ if [[ ! -f "$tarball" ]]; then
   mv "$out/wheels.partial" "$out/$id.wheels"
   mv "$tarball.partial" "$tarball"
 fi
-write_runtime_manifest "$tarball" "$id" "$python" "$repo/build/montage-music-runtime.json" >/dev/null
+write_runtime_manifest "$tarball" "$id" "$python" "$repo/build/videocut-music-runtime.json" >/dev/null
 # The wheels this build compiled, by SHA-256: compiling again need not give
 # the same bytes, so the runtime's manifest records the ones it holds.
 wheels=$(cd "$out/$id.wheels" && sha256sum -- *.whl | jq -Rn '[inputs | split("  ") | {file: .[1], sha256: .[0]}]')
-jq --argjson wheels "$wheels" '. + {builtWheels: $wheels}' "$repo/build/montage-music-runtime.json" >"$repo/build/montage-music-runtime.json.partial"
-mv -f -- "$repo/build/montage-music-runtime.json.partial" "$repo/build/montage-music-runtime.json"
-cat "$repo/build/montage-music-runtime.json"
+jq --argjson wheels "$wheels" '. + {builtWheels: $wheels}' "$repo/build/videocut-music-runtime.json" >"$repo/build/videocut-music-runtime.json.partial"
+mv -f -- "$repo/build/videocut-music-runtime.json.partial" "$repo/build/videocut-music-runtime.json"
+cat "$repo/build/videocut-music-runtime.json"

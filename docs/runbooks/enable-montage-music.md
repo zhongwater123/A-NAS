@@ -23,7 +23,7 @@
 - **资源**：运行环境压缩包约 300 MB，解开约 860 MB；权重约 95 MB。Worker 只在分析时运行，峰值内存见[用时与内存](../architecture/montage-music.md#用时与内存)，单元上限 `MemoryMax`。
 - **风险**：分析期间 Worker 占满它能用的核，放在 `anas.slice` 下，前台操作优先；内存超过上限时只结束 Worker，这首歌 5 分钟后再试，连续失败 3 次后记为不可用（`analysis_failed`）。
 - **停止条件**（出现任一项立即停止）：
-  - 构建报告下载与 `deploy/montage-music/sources.json` 或锁文件的哈希不符、`pip check` 不通过，或 `madmom's model files are in the runtime`；
+  - 构建报告下载与 `deploy/videocut-music/sources.json` 或锁文件的哈希不符、`pip check` 不通过，或 `madmom's model files are in the runtime`；
   - apt 报告依赖无法满足或版本不是 `a-nas` 的同一版本；
   - `journalctl -u anas-videocut-music` 出现 `does not match` 的权重核对失败或 `oom-kill`。
 
@@ -40,32 +40,32 @@
 1. **在构建机上构建运行环境**。在检出根目录：
 
    ```bash
-   scripts/build-montage-music-runtime.sh
+   scripts/build-videocut-music-runtime.sh
    ```
 
-   - 预期：输出 `build/montage-music-runtime.json`，`id` 与 `scripts/lib/content.sh` 的 `montage_music_runtime_id` 相同。NATTEN 单文件编译时约占 2 GiB，`ANAS_NATTEN_JOBS` 默认 2。
-   - 完成标准：`build/montage-music-runtime/<id>.tar.gz` 存在。
+   - 预期：输出 `build/videocut-music-runtime.json`，`id` 与 `scripts/lib/content.sh` 的 `videocut_music_runtime_id` 相同。NATTEN 单文件编译时约占 2 GiB，`ANAS_NATTEN_JOBS` 默认 2。
+   - 完成标准：`build/videocut-music-runtime/<id>.tar.gz` 存在。
 
-2. **备好权重**。从 Hugging Face 的固定版本下载两份权重（地址与版本见 [`allin1-harmonix-all.json`](../../deploy/models/allin1-harmonix-all.json)、[`htdemucs.json`](../../deploy/models/htdemucs.json)），按内容库的布局放好：`CONTENT/models/<清单的 sha256>/<文件>`，`CONTENT/montage-music-runtimes/<id>.tar.gz`。
+2. **备好权重**。从 Hugging Face 的固定版本下载两份权重（地址与版本见 [`allin1-harmonix-all.json`](../../deploy/models/allin1-harmonix-all.json)、[`htdemucs.json`](../../deploy/models/htdemucs.json)），按内容库的布局放好：`CONTENT/models/<清单的 sha256>/<文件>`，`CONTENT/videocut-music-runtimes/<id>.tar.gz`。
    - 完成标准：下一步的构建不报 `missing or not as pinned`（它按清单逐个核对大小与 SHA-256）。
 
 3. **打包**：
 
    ```bash
-   scripts/build-content-packages.sh --montage-music build/content CONTENT
+   scripts/build-content-packages.sh --videocut-music build/content CONTENT
    ```
 
    ```bash
-   scripts/build-packages.sh --montage-music build/packages <a-nas 的版本> build
+   scripts/build-packages.sh --videocut-music build/packages <a-nas 的版本> build
    ```
 
-   - 预期：`a-nas-montage-music-runtime-<id>`、9 个模型包（allin1 的 8 折各一个，htdemucs 一个）与 `a-nas-montage-music_<版本>_all.deb`。
-   - 完成标准：`dpkg-deb -I` 显示 `a-nas-montage-music` 依赖 `a-nas (= <版本>)` 与上面 10 个包。
+   - 预期：`a-nas-videocut-music-runtime-<id>`、9 个模型包（allin1 的 8 折各一个，htdemucs 一个）与 `a-nas-videocut-music_<版本>_all.deb`。
+   - 完成标准：`dpkg-deb -I` 显示 `a-nas-videocut-music` 依赖 `a-nas (= <版本>)` 与上面 10 个包。
 
-4. **暂存并安装**。把上一步的 11 个 `.deb` 用 `anas-dev` 复制到 NAS 的 `/var/tmp/montage-music/`，再以 root：
+4. **暂存并安装**。把上一步的 11 个 `.deb` 用 `anas-dev` 复制到 NAS 的 `/var/tmp/videocut-music/`，再以 root：
 
    ```bash
-   apt install /var/tmp/montage-music/*.deb
+   apt install /var/tmp/videocut-music/*.deb
    ```
 
    - 完成标准：`systemctl is-active anas-videocut-music.socket` 是 `active`，`a-nas-check` 没有 `FAIL`。
@@ -95,14 +95,14 @@
 - 运行环境里没有 madmom 的模型文件：
 
   ```bash
-  find /opt/a-nas/montage-music-runtimes -path '*/madmom/models/*' -type f ! -name '__init__.py*' ! -path '*/__pycache__/*'
+  find /opt/a-nas/videocut-music-runtimes -path '*/madmom/models/*' -type f ! -name '__init__.py*' ! -path '*/__pycache__/*'
   ```
 
   没有输出。
 
 ## 回滚或恢复
 
-- `apt remove a-nas-montage-music`：停掉 Worker 与套接字。剪辑服务里已分析好的歌照常可用，新选的歌停在 `analyzing`（等待 `analyzer_unavailable`）。
+- `apt remove a-nas-videocut-music`：停掉 Worker 与套接字。剪辑服务里已分析好的歌照常可用，新选的歌停在 `analyzing`（等待 `analyzer_unavailable`）。
 - 内容包随后由 `apt autoremove` 删除。
 
 ## 关联

@@ -46,16 +46,16 @@
 
 ## 配乐分析 Worker
 
-[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py) 把 `allin1.analyze` 的步骤留在内存里做，不写文件：
+[`ai/anas_videocut_music/worker.py`](../../ai/anas_videocut_music/worker.py) 把 `allin1.analyze` 的步骤留在内存里做，不写文件：
 
 1. Demucs `htdemucs` 分离四个音轨，参数与 `demucs.separate` 的默认相同（shifts 1、overlap 0.25、分块、溢出时按比例缩小、写成 16 位）。Demucs 的随机平移固定种子，同一首歌每次结果相同；开发机上的结构文件当年没有固定种子，所以对照时允许误差。
 2. 每个音轨按 madmom 读 16 位 WAV 的方式混成单声道，算 allin1 的对数滤波谱。
 3. 8 个分折模型的集成推理，madmom 的 DBN 找重拍。
 4. 响度是第八版的 RMS 曲线（2048 点一帧、每 512 点，22050 Hz），用运行环境里的 `librosa.feature.rms` 算，居中与补零写明在参数里；与第八版手写的算式逐位相同。
 
-单元 [`anas-videocut-music.socket`](../../deploy/montage-music/anas-videocut-music.socket) 与 [`.service`](../../deploy/montage-music/anas-videocut-music.service)：
+单元 [`anas-videocut-music.socket`](../../deploy/videocut-music/anas-videocut-music.socket) 与 [`.service`](../../deploy/videocut-music/anas-videocut-music.service)：
 
-- 套接字 `/run/a-nas-montage-music/music.sock`，`SocketUser=a-nas-videocut`、0600，只有剪辑服务能连；
+- 套接字 `/run/a-nas-videocut-music/music.sock`，`SocketUser=a-nas-videocut`、0600，只有剪辑服务能连；
 - DynamicUser，`PrivateNetwork`，`InaccessiblePaths=-/srv/a-nas`，`HF_HUB_OFFLINE=1`；歌曲只经两条管道进来；
 - 放在 `anas.slice` 之下；空闲 5 分钟退出，下一首再由套接字启动；
 - 权重按清单的 SHA-256 逐个核对后才加载（`checked_files`）。
@@ -65,13 +65,13 @@
 
 2026-11-18 用户选定：照 AI 运行环境与模型的做法（[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)）做成内容包，NAS 上不跑 pip、不联网。考虑过的另两种：运行环境自带一份 Python 3.12 以直接用 NATTEN 的预编译轮子（多一份解释器要单独跟安全更新）；待议期间只写实验 NAS 的联网安装脚本（偏离“NAS 不跑 pip”，交付要做两次）。
 
-- **锁文件**：[`deploy/montage-music/requirements.in`](../../deploy/montage-music/requirements.in) 由 `scripts/build-montage-music-runtime.sh --lock` 解析成按哈希锁定的 `requirements.txt`，目标同 AI 运行环境：Debian 13 的 Python 3.13、x86_64。PyTorch 取 PyTorch 自己的 CPU 版索引（`torch==2.6.0+cpu`）。Hydra 与 OmegaConf 限定新版本，否则解析器会退到 Hydra 0.11；它们依赖的 antlr4 运行时只有源码包，是纯 Python，锁文件按源码包的哈希装。
-- **没有轮子的两个包**：NATTEN 与 madmom 没有 Python 3.13 的轮子，[`deploy/montage-music/sources.json`](../../deploy/montage-music/sources.json) 固定它们的源码与 SHA-256，构建时下载、核对、编译：
+- **锁文件**：[`deploy/videocut-music/requirements.in`](../../deploy/videocut-music/requirements.in) 由 `scripts/build-videocut-music-runtime.sh --lock` 解析成按哈希锁定的 `requirements.txt`，目标同 AI 运行环境：Debian 13 的 Python 3.13、x86_64。PyTorch 取 PyTorch 自己的 CPU 版索引（`torch==2.6.0+cpu`）。Hydra 与 OmegaConf 限定新版本，否则解析器会退到 Hydra 0.11；它们依赖的 antlr4 运行时只有源码包，是纯 Python，锁文件按源码包的哈希装。
+- **没有轮子的两个包**：NATTEN 与 madmom 没有 Python 3.13 的轮子，[`deploy/videocut-music/sources.json`](../../deploy/videocut-music/sources.json) 固定它们的源码与 SHA-256，构建时下载、核对、编译：
   - NATTEN 用 0.17.1（开发机的 allin1 环境就是这一版）。0.17.5 在导入时就向 CUDA 查询设备，只有 CPU 的 PyTorch 上直接失败。NATTEN 的 CPU 算子按构建机的处理器编译，所以 NAS 用的运行环境要在 x86_64 的机器上构建；单个源文件编译时约占 2 GiB，8 GB 的机器上开 4 个并行会被内存不足杀掉，默认 2 个。
   - madmom 用 GitHub 上一个提交的压缩包。它的模型与数据文件（CC BY-NC-SA 4.0）是 git 子模块，压缩包里没有；构建写一个空的 `madmom/models/__init__.py` 占位，最后检查运行环境里没有任何这类文件。allin1 只用 madmom 的谱处理与 DBN，不加载这些文件。
-- **运行环境**：`scripts/build-montage-music-runtime.sh` 在 Debian 13 的构建镜像里建虚拟环境、按锁文件装、编出两个包，压成 `build/montage-music-runtime/<id>.tar.gz`。ID 由锁文件、`sources.json` 与 Python 版本算出（`scripts/lib/content.sh` 的 `montage_music_runtime_id`）。`scripts/build-content-packages.sh --montage-music` 把它打成内容包 `a-nas-montage-music-runtime-<id>`，装到 `/opt/a-nas/montage-music-runtimes/<id>`。
+- **运行环境**：`scripts/build-videocut-music-runtime.sh` 在 Debian 13 的构建镜像里建虚拟环境、按锁文件装、编出两个包，压成 `build/videocut-music-runtime/<id>.tar.gz`。ID 由锁文件、`sources.json` 与 Python 版本算出（`scripts/lib/content.sh` 的 `videocut_music_runtime_id`）。`scripts/build-content-packages.sh --videocut-music` 把它打成内容包 `a-nas-videocut-music-runtime-<id>`，装到 `/opt/a-nas/videocut-music-runtimes/<id>`。
 - **权重**：清单 [`allin1-harmonix-all.json`](../../deploy/models/allin1-harmonix-all.json)（8 个分折模型，每个按 `parts` 记大小与 SHA-256，整体的 SHA-256 是这 8 行摘要清单的摘要）与 [`htdemucs.json`](../../deploy/models/htdemucs.json)，各自固定 Hugging Face 的提交。同一脚本把它们打成模型内容包，装到 `/opt/a-nas/models/<sha256>/`。Worker 启动时逐个核对。
-- **可选软件包**：`scripts/build-packages.sh --montage-music` 另打 `a-nas-montage-music`：Worker 的代码、两个单元、清单，以及指向运行环境与权重的链接。它依赖同版本的 `a-nas` 与上面的内容包。`a-nas` 不依赖它，`make packages` 与 release 都不打它。
+- **可选软件包**：`scripts/build-packages.sh --videocut-music` 另打 `a-nas-videocut-music`：Worker 的代码、两个单元、清单，以及指向运行环境与权重的链接。它依赖同版本的 `a-nas` 与上面的内容包。`a-nas` 不依赖它，`make packages` 与 release 都不打它。
 
 ### 版权待议期间
 
@@ -159,8 +159,8 @@
   - 分析、等待与失败：[`internal/videocut/app/analysis.go`](../../internal/videocut/app/analysis.go)、[`internal/videocut/external/music.go`](../../internal/videocut/external/music.go)
   - 任务取选段：[`internal/videocut/app/jobmusic.go`](../../internal/videocut/app/jobmusic.go)
   - 选段：[`ai/anas_videocut/ops/music.py`](../../ai/anas_videocut/ops/music.py)、[`ai/anas_videocut/algo/music.py`](../../ai/anas_videocut/algo/music.py)、[`internal/videocutcompute/music.go`](../../internal/videocutcompute/music.go)
-  - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-videocut-music.service)
-  - 运行环境与打包：[`scripts/build-montage-music-runtime.sh`](../../scripts/build-montage-music-runtime.sh)、[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)、[`scripts/build-packages.sh`](../../scripts/build-packages.sh)
+  - 配乐分析 Worker 与单元：[`ai/anas_videocut_music/worker.py`](../../ai/anas_videocut_music/worker.py)、[`deploy/videocut-music/`](../../deploy/videocut-music/anas-videocut-music.service)
+  - 运行环境与打包：[`scripts/build-videocut-music-runtime.sh`](../../scripts/build-videocut-music-runtime.sh)、[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)、[`scripts/build-packages.sh`](../../scripts/build-packages.sh)
   - 仓库与软件包不含歌曲的检查：[`scripts/check-no-songs.sh`](../../scripts/check-no-songs.sh)
 - 测试：
   - Go：[`internal/videocut/app/songs_test.go`](../../internal/videocut/app/songs_test.go)、[`internal/videocut/app/jobmusic_test.go`](../../internal/videocut/app/jobmusic_test.go)、[`internal/videocut/external/music_test.go`](../../internal/videocut/external/music_test.go)、[`internal/videocut/protocol/song_test.go`](../../internal/videocut/protocol/song_test.go)、[`internal/httpapi/videocut_song_test.go`](../../internal/httpapi/videocut_song_test.go)、[`internal/videocutcompute/music_test.go`](../../internal/videocutcompute/music_test.go)

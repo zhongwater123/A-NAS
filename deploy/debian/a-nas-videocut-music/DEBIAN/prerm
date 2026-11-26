@@ -1,5 +1,5 @@
 #!/bin/bash
-# prerm of a-nas-montage-music: the Worker and its socket stop before their
+# prerm of a-nas-videocut-music: the Worker and its socket stop before their
 # files go. The montage service keeps its songs waiting for the analysis.
 set -euo pipefail
 

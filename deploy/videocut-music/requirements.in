@@ -1,7 +1,7 @@
 # The music analysis Worker's runtime on Debian 13 (CPython 3.13, x86_64):
 # allin1 with harmonix-all (docs/architecture/montage-music.md). The runtime's
 # packages and hashes are in requirements.txt, which
-#   scripts/build-montage-music-runtime.sh --lock
+#   scripts/build-videocut-music-runtime.sh --lock
 # resolves from this file with uv. NATTEN and madmom have no wheels for this
 # Python: sources.json pins their sources, which the build turns into wheels.
 #

@@ -1,10 +1,12 @@
-Package: a-nas-montage-music
+Package: a-nas-videocut-music
 Version: @VERSION@
 Architecture: all
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: misc
 Priority: optional
 Depends: a-nas (= @VERSION@), @CONTENT@
+Replaces: a-nas-montage-music
+Conflicts: a-nas-montage-music
 Description: the montage center's music analysis for A-NAS
  allin1 finds a song's beats, downbeats and sections for the montage center
  (docs/architecture/montage-music.md): its Worker, units and the links to

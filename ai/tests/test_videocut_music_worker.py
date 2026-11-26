@@ -1,7 +1,7 @@
-"""The music analysis Worker (ai/anas_montage_music): it reads the two streams
+"""The music analysis Worker (ai/anas_videocut_music): it reads the two streams
 the montage center decodes, answers the eighth version's loudness, and
 refuses what is not a song. allin1 itself runs only in the music runtime
-(scripts/build-montage-music-runtime.sh); here a stand-in answers for it, and
+(scripts/build-videocut-music-runtime.sh); here a stand-in answers for it, and
 ai/eval/videocut_music_allin1.py compares the real one with the development
 machine's structure files.
 
@@ -25,7 +25,7 @@ LIBROSA = RUNTIME and bool(importlib.util.find_spec("librosa"))
 if RUNTIME:
     import numpy as np
 
-    from anas_montage_music import worker
+    from anas_videocut_music import worker
 
 
 class StandIn:

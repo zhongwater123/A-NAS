@@ -494,7 +494,7 @@ type videoCutServiceConfig struct {
 	// its own (anas-videocut-music.socket); ComputeSocket the compute
 	// Worker (anas-videocut-compute.socket). While either is missing, songs
 	// wait.
-	MusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET" envDefault:"/run/a-nas-montage-music/music.sock"`
+	MusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET" envDefault:"/run/a-nas-videocut-music/music.sock"`
 	ComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET" envDefault:"/run/a-nas-videocut-compute/compute.sock"`
 	// PlanAnswers names a directory of fixed plans (pick.json, shots.json)
 	// that stand in for the AI assistant's planning, which is not shipped
