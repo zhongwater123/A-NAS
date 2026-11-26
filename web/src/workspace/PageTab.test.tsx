@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { localConsoleScreenSaverIdleMs, onLocalConsoleActive } from "../lib/localConsole";
+import { localConsoleScreenSaverIdleMs } from "../lib/localConsole";
 import { session } from "../test/fixtures";
 import {
   addVersion,
@@ -85,7 +85,12 @@ describe("共享页面的标签页", () => {
     };
     try {
       render(<PageTab pageId="page_prd" />);
-      const open = { pageId: "page_prd", version: 2, tab: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/) };
+      const open = {
+        pageId: "page_prd",
+        version: 2,
+        tab: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/),
+        seq: expect.any(Number),
+      };
       await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: false }));
       // Getting the focus makes it the tab the member uses.
       focused = true;
@@ -109,6 +114,10 @@ describe("共享页面的标签页", () => {
         window.dispatchEvent(new Event("pagehide"));
       });
       await waitFor(() => expect(store.viewing).toBeUndefined());
+      // Each report and take-back counts up, so the service can drop one
+      // that arrives after a newer one.
+      expect(store.seqs.length).toBeGreaterThan(4);
+      expect(store.seqs.every((seq, i) => i === 0 || seq > store.seqs[i - 1])).toBe(true);
     } finally {
       delete (document as { hidden?: boolean }).hidden;
     }
@@ -276,21 +285,18 @@ describe("共享页面的标签页", () => {
     expect(close).toHaveBeenCalled();
   });
 
-  it("keeps the device screen's screen saver, which reading the page puts off", async () => {
+  it("keeps the device screen's screen saver, which the page's own messages do not put off", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     deviceScreen();
-    const used = vi.fn();
-    const stop = onLocalConsoleActive(used);
-    try {
-      render(<PageTab pageId="page_prd" />);
-      await frame();
-      // Scrolling inside the frame is input the tab's window never sees.
-      await fromFrame({ type: "anas:scrolled", y: 120 });
-      expect(used).toHaveBeenCalledTimes(1);
-      await act(() => vi.advanceTimersByTimeAsync(localConsoleScreenSaverIdleMs + 10 * 60_000));
-      expect(await screen.findByRole("dialog", { name: "息屏" })).toBeTruthy();
-    } finally {
-      stop();
+    render(<PageTab pageId="page_prd" />);
+    await frame();
+    // The page's scripts can say it scrolled as often as they like: the
+    // screen saver, then the black screen set at ten minutes, still come.
+    const minutes = Math.ceil(localConsoleScreenSaverIdleMs / 60_000) + 10;
+    for (let minute = 0; minute < minutes; minute++) {
+      await fromFrame({ type: "anas:scrolled", y: minute * 10 });
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
     }
+    expect(await screen.findByRole("dialog", { name: "息屏" })).toBeTruthy();
   });
 });

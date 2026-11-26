@@ -12,7 +12,6 @@ export const localConsoleScreenSaverIdleMs = 180_000;
 
 let covered = false;
 const dismissedListeners = new Set<() => void>();
-const activeListeners = new Set<() => void>();
 
 // localConsoleCovered tells whether either cover, the screen saver or 息屏,
 // is up over the page: nobody sees what the companion would do then, so VNAS
@@ -41,19 +40,4 @@ export function onLocalConsoleDismissed(listener: () => void): () => void {
 // localConsoleDismissed is how the screen saver tells those listeners.
 export function localConsoleDismissed() {
   for (const listener of dismissedListeners) listener();
-}
-
-// localConsoleActive tells the device screen's screen saver that the member
-// is using the page where its window cannot see: input inside a frame never
-// reaches the page around it (workspace/PageView.tsx).
-export function localConsoleActive() {
-  for (const listener of activeListeners) listener();
-}
-
-// onLocalConsoleActive calls listener with each such report.
-export function onLocalConsoleActive(listener: () => void): () => void {
-  activeListeners.add(listener);
-  return () => {
-    activeListeners.delete(listener);
-  };
 }
