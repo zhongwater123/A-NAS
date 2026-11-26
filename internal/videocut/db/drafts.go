@@ -15,7 +15,7 @@ import (
 // there is none.
 func (d *DB) DraftID(ctx context.Context, owner, versionID string) (string, error) {
 	var id string
-	err := d.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
+	err := d.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
 	return id, err
 }
 
@@ -24,7 +24,7 @@ func (d *DB) DraftID(ctx context.Context, owner, versionID string) (string, erro
 // draft already (another request made it first).
 func (tx *Tx) CreateDraft(ctx context.Context, id, owner, projectID, versionID, shots string, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
-	result, err := tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
+	result, err := tx.tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
 				VALUES(?, ?, ?, ?, 0, ?, ?) ON CONFLICT (base_version_id) DO NOTHING`, id, owner, projectID, versionID, shots, now)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func (tx *Tx) CreateDraft(ctx context.Context, id, owner, projectID, versionID, 
 	if n, err := result.RowsAffected(); err != nil || n == 0 {
 		return err // another request made it first
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, shots_json, created_at) VALUES(?, 0, 'create', ?, ?)`,
+	_, err = tx.tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, shots_json, created_at) VALUES(?, 0, 'create', ?, ?)`,
 		id, shots, now)
 	return err
 }
@@ -49,7 +49,7 @@ type DraftRow struct {
 // Draft reads owner's draft; sql.ErrNoRows when owner has none by that id.
 func (d *DB) Draft(ctx context.Context, owner, draftID string) (DraftRow, error) {
 	var row DraftRow
-	err := d.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
+	err := d.db.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
 		draftID, owner).Scan(&row.VersionID, &row.Revision, &row.Shots, &row.Updated)
 	return row, err
 }
@@ -57,7 +57,7 @@ func (d *DB) Draft(ctx context.Context, owner, draftID string) (DraftRow, error)
 // DraftRevision is the revision draftID stands at.
 func (tx *Tx) DraftRevision(ctx context.Context, draftID string) (int, error) {
 	var revision int
-	err := tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision)
+	err := tx.tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision)
 	return revision, err
 }
 
@@ -65,7 +65,7 @@ func (tx *Tx) DraftRevision(ctx context.Context, draftID string) (int, error) {
 // sql.ErrNoRows when owner has no such draft.
 func (d *DB) DraftJob(ctx context.Context, owner, draftID string) (string, error) {
 	var jobID string
-	err := d.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
+	err := d.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
 		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
 	return jobID, err
 }
@@ -73,7 +73,7 @@ func (d *DB) DraftJob(ctx context.Context, owner, draftID string) (string, error
 // AdvanceDraft takes owner's draft from revision base to base+1 holding
 // shots; false when the draft is not at base any more.
 func (tx *Tx) AdvanceDraft(ctx context.Context, owner, draftID string, base int, shots string, at time.Time) (bool, error) {
-	result, err := tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, shots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
+	result, err := tx.tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, shots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
 		shots, sqlitedb.FormatTime(at), draftID, owner, base)
 	if err != nil {
 		return false, err
@@ -85,7 +85,7 @@ func (tx *Tx) AdvanceDraft(ctx context.Context, owner, draftID string, base int,
 // AddRevision keeps revision of draftID: the step op that made it, the
 // seed it drew with, the revision undoing it goes back to, and its shots.
 func (tx *Tx) AddRevision(ctx context.Context, draftID string, revision int, op string, seed, back sql.NullInt64, shots string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+	_, err := tx.tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
 		draftID, revision, op, seed, back, shots, sqlitedb.FormatTime(at))
 	return err
 }
@@ -102,7 +102,7 @@ type Revision struct {
 // sql.ErrNoRows when it has none or it is no longer kept.
 func (d *DB) UndoTarget(ctx context.Context, draftID string, revision int) (Revision, error) {
 	var target Revision
-	err := d.QueryRowContext(ctx, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
+	err := d.db.QueryRowContext(ctx, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
 		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
 		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.Revision, &target.Shots, &target.Back)
 	return target, err
@@ -111,7 +111,7 @@ func (d *DB) UndoTarget(ctx context.Context, draftID string, revision int) (Revi
 // RevisionBacks are the revisions kept of draftID, each with the revision
 // undoing it goes back to.
 func (tx *Tx) RevisionBacks(ctx context.Context, draftID string) (map[int]sql.NullInt64, error) {
-	rows, err := tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
+	rows, err := tx.tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +130,6 @@ func (tx *Tx) RevisionBacks(ctx context.Context, draftID string) (map[int]sql.Nu
 
 // DeleteRevision stops keeping revision of draftID.
 func (tx *Tx) DeleteRevision(ctx context.Context, draftID string, revision int) error {
-	_, err := tx.ExecContext(ctx, "DELETE FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, revision)
+	_, err := tx.tx.ExecContext(ctx, "DELETE FROM draft_revisions WHERE draft_id = ? AND revision = ?", draftID, revision)
 	return err
 }

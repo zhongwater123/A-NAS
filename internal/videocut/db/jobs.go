@@ -43,7 +43,7 @@ func KeepsMarker(waitVNAS string) string {
 
 // ResetPlanRejections forgets jobID's answers refused in a row.
 func (tx *Tx) ResetPlanRejections(ctx context.Context, jobID string) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID)
 	return err
 }
 
@@ -51,7 +51,7 @@ func (tx *Tx) ResetPlanRejections(ctx context.Context, jobID string) error {
 // says how many there are now.
 func (tx *Tx) CountPlanRejection(ctx context.Context, jobID string) (int, error) {
 	var rejections int
-	err := tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
+	err := tx.tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
 		jobID).Scan(&rejections)
 	return rejections, err
 }
@@ -59,19 +59,19 @@ func (tx *Tx) CountPlanRejection(ctx context.Context, jobID string) (int, error)
 // JobPlanning is how jobID's planning stands: its owner, its epoch, and
 // whether it wants a round.
 func (d *DB) JobPlanning(ctx context.Context, jobID string) (owner string, epoch int, wanted bool, err error) {
-	err = d.QueryRowContext(ctx, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
+	err = d.db.QueryRowContext(ctx, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
 		Scan(&owner, &epoch, &wanted)
 	return owner, epoch, wanted, err
 }
 
 // UnwantRound records that jobID wants no round.
 func (d *DB) UnwantRound(ctx context.Context, jobID string) error {
-	return unwantRound(ctx, d, jobID)
+	return unwantRound(ctx, d.db, jobID)
 }
 
 // UnwantRound is DB.UnwantRound inside the transaction.
 func (tx *Tx) UnwantRound(ctx context.Context, jobID string) error {
-	return unwantRound(ctx, tx, jobID)
+	return unwantRound(ctx, tx.tx, jobID)
 }
 
 func unwantRound(ctx context.Context, q queryer, jobID string) error {
@@ -83,7 +83,7 @@ func unwantRound(ctx context.Context, q queryer, jobID string) error {
 // did, and says since when as kept ("" when that is unknown).
 func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string, error) {
 	var since string
-	err := d.QueryRowContext(ctx, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
+	err := d.db.QueryRowContext(ctx, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
 		WHERE id = ? RETURNING IFNULL(plan_wanted_at, '')`, sqlitedb.FormatTime(at), jobID).Scan(&since)
 	return since, err
 }
@@ -92,7 +92,7 @@ func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string,
 // the members with a job that keeps their marker (KeepsMarker, with
 // waitVNAS).
 func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSince time.Time) (map[string]bool, error) {
-	rows, err := d.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
 		WHERE `+KeepsMarker(waitVNAS)+` AND g.registered_at >= ?`,
 		sqlitedb.FormatTime(registeredSince))
 	if err != nil {
@@ -118,7 +118,7 @@ func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSin
 // first step's input key and settings, encoded; sql.ErrNoRows when there
 // is none.
 func (tx *Tx) ClaimableJob(ctx context.Context, owner, waitVNAS string) (jobID string, epoch int, pickKey, settings string, err error) {
-	err = tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
+	err = tx.tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
 			WHERE j.owner_user_id = ? AND `+WantsRound(waitVNAS)+`
 			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
 			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&jobID, &epoch, &pickKey, &settings)
@@ -128,18 +128,18 @@ func (tx *Tx) ClaimableJob(ctx context.Context, owner, waitVNAS string) (jobID s
 // NewPlanEpoch starts jobID's planning over in a new epoch, its refusals
 // forgotten.
 func (tx *Tx) NewPlanEpoch(ctx context.Context, jobID string) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID)
 	return err
 }
 
 // CancelRequested reports whether jobID is being cancelled.
 func (d *DB) CancelRequested(ctx context.Context, jobID string) (bool, error) {
-	return cancelRequested(ctx, d, jobID)
+	return cancelRequested(ctx, d.db, jobID)
 }
 
 // CancelRequested is DB.CancelRequested inside the transaction.
 func (tx *Tx) CancelRequested(ctx context.Context, jobID string) (bool, error) {
-	return cancelRequested(ctx, tx, jobID)
+	return cancelRequested(ctx, tx.tx, jobID)
 }
 
 func cancelRequested(ctx context.Context, q queryer, jobID string) (bool, error) {
@@ -152,14 +152,14 @@ func cancelRequested(ctx context.Context, q queryer, jobID string) (bool, error)
 // bounds claimed, started and called (LateRounds) due at at.
 func (tx *Tx) DueLateRoundJobs(ctx context.Context, at, claimed, started, called time.Time) error {
 	bounds := []any{sqlitedb.FormatTime(claimed), sqlitedb.FormatTime(started), sqlitedb.FormatTime(called)}
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+LateRounds+")",
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+LateRounds+")",
 		append([]any{sqlitedb.FormatTime(at)}, bounds...)...)
 	return err
 }
 
 // MakeWaitingJobDue makes jobID due at at, when it waits.
 func (tx *Tx) MakeWaitingJobDue(ctx context.Context, jobID string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET not_before = ? WHERE id = ? AND state = 'waiting'", sqlitedb.FormatTime(at), jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE jobs SET not_before = ? WHERE id = ? AND state = 'waiting'", sqlitedb.FormatTime(at), jobID)
 	return err
 }
 
@@ -169,7 +169,7 @@ func (tx *Tx) MakeWaitingJobDue(ctx context.Context, jobID string, at time.Time)
 // not ended.
 func (tx *Tx) CancelRequestedJobs(ctx context.Context, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
 			WHERE cancel_requested = 1 AND `+ActiveStateQuery, now, now)
 	return err
 }
@@ -177,7 +177,7 @@ func (tx *Tx) CancelRequestedJobs(ctx context.Context, at time.Time) error {
 // RequeueRunningJobs puts the jobs running back in the queue, due at at.
 func (tx *Tx) RequeueRunningJobs(ctx context.Context, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
 			WHERE state = 'running'`, now, now)
 	return err
 }
@@ -185,7 +185,7 @@ func (tx *Tx) RequeueRunningJobs(ctx context.Context, at time.Time) error {
 // JobActive reports whether jobID is a job that has not ended.
 func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 	var active bool
-	err := d.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+ActiveStateQuery+")", jobID).Scan(&active)
+	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+ActiveStateQuery+")", jobID).Scan(&active)
 	return active, err
 }
 
@@ -193,7 +193,7 @@ func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 // (not valid when none is).
 func (d *DB) NextNotBefore(ctx context.Context) (sql.NullString, error) {
 	var next sql.NullString
-	err := d.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+DueStates).Scan(&next)
+	err := d.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+DueStates).Scan(&next)
 	return next, err
 }
 
@@ -207,7 +207,7 @@ type DueJob struct {
 // DueJob is the job due first at now; sql.ErrNoRows when none is.
 func (tx *Tx) DueJob(ctx context.Context, now time.Time) (DueJob, error) {
 	var job DueJob
-	err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
+	err := tx.tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
 			WHERE `+DueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
 		Scan(&job.ID, &job.Owner, &job.ProjectID, &job.Kind, &job.Settings, &job.Plans)
@@ -216,14 +216,14 @@ func (tx *Tx) DueJob(ctx context.Context, now time.Time) (DueJob, error) {
 
 // FailInvalidJob fails jobID at at, as invalid, saying message.
 func (tx *Tx) FailInvalidJob(ctx context.Context, jobID, message string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
 		message, sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID)
 	return err
 }
 
 // RunJob sets jobID running at at, its lease until leaseUntil.
 func (tx *Tx) RunJob(ctx context.Context, jobID string, leaseUntil, at time.Time) error {
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'running', lease_until = ?, heartbeat_at = ?, updated_at = ? WHERE id = ?`,
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'running', lease_until = ?, heartbeat_at = ?, updated_at = ? WHERE id = ?`,
 		sqlitedb.FormatTime(leaseUntil), sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID)
 	return err
 }
@@ -232,7 +232,7 @@ func (tx *Tx) RunJob(ctx context.Context, jobID string, leaseUntil, at time.Time
 // whether the job is being cancelled and whether it is saving;
 // sql.ErrNoRows when the job is gone.
 func (d *DB) RenewLease(ctx context.Context, jobID string, leaseUntil, at time.Time) (requested, saving bool, err error) {
-	err = d.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
+	err = d.db.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
 		sqlitedb.FormatTime(leaseUntil), sqlitedb.FormatTime(at), jobID).Scan(&requested, &saving)
 	return requested, saving, err
 }
@@ -241,7 +241,7 @@ func (d *DB) RenewLease(ctx context.Context, jobID string, leaseUntil, at time.T
 // is being cancelled and whether it is saving; sql.ErrNoRows when it is
 // not running.
 func (tx *Tx) RunningJob(ctx context.Context, jobID string) (attempts int, cancelled, saving bool, err error) {
-	err = tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", jobID).Scan(&attempts, &cancelled, &saving)
+	err = tx.tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", jobID).Scan(&attempts, &cancelled, &saving)
 	return attempts, cancelled, saving, err
 }
 
@@ -261,7 +261,7 @@ type JobSettlement struct {
 
 // SettleJob records how jobID's step left it, its lease released.
 func (tx *Tx) SettleJob(ctx context.Context, jobID string, s JobSettlement) error {
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
 			missing_json = ?, save_started = ?, lease_until = NULL, not_before = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
 		s.State, s.WaitReason, s.Attempts, s.ErrorClass, s.Error, s.Missing, s.SaveStarted, s.NotBefore, s.FinishedAt, s.UpdatedAt, jobID)
 	return err
@@ -271,7 +271,7 @@ func (tx *Tx) SettleJob(ctx context.Context, jobID string, s JobSettlement) erro
 // heard back.
 func (d *DB) SaveStarted(ctx context.Context, jobID string) (bool, error) {
 	var saving bool
-	err := d.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", jobID).Scan(&saving)
+	err := d.db.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", jobID).Scan(&saving)
 	return saving, err
 }
 
@@ -279,7 +279,7 @@ func (d *DB) SaveStarted(ctx context.Context, jobID string) (bool, error) {
 // project's grant, what its render step kept, and the input key of its
 // save step.
 func (d *DB) SaveReplay(ctx context.Context, jobID, renderStep, saveStep string) (grantID, rendered, key string, err error) {
-	err = d.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
+	err = d.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
 			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
 			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, renderStep, saveStep, jobID).Scan(&grantID, &rendered, &key)
 	return grantID, rendered, key, err
@@ -289,27 +289,27 @@ func (d *DB) SaveReplay(ctx context.Context, jobID, renderStep, saveStep string)
 // sql.ErrNoRows when there is no such job.
 func (d *DB) JobGrant(ctx context.Context, jobID string) (sql.NullString, error) {
 	var grantID sql.NullString
-	err := d.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
+	err := d.db.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
 		Scan(&grantID)
 	return grantID, err
 }
 
 // SetJobStep records that jobID is at step name, at at.
 func (tx *Tx) SetJobStep(ctx context.Context, jobID, name string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET step = ?, wait_reason = '', updated_at = ? WHERE id = ?", name, sqlitedb.FormatTime(at), jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE jobs SET step = ?, wait_reason = '', updated_at = ? WHERE id = ?", name, sqlitedb.FormatTime(at), jobID)
 	return err
 }
 
 // ResetJobAttempts starts jobID's attempts from none, at at.
 func (tx *Tx) ResetJobAttempts(ctx context.Context, jobID string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE jobs SET attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?", sqlitedb.FormatTime(at), jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE jobs SET attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?", sqlitedb.FormatTime(at), jobID)
 	return err
 }
 
 // StartSave raises jobID's save fence while it runs and is not being
 // cancelled; false when it did not.
 func (d *DB) StartSave(ctx context.Context, jobID string) (bool, error) {
-	started, err := d.ExecContext(ctx, "UPDATE jobs SET save_started = 1 WHERE id = ? AND cancel_requested = 0 AND state = 'running'", jobID)
+	started, err := d.db.ExecContext(ctx, "UPDATE jobs SET save_started = 1 WHERE id = ? AND cancel_requested = 0 AND state = 'running'", jobID)
 	if err != nil {
 		return false, err
 	}
@@ -320,21 +320,21 @@ func (d *DB) StartSave(ctx context.Context, jobID string) (bool, error) {
 // ReleaseSaveFence lowers jobID's save fence at at, its attempts from
 // none: the job goes on with its next 方案.
 func (tx *Tx) ReleaseSaveFence(ctx context.Context, jobID string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET save_started = 0, attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?`, sqlitedb.FormatTime(at), jobID)
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET save_started = 0, attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?`, sqlitedb.FormatTime(at), jobID)
 	return err
 }
 
 // FinishJob records jobID done at at, its save fence lowered.
 func (tx *Tx) FinishJob(ctx context.Context, jobID string, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', save_started = 0, missing_json = NULL, attempts = 0, error_class = '', error = '', wait_reason = '',
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', save_started = 0, missing_json = NULL, attempts = 0, error_class = '', error = '', wait_reason = '',
 			lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, now, now, jobID)
 	return err
 }
 
 // JobDraft is the draft an edit job saves and the draft's revision.
 func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revision int, err error) {
-	err = d.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
+	err = d.db.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
 	return draftID, revision, err
 }
 
@@ -343,12 +343,12 @@ func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revisi
 // KeyedJob is owner's job started with requestKey: its id, its kind and
 // what column holds for it; sql.ErrNoRows when there is none.
 func (d *DB) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	return keyedJob(ctx, d, owner, requestKey, column)
+	return keyedJob(ctx, d.db, owner, requestKey, column)
 }
 
 // KeyedJob is DB.KeyedJob inside the transaction.
 func (tx *Tx) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	return keyedJob(ctx, tx, owner, requestKey, column)
+	return keyedJob(ctx, tx.tx, owner, requestKey, column)
 }
 
 func keyedJob(ctx context.Context, q queryer, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
@@ -360,7 +360,7 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, column string) 
 // ProjectJobActive reports whether a job of projectID has not ended.
 func (tx *Tx) ProjectJobActive(ctx context.Context, projectID string) (bool, error) {
 	var active bool
-	err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+ActiveStateQuery+")", projectID).Scan(&active)
+	err := tx.tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+ActiveStateQuery+")", projectID).Scan(&active)
 	return active, err
 }
 
@@ -378,7 +378,7 @@ type NewJob struct {
 // AddJob queues job, made and due at at.
 func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
+	_, err := tx.tx.ExecContext(ctx, `INSERT INTO jobs(id, owner_user_id, project_id, request_key, settings_json, plans, state, not_before,
 			created_at, updated_at, kind, source_version_id, draft_id, draft_revision)
 		VALUES(?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Owner, job.ProjectID, job.RequestKey, job.Settings, job.Plans, now, now, now, job.Kind, job.SourceVersion, job.Draft, job.DraftRevision)
@@ -387,12 +387,12 @@ func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
 
 // JobSettings are jobID's settings as it was started with them, encoded.
 func (d *DB) JobSettings(ctx context.Context, jobID string) (string, error) {
-	return jobSettings(ctx, d, jobID)
+	return jobSettings(ctx, d.db, jobID)
 }
 
 // JobSettings is DB.JobSettings inside the transaction.
 func (tx *Tx) JobSettings(ctx context.Context, jobID string) (string, error) {
-	return jobSettings(ctx, tx, jobID)
+	return jobSettings(ctx, tx.tx, jobID)
 }
 
 func jobSettings(ctx context.Context, q queryer, jobID string) (string, error) {
@@ -413,7 +413,7 @@ type JobRow struct {
 // Job is owner's job jobID; sql.ErrNoRows when owner has none.
 func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
 	var job JobRow
-	err := d.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
+	err := d.db.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
 		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &job.Step, &job.WaitReason, &job.Error, &job.Created, &job.Finished, &job.Plans)
 	return job, err
@@ -423,7 +423,7 @@ func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
 // none).
 func (d *DB) JobMissing(ctx context.Context, jobID string) (sql.NullString, error) {
 	var raw sql.NullString
-	err := d.QueryRowContext(ctx, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw)
+	err := d.db.QueryRowContext(ctx, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw)
 	return raw, err
 }
 
@@ -433,7 +433,7 @@ func (d *DB) JobMissing(ctx context.Context, jobID string) (sql.NullString, erro
 func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Time) (string, error) {
 	now := sqlitedb.FormatTime(at)
 	var state string
-	err := d.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
+	err := d.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
 		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
 		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
 		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+ActiveStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
@@ -449,7 +449,7 @@ func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, notBefore, updat
 	for _, state := range states {
 		args = append(args, state)
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
+	result, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
 		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
 	if err != nil {
 		return false, err
@@ -460,12 +460,12 @@ func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, notBefore, updat
 
 // LatestJob is projectID's job made last; sql.ErrNoRows when it has none.
 func (d *DB) LatestJob(ctx context.Context, projectID string) (string, error) {
-	return latestJob(ctx, d, projectID)
+	return latestJob(ctx, d.db, projectID)
 }
 
 // LatestJob is DB.LatestJob inside the transaction.
 func (tx *Tx) LatestJob(ctx context.Context, projectID string) (string, error) {
-	return latestJob(ctx, tx, projectID)
+	return latestJob(ctx, tx.tx, projectID)
 }
 
 func latestJob(ctx context.Context, q queryer, projectID string) (string, error) {
@@ -487,7 +487,7 @@ type NoticeRow struct {
 // waitVNAS), need the member, or were done or failed since since, the
 // latest changed first.
 func (d *DB) Notices(ctx context.Context, owner, waitVNAS string, since time.Time) ([]NoticeRow, error) {
-	rows, err := d.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
+	rows, err := d.db.QueryContext(ctx, `SELECT j.id, j.project_id, p.name, j.state, j.wait_reason, j.error, j.updated_at, IFNULL(v.film_asset_id, ''),
 		EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.epoch = j.plan_epoch AND r.state IN ('claimed', 'started'))
 		FROM jobs j JOIN projects p ON p.id = j.project_id LEFT JOIN versions v ON v.job_id = j.id AND v.plan = 1
 		WHERE j.owner_user_id = ? AND ((j.state = 'waiting' AND j.wait_reason = ?) OR j.state = 'needs_input'
@@ -509,12 +509,12 @@ func (d *DB) Notices(ctx context.Context, owner, waitVNAS string, since time.Tim
 
 // ProjectJobIDs are the jobs of projectID.
 func (tx *Tx) ProjectJobIDs(ctx context.Context, projectID string) ([]string, error) {
-	return jobIDs(ctx, tx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
+	return jobIDs(ctx, tx.tx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
 }
 
 // OwnerJobIDs are the jobs of owner.
 func (tx *Tx) OwnerJobIDs(ctx context.Context, owner string) ([]string, error) {
-	return jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", owner)
+	return jobIDs(ctx, tx.tx, "SELECT id FROM jobs WHERE owner_user_id = ?", owner)
 }
 
 func jobIDs(ctx context.Context, q queryer, query, id string) ([]string, error) {

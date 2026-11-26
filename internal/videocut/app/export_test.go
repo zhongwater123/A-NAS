@@ -45,7 +45,7 @@ func (s *Store) NextDue(ctx context.Context) time.Duration { return s.nextDue(ct
 func (s *Store) Count(t testing.TB, query string, args ...any) int {
 	t.Helper()
 	var n int
-	if err := s.db.QueryRowContext(t.Context(), query, args...).Scan(&n); err != nil {
+	if err := s.db.SQLForTests().QueryRowContext(t.Context(), query, args...).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -55,7 +55,7 @@ func (s *Store) Count(t testing.TB, query string, args ...any) int {
 // or an earlier release leaves behind.
 func (s *Store) Exec(t testing.TB, query string, args ...any) {
 	t.Helper()
-	if _, err := s.db.ExecContext(t.Context(), query, args...); err != nil {
+	if _, err := s.db.SQLForTests().ExecContext(t.Context(), query, args...); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -126,9 +126,6 @@ type queryer interface {
 	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
 	RoundStanding(ctx context.Context, owner, jobID, token string) (db.RoundStanding, error)
 	Song(ctx context.Context, id string) (db.SongRow, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 // batch finds owner's batch for requestKey, or starts one: a create batch

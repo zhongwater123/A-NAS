@@ -22,7 +22,7 @@ type BatchRow struct {
 func (tx *Tx) Batch(ctx context.Context, owner, requestKey string) (BatchRow, error) {
 	var row BatchRow
 	var assets string
-	err := tx.QueryRowContext(ctx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
+	err := tx.tx.QueryRowContext(ctx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
 		owner, requestKey).Scan(&row.ID, &row.ProjectID, &row.Kind, &assets, &row.State)
 	if err != nil {
 		return row, err
@@ -38,34 +38,34 @@ func (tx *Tx) AddBatch(ctx context.Context, owner, requestKey string, row BatchR
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO batches(id, owner_user_id, project_id, request_key, kind, asset_ids, state, created_at)
+	_, err = tx.tx.ExecContext(ctx, `INSERT INTO batches(id, owner_user_id, project_id, request_key, kind, asset_ids, state, created_at)
 			VALUES(?, ?, ?, ?, ?, ?, 'registering', ?)`, row.ID, owner, row.ProjectID, requestKey, row.Kind, string(encoded), sqlitedb.FormatTime(at))
 	return err
 }
 
 // FinishBatch marks batch id done.
 func (tx *Tx) FinishBatch(ctx context.Context, id string) error {
-	_, err := tx.ExecContext(ctx, "UPDATE batches SET state = 'done' WHERE id = ?", id)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE batches SET state = 'done' WHERE id = ?", id)
 	return err
 }
 
 // DeleteRegisteringBatch forgets batch id while it is still registering.
 func (d *DB) DeleteRegisteringBatch(ctx context.Context, id string) error {
-	_, err := d.ExecContext(ctx, "DELETE FROM batches WHERE id = ? AND state = 'registering'", id)
+	_, err := d.db.ExecContext(ctx, "DELETE FROM batches WHERE id = ? AND state = 'registering'", id)
 	return err
 }
 
 // AnyBatchRegistering reports whether any batch is still registering.
 func (d *DB) AnyBatchRegistering(ctx context.Context) (bool, error) {
 	var found bool
-	err := d.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM batches WHERE state = 'registering')").Scan(&found)
+	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM batches WHERE state = 'registering')").Scan(&found)
 	return found, err
 }
 
 // RegisteringBatches are owner's batches still registering, their State
 // "registering" as the query keeps only those.
 func (d *DB) RegisteringBatches(ctx context.Context, owner string) ([]BatchRow, error) {
-	rows, err := d.QueryContext(ctx, "SELECT id, project_id, kind, asset_ids FROM batches WHERE owner_user_id = ? AND state = 'registering'", owner)
+	rows, err := d.db.QueryContext(ctx, "SELECT id, project_id, kind, asset_ids FROM batches WHERE owner_user_id = ? AND state = 'registering'", owner)
 	if err != nil {
 		return nil, err
 	}

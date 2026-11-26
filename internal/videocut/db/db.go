@@ -14,9 +14,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// DB is the open database. It still lends app its *sql.DB while the reads
-// and writes move here (#665).
-type DB struct{ *sql.DB }
+// DB is the open database. Its reads and writes are its methods, one file
+// for each kind of record; app writes no SQL of its own (#665).
+type DB struct{ db *sql.DB }
 
 // Open opens, creating when missing, the database in root and takes it to
 // the newest step. Commits wait until they are on disk: a job that was
@@ -29,16 +29,22 @@ func Open(ctx context.Context, root string) (*DB, error) {
 	if err := sqlitedb.Migrate(ctx, database, schema); err != nil {
 		return nil, errors.Join(err, database.Close())
 	}
-	return &DB{database}, nil
+	return &DB{db: database}, nil
 }
 
+// Close closes the database.
+func (d *DB) Close() error { return d.db.Close() }
+
+// SQLForTests is the database's own handle, for tests that read what no
+// method reads or set up states only a crash or an earlier release leaves
+// behind. Code outside tests reads and writes through the methods.
+func (d *DB) SQLForTests() *sql.DB { return d.db }
+
 // Tx is one transaction: reads and writes that stand or fall together.
-// It still lends app its *sql.Tx while the reads and writes move here
-// (#665).
-type Tx struct{ *sql.Tx }
+type Tx struct{ tx *sql.Tx }
 
 // queryer is the database or one transaction in it, for the reads and
-// writes that app makes in both.
+// writes that app makes in both (DB.db, Tx.tx).
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -48,5 +54,5 @@ type queryer interface {
 // Update runs apply in one transaction and commits it when apply returns
 // nil; otherwise nothing apply wrote stays.
 func (d *DB) Update(ctx context.Context, apply func(*Tx) error) error {
-	return sqlitedb.WithTx(ctx, d.DB, func(tx *sql.Tx) error { return apply(&Tx{tx}) })
+	return sqlitedb.WithTx(ctx, d.db, func(tx *sql.Tx) error { return apply(&Tx{tx: tx}) })
 }

@@ -15,7 +15,7 @@ import (
 // 方案 and step with catalogKey, encoded; sql.ErrNoRows when there is none.
 func (d *DB) AcceptedPlan(ctx context.Context, jobID string, plan int, step, catalogKey string) (string, error) {
 	var answer string
-	err := d.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
+	err := d.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
 		ORDER BY accepted_at DESC LIMIT 1`, jobID, plan, step, catalogKey).Scan(&answer)
 	return answer, err
 }
@@ -23,7 +23,7 @@ func (d *DB) AcceptedPlan(ctx context.Context, jobID string, plan int, step, cat
 // AcceptPlan keeps answer as jobID's plan-th 方案's plan for step with
 // catalogKey, taken at at.
 func (d *DB) AcceptPlan(ctx context.Context, jobID string, plan int, step, catalogKey, answer string, at time.Time) error {
-	_, err := d.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
+	_, err := d.db.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
 		jobID, plan, step, catalogKey, answer, sqlitedb.FormatTime(at))
 	return err
 }
@@ -31,13 +31,13 @@ func (d *DB) AcceptPlan(ctx context.Context, jobID string, plan int, step, catal
 // VoidPlan voids, at at, the plans of jobID's plan-th 方案 for step not
 // voided yet.
 func (tx *Tx) VoidPlan(ctx context.Context, jobID string, plan int, step string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND plan = ? AND step = ? AND voided_at IS NULL",
+	_, err := tx.tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND plan = ? AND step = ? AND voided_at IS NULL",
 		sqlitedb.FormatTime(at), jobID, plan, step)
 	return err
 }
 
 // VoidPlans voids, at at, every plan of jobID not voided yet.
 func (tx *Tx) VoidPlans(ctx context.Context, jobID string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
 	return err
 }

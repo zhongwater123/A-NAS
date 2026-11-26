@@ -11,34 +11,34 @@ type JobAsset struct{ AssetID, ObjectID string }
 
 // AddJobAsset gives jobID assetID as objectID.
 func (tx *Tx) AddJobAsset(ctx context.Context, jobID, assetID, objectID string) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) VALUES(?, ?, ?)", jobID, assetID, objectID)
+	_, err := tx.tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) VALUES(?, ?, ?)", jobID, assetID, objectID)
 	return err
 }
 
 // CopyProjectAssets gives jobID every video projectID holds, as it holds
 // them.
 func (tx *Tx) CopyProjectAssets(ctx context.Context, jobID, projectID string) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
+	_, err := tx.tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM project_assets WHERE project_id = ?",
 		jobID, projectID)
 	return err
 }
 
 // CopyJobAssets gives jobID the videos of fromJobID, as that job took them.
 func (tx *Tx) CopyJobAssets(ctx context.Context, jobID, fromJobID string) error {
-	_, err := tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM job_assets WHERE job_id = ?",
+	_, err := tx.tx.ExecContext(ctx, "INSERT INTO job_assets(job_id, asset_id, object_id) SELECT ?, asset_id, object_id FROM job_assets WHERE job_id = ?",
 		jobID, fromJobID)
 	return err
 }
 
 // DeleteJobAsset takes assetID out of jobID.
 func (tx *Tx) DeleteJobAsset(ctx context.Context, jobID, assetID string) error {
-	_, err := tx.ExecContext(ctx, "DELETE FROM job_assets WHERE job_id = ? AND asset_id = ?", jobID, assetID)
+	_, err := tx.tx.ExecContext(ctx, "DELETE FROM job_assets WHERE job_id = ? AND asset_id = ?", jobID, assetID)
 	return err
 }
 
 // JobAssets are jobID's videos with their content, by asset id.
 func (d *DB) JobAssets(ctx context.Context, jobID string) ([]JobAsset, error) {
-	rows, err := d.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
+	rows, err := d.db.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (d *DB) JobAssets(ctx context.Context, jobID string) ([]JobAsset, error) {
 
 // JobAssetIDs are jobID's videos, by asset id.
 func (d *DB) JobAssetIDs(ctx context.Context, jobID string) ([]string, error) {
-	rows, err := d.QueryContext(ctx, "SELECT asset_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
+	rows, err := d.db.QueryContext(ctx, "SELECT asset_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (d *DB) JobAssetIDs(ctx context.Context, jobID string) ([]string, error) {
 // JobAssetObjects is the content jobID took of each of its videos.
 func (d *DB) JobAssetObjects(ctx context.Context, jobID string) (map[string]string, error) {
 	objects := map[string]string{}
-	rows, err := d.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ?", jobID)
+	rows, err := d.db.QueryContext(ctx, "SELECT asset_id, object_id FROM job_assets WHERE job_id = ?", jobID)
 	if err != nil {
 		return nil, err
 	}

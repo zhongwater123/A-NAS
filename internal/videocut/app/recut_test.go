@@ -56,7 +56,7 @@ func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
 		t.Fatalf("the recut has %d videos", n)
 	}
 	var settingsJSON string
-	if err := env.store.db.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", job.ID).Scan(&settingsJSON); err != nil {
+	if err := env.store.db.SQLForTests().QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", job.ID).Scan(&settingsJSON); err != nil {
 		t.Fatal(err)
 	}
 	var settings domain.JobSettings
@@ -102,7 +102,7 @@ func TestARecutOfAnEditedVersionLeavesTheHandEditsOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	var base string
-	if err := env.store.db.QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
+	if err := env.store.db.SQLForTests().QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
 		t.Fatal(err)
 	}
 	// The plan's first picture still leads with c1/1, not the c1/3 put there by hand.
@@ -205,7 +205,7 @@ func TestARecutsBaseKeepsThePlansLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	var base string
-	if err := env.store.db.QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
+	if err := env.store.db.SQLForTests().QueryRowContext(ctx, "SELECT json_extract(settings_json, '$.recut.base') FROM jobs WHERE id = ?", job.ID).Scan(&base); err != nil {
 		t.Fatal(err)
 	}
 	for _, kept := range []string{"顺着海浪声转到山路", "从清晨的海面进入", "脚步接脚步", "同一片海", `"shows":"路"`} {

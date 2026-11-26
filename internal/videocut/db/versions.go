@@ -46,7 +46,7 @@ type VersionRow struct {
 
 // Versions lists the versions whose column is value, ordered by order.
 func (d *DB) Versions(ctx context.Context, column, value, order string) ([]VersionRow, error) {
-	rows, err := d.QueryContext(ctx, "SELECT "+VersionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
+	rows, err := d.db.QueryContext(ctx, "SELECT "+VersionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ type VersionSourceRow struct {
 // sql.ErrNoRows when owner has none.
 func (d *DB) VersionSource(ctx context.Context, owner, versionID string) (VersionSourceRow, error) {
 	var row VersionSourceRow
-	err := d.QueryRowContext(ctx, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
+	err := d.db.QueryRowContext(ctx, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
 		FROM versions v JOIN projects p ON p.id = v.project_id WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`,
 		versionID, owner).Scan(&row.ProjectID, &row.Number, &row.JobID, &row.Plan, &row.Timeline, &row.GrantID)
 	return row, err
@@ -87,7 +87,7 @@ func (d *DB) VersionSource(ctx context.Context, owner, versionID string) (Versio
 
 // KeepVersionTimeline gives versionID timeline, unless it keeps one.
 func (d *DB) KeepVersionTimeline(ctx context.Context, versionID, timeline string) error {
-	_, err := d.ExecContext(ctx, "UPDATE versions SET timeline_json = ? WHERE id = ? AND timeline_json IS NULL", timeline, versionID)
+	_, err := d.db.ExecContext(ctx, "UPDATE versions SET timeline_json = ? WHERE id = ? AND timeline_json IS NULL", timeline, versionID)
 	return err
 }
 
@@ -99,7 +99,7 @@ func (d *DB) RedoneSince(ctx context.Context, jobID string, plan int, names []st
 		args = append(args, name)
 	}
 	var redone bool
-	err := d.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
+	err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
 		WHERE v.job_id = ? AND v.plan = ? AND s.finished_at > v.created_at AND s.name IN (`+sqlitedb.Placeholders(len(names))+`))`,
 		args...).Scan(&redone)
 	return redone, err
@@ -109,7 +109,7 @@ func (d *DB) RedoneSince(ctx context.Context, jobID string, plan int, names []st
 // project is ready; sql.ErrNoRows otherwise.
 func (tx *Tx) VersionProject(ctx context.Context, owner, versionID string) (string, error) {
 	var projectID string
-	err := tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
+	err := tx.tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
 			WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`, versionID, owner).Scan(&projectID)
 	return projectID, err
 }
@@ -118,7 +118,7 @@ func (tx *Tx) VersionProject(ctx context.Context, owner, versionID string) (stri
 // at revision; sql.ErrNoRows when none did.
 func (d *DB) SavedEditJob(ctx context.Context, draftID string, revision int) (string, error) {
 	var saved string
-	err := d.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
+	err := d.db.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
 		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, revision).Scan(&saved)
 	return saved, err
 }
@@ -128,7 +128,7 @@ func (d *DB) SavedEditJob(ctx context.Context, draftID string, revision int) (st
 // source and revision taken from the job; nothing when the version key
 // has its version already.
 func (tx *Tx) AddVersion(ctx context.Context, id, projectID string, number int, jobID string, plan int, versionKey, filmAssetID string, at time.Time, timeline any) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,
+	_, err := tx.tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,
 				kind, source_version_id, draft_revision)
 			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE kind WHEN 'generate' THEN 'plan' ELSE kind END, source_version_id, draft_revision
 			FROM jobs WHERE id = ? ON CONFLICT (version_key) DO NOTHING`,
@@ -138,7 +138,7 @@ func (tx *Tx) AddVersion(ctx context.Context, id, projectID string, number int, 
 
 // SavedPlans are jobID's 方案 whose films are saved.
 func (d *DB) SavedPlans(ctx context.Context, jobID string) (map[int]bool, error) {
-	rows, err := d.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
+	rows, err := d.db.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +158,6 @@ func (d *DB) SavedPlans(ctx context.Context, jobID string) (map[int]bool, error)
 // it has versions.
 func (d *DB) NextUnsavedPlan(ctx context.Context, jobID string) (int, error) {
 	var plan int
-	err := d.QueryRowContext(ctx, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", jobID).Scan(&plan)
+	err := d.db.QueryRowContext(ctx, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", jobID).Scan(&plan)
 	return plan, err
 }

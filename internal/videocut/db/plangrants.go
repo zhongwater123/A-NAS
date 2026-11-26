@@ -13,7 +13,7 @@ import (
 // RegisterPlanGrant records that owner, signed in as username, has a
 // planning grant registered at at, replacing the registration before.
 func (d *DB) RegisterPlanGrant(ctx context.Context, owner, username string, at time.Time) error {
-	_, err := d.ExecContext(ctx, `INSERT INTO plan_grants(owner_user_id, username, registered_at) VALUES(?, ?, ?)
+	_, err := d.db.ExecContext(ctx, `INSERT INTO plan_grants(owner_user_id, username, registered_at) VALUES(?, ?, ?)
 		ON CONFLICT(owner_user_id) DO UPDATE SET username = excluded.username, registered_at = excluded.registered_at`,
 		owner, username, sqlitedb.FormatTime(at))
 	return err
@@ -22,12 +22,12 @@ func (d *DB) RegisterPlanGrant(ctx context.Context, owner, username string, at t
 // PlanGrant is owner's last registration: the username and when, as kept;
 // sql.ErrNoRows when owner has none.
 func (d *DB) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	return planGrant(ctx, d, owner)
+	return planGrant(ctx, d.db, owner)
 }
 
 // PlanGrant is DB.PlanGrant inside the transaction.
 func (tx *Tx) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	return planGrant(ctx, tx, owner)
+	return planGrant(ctx, tx.tx, owner)
 }
 
 func planGrant(ctx context.Context, q queryer, owner string) (username, at string, err error) {
@@ -37,6 +37,6 @@ func planGrant(ctx context.Context, q queryer, owner string) (username, at strin
 
 // DeletePlanGrant forgets owner's registration.
 func (tx *Tx) DeletePlanGrant(ctx context.Context, owner string) error {
-	_, err := tx.ExecContext(ctx, "DELETE FROM plan_grants WHERE owner_user_id = ?", owner)
+	_, err := tx.tx.ExecContext(ctx, "DELETE FROM plan_grants WHERE owner_user_id = ?", owner)
 	return err
 }

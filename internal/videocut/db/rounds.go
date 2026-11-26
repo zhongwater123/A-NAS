@@ -37,12 +37,12 @@ type RoundStanding struct {
 // RoundStanding is owner's round for jobID with token, as it stands now;
 // sql.ErrNoRows when there is none.
 func (d *DB) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
-	return roundStanding(ctx, d, owner, jobID, token)
+	return roundStanding(ctx, d.db, owner, jobID, token)
 }
 
 // RoundStanding is DB.RoundStanding inside the transaction.
 func (tx *Tx) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
-	return roundStanding(ctx, tx, owner, jobID, token)
+	return roundStanding(ctx, tx.tx, owner, jobID, token)
 }
 
 func roundStanding(ctx context.Context, q queryer, owner, jobID, token string) (RoundStanding, error) {
@@ -57,13 +57,13 @@ func roundStanding(ctx context.Context, q queryer, owner, jobID, token string) (
 // MarkRoundCalled records that the model called a montage tool in round id
 // at at.
 func (d *DB) MarkRoundCalled(ctx context.Context, id string, at time.Time) error {
-	_, err := d.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ?", sqlitedb.FormatTime(at), id)
+	_, err := d.db.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ?", sqlitedb.FormatTime(at), id)
 	return err
 }
 
 // EndRoundByID ends round id at at with outcome (EndRound).
 func (tx *Tx) EndRoundByID(ctx context.Context, id string, at time.Time, outcome string) error {
-	_, err := tx.ExecContext(ctx, EndRound+" WHERE id = ?", sqlitedb.FormatTime(at), outcome, id)
+	_, err := tx.tx.ExecContext(ctx, EndRound+" WHERE id = ?", sqlitedb.FormatTime(at), outcome, id)
 	return err
 }
 
@@ -77,7 +77,7 @@ type PastRound struct {
 // PastRounds are jobID's latest 20 rounds for epoch and pickKey, the latest
 // claimed first.
 func (d *DB) PastRounds(ctx context.Context, jobID string, epoch int, pickKey string) ([]PastRound, error) {
-	rows, err := d.QueryContext(ctx, `SELECT state, failure, outcome, ended_at FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ?
+	rows, err := d.db.QueryContext(ctx, `SELECT state, failure, outcome, ended_at FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ?
 		ORDER BY claimed_at DESC, id DESC LIMIT 20`, jobID, epoch, pickKey)
 	if err != nil {
 		return nil, err
@@ -98,7 +98,7 @@ func (d *DB) PastRounds(ctx context.Context, jobID string, epoch int, pickKey st
 // plan for another epoch than epoch or another input key than pickKey
 // (EndRound).
 func (d *DB) EndOtherRounds(ctx context.Context, jobID string, epoch int, pickKey string, at time.Time, outcome string) error {
-	_, err := d.ExecContext(ctx, EndRound+` WHERE job_id = ? AND state IN ('claimed', 'started') AND (epoch <> ? OR input_key <> ?)`,
+	_, err := d.db.ExecContext(ctx, EndRound+` WHERE job_id = ? AND state IN ('claimed', 'started') AND (epoch <> ? OR input_key <> ?)`,
 		sqlitedb.FormatTime(at), outcome, jobID, epoch, pickKey)
 	return err
 }
@@ -106,7 +106,7 @@ func (d *DB) EndOtherRounds(ctx context.Context, jobID string, epoch int, pickKe
 // AddRound keeps round id, claimed by owner at at with token for jobID's
 // epoch, its template and the first step's input key pickKey.
 func (tx *Tx) AddRound(ctx context.Context, id, jobID, owner, token string, at time.Time, epoch int, template, pickKey string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
+	_, err := tx.tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
 			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, id, jobID, owner, token, sqlitedb.FormatTime(at), epoch, template, pickKey)
 	return err
 }
@@ -119,7 +119,7 @@ type RoundRow struct {
 // Round is owner's round roundID; sql.ErrNoRows when owner has none.
 func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error) {
 	var r RoundRow
-	err := tx.QueryRowContext(ctx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
+	err := tx.tx.QueryRowContext(ctx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
 		roundID, owner).Scan(&r.ID, &r.JobID, &r.Owner, &r.Token, &r.State)
 	return r, err
 }
@@ -128,12 +128,12 @@ func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error
 // they plan for (EndRound). Their conversations stay in the member's VNAS
 // history; what they hand back from now on is not kept.
 func (d *DB) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
-	return endRounds(ctx, d, jobID, at, outcome)
+	return endRounds(ctx, d.db, jobID, at, outcome)
 }
 
 // EndRounds is DB.EndRounds inside the transaction.
 func (tx *Tx) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
-	return endRounds(ctx, tx, jobID, at, outcome)
+	return endRounds(ctx, tx.tx, jobID, at, outcome)
 }
 
 func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outcome string) error {
@@ -143,7 +143,7 @@ func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outco
 
 // StartRound records round id started at at as the conversation runRef.
 func (tx *Tx) StartRound(ctx context.Context, id, runRef string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'started', run_ref = ?, started_at = ? WHERE id = ?",
+	_, err := tx.tx.ExecContext(ctx, "UPDATE rounds SET state = 'started', run_ref = ?, started_at = ? WHERE id = ?",
 		runRef, sqlitedb.FormatTime(at), id)
 	return err
 }
@@ -152,7 +152,7 @@ func (tx *Tx) StartRound(ctx context.Context, id, runRef string, at time.Time) e
 // outcome and failure.
 func (tx *Tx) AbandonRound(ctx context.Context, id string, at time.Time, outcome, failure string) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
+	_, err := tx.tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
 		now, now, outcome, failure, id)
 	return err
 }
@@ -161,7 +161,7 @@ func (tx *Tx) AbandonRound(ctx context.Context, id string, at time.Time, outcome
 // its failure is failure when the model called no tool in it, else none.
 func (tx *Tx) EndStartedRound(ctx context.Context, id string, at time.Time, outcome, failure string) error {
 	now := sqlitedb.FormatTime(at)
-	_, err := tx.ExecContext(ctx, `UPDATE rounds SET state = 'ended', ended_at = ?, reported_at = ?, outcome = ?,
+	_, err := tx.tx.ExecContext(ctx, `UPDATE rounds SET state = 'ended', ended_at = ?, reported_at = ?, outcome = ?,
 				failure = CASE WHEN called_at IS NULL THEN ? ELSE '' END WHERE id = ?`,
 		now, now, outcome, failure, id)
 	return err
@@ -169,7 +169,7 @@ func (tx *Tx) EndStartedRound(ctx context.Context, id string, at time.Time, outc
 
 // MarkRoundReported records round id reported at at, unless it was before.
 func (tx *Tx) MarkRoundReported(ctx context.Context, id string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE rounds SET reported_at = COALESCE(reported_at, ?) WHERE id = ?", sqlitedb.FormatTime(at), id)
+	_, err := tx.tx.ExecContext(ctx, "UPDATE rounds SET reported_at = COALESCE(reported_at, ?) WHERE id = ?", sqlitedb.FormatTime(at), id)
 	return err
 }
 
@@ -178,7 +178,7 @@ func (tx *Tx) MarkRoundReported(ctx context.Context, id string, at time.Time) er
 // many it ended (0 when that is unknown).
 func (tx *Tx) EndLateRounds(ctx context.Context, at time.Time, outcome string, claimed, started, called time.Time) (int64, error) {
 	bounds := []any{sqlitedb.FormatTime(claimed), sqlitedb.FormatTime(started), sqlitedb.FormatTime(called)}
-	ended, err := tx.ExecContext(ctx, EndRound+" WHERE "+LateRounds, append([]any{sqlitedb.FormatTime(at), outcome}, bounds...)...)
+	ended, err := tx.tx.ExecContext(ctx, EndRound+" WHERE "+LateRounds, append([]any{sqlitedb.FormatTime(at), outcome}, bounds...)...)
 	if err != nil {
 		return 0, err
 	}

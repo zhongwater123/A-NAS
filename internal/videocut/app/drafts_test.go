@@ -893,7 +893,7 @@ func TestPlanStepsAreNamedAlikeInSQL(t *testing.T) {
 	env := newEditEnv(t)
 	for plan := range 4 {
 		var name string
-		if err := env.store.db.QueryRowContext(t.Context(), "SELECT "+db.PlanStepSQL("fill", "p")+" FROM (SELECT ? AS p)", plan).Scan(&name); err != nil {
+		if err := env.store.db.SQLForTests().QueryRowContext(t.Context(), "SELECT "+db.PlanStepSQL("fill", "p")+" FROM (SELECT ? AS p)", plan).Scan(&name); err != nil {
 			t.Fatal(err)
 		}
 		if name != planStep("fill", plan) {
