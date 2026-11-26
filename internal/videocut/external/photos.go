@@ -1,4 +1,4 @@
-package app
+package external
 
 import (
 	"context"
@@ -13,11 +13,20 @@ import (
 // does, with those refusals as the montage center's: windows made with
 // another model are ErrSearchModel, a library or local AI that cannot answer
 // now is ErrSearchUnavailable, a text it does not search for is ErrInvalid,
-// and the rest are as for any grant call (grantError). Open uses it when
-// Options.Grants search windows.
+// and the rest are as for any grant call (domain.GrantError). videocut.go
+// gives it to app when the grants search windows (videocut.WindowSearchOf).
 type GrantSearch struct {
-	Grants WindowSearch
+	Grants PhotoSearch
 }
+
+// PhotoSearch is the photo library's own search of a grant's windows by
+// text; photosapi.Grants has it.
+type PhotoSearch interface {
+	SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error)
+}
+
+// SearchWindows asks the photo library and says its refusals as the
+// montage center's errors.
 
 func (g GrantSearch) SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error) {
 	matches, err := g.Grants.SearchWindows(ctx, grantID, texts, k)
@@ -37,5 +46,5 @@ func (g GrantSearch) SearchWindows(ctx context.Context, grantID string, texts []
 	}
 	// The rest are what any grant call answers: a grant revoked, a session
 	// ended.
-	return nil, grantError(err)
+	return nil, domain.GrantError(err)
 }

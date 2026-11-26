@@ -235,7 +235,7 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 				return nil, 0, refuse("这一镜或前后镜头的视频已从相册删除或放进回收站，不能删这一镜")
 			}
 			if err != nil {
-				return nil, 0, grantError(err)
+				return nil, 0, domain.GrantError(err)
 			}
 			// Windows being made again have no vectors yet, and those made
 			// with another model are not the version's (checkAnalysis).

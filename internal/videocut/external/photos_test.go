@@ -1,4 +1,6 @@
-package app
+//go:build linux
+
+package external_test
 
 import (
 	"context"
@@ -10,11 +12,13 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 )
 
 // The photo library's grants are what a store searches with.
-var _ WindowSearch = photosapi.Grants{}
+var _ external.PhotoSearch = photosapi.Grants{}
 
 // grantCall answers searchWindows as the photo library would, through the
 // request's JSON, or refuses with code.
@@ -50,15 +54,11 @@ func grantCall(t *testing.T, code string, asked *photosapi.GrantRequest) photosa
 
 func TestAStoreSearchesWithThePhotoLibrarysGrants(t *testing.T) {
 	var asked photosapi.GrantRequest
-	store, err := Open(t.Context(), t.TempDir(), Options{Grants: grantCall(t, "", &asked)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	if store.search == nil {
+	search := videocut.WindowSearchOf(grantCall(t, "", &asked))
+	if search == nil {
 		t.Fatal("a store whose grants search windows has no search")
 	}
-	hits, err := store.search.SearchWindows(t.Context(), "grant-1", []string{"a", "b"}, 3)
+	hits, err := search.SearchWindows(t.Context(), "grant-1", []string{"a", "b"}, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 		{"down", domain.ErrSearchUnavailable},
 	} {
 		var asked photosapi.GrantRequest
-		_, err := GrantSearch{Grants: grantCall(t, c.code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
+		_, err := external.GrantSearch{Grants: grantCall(t, c.code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
 		if !errors.Is(err, c.want) {
 			t.Errorf("%s: %v, want %v", c.code, err, c.want)
 		}
@@ -95,7 +95,7 @@ func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 	for code, want := range map[string]error{photosapi.GrantInvalid: domain.ErrInvalid, photosapi.GrantNotFound: domain.ErrGrantRevoked,
 		photosapi.GrantUnauthorized: domain.ErrSessionEnded, "something_new": domain.ErrPhotosUnavailable} {
 		var asked photosapi.GrantRequest
-		_, err := GrantSearch{Grants: grantCall(t, code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
+		_, err := external.GrantSearch{Grants: grantCall(t, code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
 		if !errors.Is(err, want) || errors.Is(err, domain.ErrSearchUnavailable) || errors.Is(err, domain.ErrSearchModel) {
 			t.Errorf("%s: %v, want %v", code, err, want)
 		}

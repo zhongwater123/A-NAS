@@ -349,7 +349,7 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 		return nil, domain.ErrNotFound // there is no frame of it
 	}
 	if err != nil {
-		return nil, grantError(err)
+		return nil, domain.GrantError(err)
 	}
 	defer func() { _ = file.Close() }()
 	if opened != object {

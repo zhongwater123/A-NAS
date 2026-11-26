@@ -462,7 +462,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	// job remains in needs_input and repeating the same drop finishes it.
 	if grantID.Valid {
 		if err := s.grants.Remove(ctx, grantID.String, ids); err != nil && photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
-			return domain.Job{}, grantError(err)
+			return domain.Job{}, domain.GrantError(err)
 		}
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
@@ -513,7 +513,7 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (domain.
 		return domain.Job{}, err
 	}
 	if err := s.analyzeAssets(ctx, grantID, job.Missing, true); err != nil {
-		return domain.Job{}, grantError(err)
+		return domain.Job{}, domain.GrantError(err)
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
 		return domain.Job{}, err

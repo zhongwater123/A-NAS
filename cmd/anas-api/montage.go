@@ -88,7 +88,8 @@ func configuredMontage(ctx context.Context, config Config, grants app.Grants, me
 	// Development has no music analysis or compute Worker of its own unless
 	// their sockets are given; songs wait for them.
 	editing, _ := media.(app.Editing)
-	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.MontagePlanAnswers), Logger: logger}
+	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.MontagePlanAnswers),
+		WindowSearch: videocut.WindowSearchOf(grants), Logger: logger}
 	if config.MontageMusicSocket != "" {
 		options.Music = external.MusicWorker{Socket: config.MontageMusicSocket}
 	}

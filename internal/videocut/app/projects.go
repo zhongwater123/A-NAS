@@ -100,27 +100,10 @@ func validText(text string, most int) bool {
 	return utf8.ValidString(text) && utf8.RuneCountInString(text) <= most && !strings.ContainsAny(text, "\x00")
 }
 
-// grantError turns what the photo library answered into the montage
-// center's errors. No answer, an owner whose account is not in use now
-// (owner_inactive) and the photo library's own failure are for later.
-func grantError(err error) error {
-	switch photosapi.GrantErrorCode(err) {
-	case photosapi.GrantAssetsRefused, photosapi.GrantAssetNotFound:
-		return domain.ErrAssetsRefused
-	case photosapi.GrantTooMany:
-		return domain.ErrTooManyAssets
-	case photosapi.GrantUnauthorized:
-		return domain.ErrSessionEnded
-	case photosapi.GrantNotFound:
-		return domain.ErrGrantRevoked
-	}
-	return fmt.Errorf("%w: %v", domain.ErrPhotosUnavailable, err)
-}
-
 // assetGone reports whether the photo library answered that a video a
 // project holds can no longer be read: deleted, or in the trash. Where a
 // video is read rather than added, that is not a video that cannot be added
-// (grantError), and the reader says what it means there.
+// (GrantError), and the reader says what it means there.
 func assetGone(err error) bool {
 	code := photosapi.GrantErrorCode(err)
 	return code == photosapi.GrantAssetNotFound || code == photosapi.GrantAssetsRefused
@@ -214,7 +197,7 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 func (s *Store) register(ctx context.Context, owner, session string, b batchRow) error {
 	grant, err := s.grants.Register(ctx, session, b.projectID, b.assets)
 	if err != nil {
-		err = grantError(err)
+		err = domain.GrantError(err)
 		if !errors.Is(err, domain.ErrPhotosUnavailable) {
 			// Refused: nothing was granted.
 			s.undo(ctx, b, "")
@@ -230,7 +213,7 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 	looked, err := s.grants.Lookup(ctx, grant.ID, b.assets)
 	switch {
 	case err != nil:
-		err = grantError(err)
+		err = domain.GrantError(err)
 	case len(looked) != len(b.assets):
 		err = fmt.Errorf("%w: the grant answered %d of %d videos", domain.ErrPhotosUnavailable, len(looked), len(b.assets))
 	default:
@@ -328,7 +311,7 @@ func (s *Store) settle(ctx context.Context, b batchRow, grantID string) (string,
 		drop := slices.DeleteFunc(slices.Clone(b.assets), func(id string) bool { return held[id] })
 		if len(drop) > 0 {
 			if err := s.grants.Remove(ctx, grantID, drop); err != nil && photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
-				return "", grantError(err)
+				return "", domain.GrantError(err)
 			}
 		}
 	}
@@ -844,7 +827,7 @@ func (s *Store) reconcile(ctx context.Context) error {
 	defer s.reconciling.Unlock()
 	grants, err := s.grants.List(ctx)
 	if err != nil {
-		return grantError(err)
+		return domain.GrantError(err)
 	}
 	held := map[string][]photos.Grant{}
 	for _, grant := range grants {

@@ -708,7 +708,7 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 			continue
 		}
 		if err != nil {
-			return grantError(err)
+			return domain.GrantError(err)
 		}
 		if was.windowsChanged(now) {
 			return domain.ErrAnalysisChanged

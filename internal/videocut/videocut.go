@@ -33,6 +33,16 @@ var (
 	_ app.MusicAnalyzer = external.MusicWorker{}
 )
 
+// WindowSearchOf is the grants' own search of windows by text, for editing
+// a film (#596), when they have one: the photo library's answers as the
+// montage center's errors (external.GrantSearch).
+func WindowSearchOf(grants app.Grants) app.WindowSearch {
+	if search, ok := grants.(external.PhotoSearch); ok {
+		return external.GrantSearch{Grants: search}
+	}
+	return nil
+}
+
 type Config struct {
 	Root       string
 	SocketPath string
@@ -123,7 +133,8 @@ func Run(ctx context.Context, config Config) error {
 		Unavailable: protocol.Unavailable,
 		Open: func(ctx context.Context, root string) (*servedStore, error) {
 			store, err := app.Open(ctx, root, app.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute,
-				JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, PlanMarkers: config.PlanMarkers, Logger: config.Logger})
+				JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, WindowSearch: WindowSearchOf(config.Grants),
+				PlanMarkers: config.PlanMarkers, Logger: config.Logger})
 			if err != nil {
 				return nil, err
 			}
