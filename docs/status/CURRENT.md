@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-11-24
+更新时间：2026-11-26
 
 本页是目录：只记当前事实、阻塞、待用户决定的事与下一步，每条一两行，细节在链接的文档中。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，决定的经过见[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)。每次部署前的本页存为同目录下按安装日期命名的快照（如 [2026-11-10](2026-11-10.md)），规则见[文档系统](../README.md#写入规则)第 8 条。
 
@@ -10,15 +10,17 @@
 
 ## 实验 NAS 上运行什么
 
-- 已部署：`a40311de890b`，软件包 `1.0.1~rc.6+dev20261119.123+ga40311de890b`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，2026-11-20 安装），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
+- 已部署：`97776b365cbc`，软件包 `1.0.1~rc.6+dev20261125.152+g97776b365cbc`（[ADR 0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)，2026-11-26 安装），apt 源是本机软件源的 `dev`，之后在[系统更新](../specs/system-update.md)中安装。最近的 RC 标签仍是 [`v1.0.1-rc.6`](../releases/v1.0.1.md#rc6-状态)。未部署的 PR：`git fetch` 后运行 `bash scripts/undeployed.sh`。
   - 宿主机依赖由 `a-nas-host` 与 `a-nas-console` 声明（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）；`ifupdown-wait-online` 已停用。
-  - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `76a8ba1f3e6dfb14`；AI Worker 的内存上限为总内存减 2.5 GiB（13202 MiB）。
-  - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
+  - 相册：排序从向量索引读（Qdrant 1.20.0，#411）；读文字用 llama.cpp b11655 与 Qwen3.5-4B，更正按内容对象存（Catalog 16，[ADR 0033](../adr/0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)）；AI 运行环境 `90f9a9ea75eec905`（含 PyTorch）；AI Worker 的内存上限为总内存减 2.5 GiB（13202 MiB）。
+  - 家庭中心以 `a-nas-family` 运行（family.db 版本 3）；共享工作区以 `a-nas-workspace` 运行；网页搜索已开启，SearXNG 以 `a-nas-search` 运行；温度与风扇转速由 `nct6775` 驱动读取；FFmpeg Worker 是 `anas-ffmpeg.socket`；Host Agent 的记录在 root 专属的 `/var/lib/a-nas-host`。
   - 虚拟伙伴的动画池 `36492963e4112f55`（A-NAS-assets 固定副本，#445）。
   - Caddy 2.11.9 来自 A-NAS 软件源，另装了 `wireguard-tools`；互联网入口关闭（`/etc/a-nas/internet.env` 不存在），第一版暂缓（[决定](../decisions/2026-11-09-home-network-first.md)）。
 - AI 助手 V1：2026-11-19 由 `a-nas` 接管试用（[手册](../runbooks/enable-ai-assistant.md#从试用接管)），成员都能用。
 - 剪辑中心由 drop-in `montage-demo.conf` 只在本机打开（[手册](../runbooks/demo-montage-center.md)）；配乐分析[手动装](../runbooks/enable-montage-music.md)，不随 release 发布。
-- 照片打分模块以脚本装在本机（11-13 安装，11-17 更新，[手册](../runbooks/install-and-remove-photo-scoring.md)）。
+- 照片打分模块以脚本装在本机（11-13 安装，11-26 更新到打分库版本 5，[手册](../runbooks/install-and-remove-photo-scoring.md)）。
+- 美学打分模型只供内部验收，单独装包（[美学打分](../architecture/photo-ai.md#美学打分)）；相册还没有调用它。
+- 手机直连热点：装有 `a-nas-hotspot-radio`；热点证书来自 Let's Encrypt，每天检查续期（[手册](../runbooks/prepare-experimental-nas-hotspot-radio.md#热点证书)）。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1；一块盘坏了不再卸载整个数据卷（#441，2026-11-10 重启后核对，[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 应用中心 2026-11-03 只装有思源笔记；[#300](https://github.com/zhongwater123/A-NAS/pull/300) 之前装的容器没有日志上限，重新安装才有。
@@ -49,6 +51,6 @@
 7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
 9. 剪辑中心：allin1 版权待议；二次编辑的界面按新交互重做，先写新的 ADR 与规格（[#632](https://github.com/zhongwater123/A-NAS/issues/632)），再拆 #596 的子 issue；导出与修改稿、重剪从修改稿出发两处要先定（[ADR 0039 的修订说明](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#实现与后续修订2026-11-25)）；已有的服务端见[实施方案](../architecture/montage-center.md#出片后的二次编辑)。
-10. 家庭待办：随下次发布部署到实验 NAS，再把验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
-11. 共享工作区：M1（共享页面与 agent 修改）合入后部署并实机验收，再做 M2 的批注与版本对比（[规格](../specs/shared-workspace.md)）。
+10. 家庭待办：把实机验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
+11. 共享工作区：实机验收 M1（共享页面与 agent 修改），再做 M2 的批注与版本对比（[规格](../specs/shared-workspace.md)）。
 12. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
