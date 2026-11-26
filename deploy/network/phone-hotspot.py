@@ -248,8 +248,8 @@ body {{ margin: 12vh auto 0; padding: 0 24px; max-width: 27rem; line-height: 1.6
 a {{ display: inline-block; padding: 8px 0; font-weight: 600; overflow-wrap: anywhere; }}
 </style>
 <main><h1>A-NAS 手机直连</h1><p>此热点用于访问 NAS 和上传文件。</p>
-<p>请在手机浏览器打开 WebOS 登录并上传。</p>
-<a href="{base}/" target="_blank" rel="noopener noreferrer">打开 WebOS</a>
+<p>请用 Safari 或 Chrome 登录并上传。如果系统窗口没有打开网页，可以复制下方地址。</p>
+<a href="{base}/">打开 WebOS</a>
 <p>{base}/</p></main></html>
 """, encoding="utf-8")
     # Files are only served by these exact paths and the HTTPS listener.
