@@ -371,7 +371,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 			return nil
 		}
 		first = true
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
+		if err := tx.ResetPlanRejections(ctx, jobID); err != nil {
 			return err
 		}
 		return s.dueNow(ctx, tx, jobID)
@@ -406,8 +406,7 @@ func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons 
 			late = over
 			return err
 		}
-		if err := tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
-			jobID).Scan(&rejections); err != nil {
+		if rejections, err = tx.CountPlanRejection(ctx, jobID); err != nil {
 			return err
 		}
 		if rejections < maxPlanRejections {
@@ -416,7 +415,7 @@ func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons 
 		if err := tx.EndRoundByID(ctx, call.roundID, s.now(), "答案连续 3 次不合格"); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {
+		if err := tx.ResetPlanRejections(ctx, jobID); err != nil {
 			return err
 		}
 		return s.dueNow(ctx, tx, jobID)

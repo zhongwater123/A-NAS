@@ -13,7 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
@@ -319,11 +318,8 @@ func (p *planFailed) Unwrap() error { return domain.ErrPlanFailed }
 // that may not wants none. pickKey is the first step's input key, which a
 // round plans for.
 func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
-	var owner string
-	var epoch int
-	var wanted bool
-	if err := s.db.QueryRowContext(ctx, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
-		Scan(&owner, &epoch, &wanted); err != nil {
+	owner, epoch, wanted, err := s.db.JobPlanning(ctx, jobID)
+	if err != nil {
 		return err
 	}
 	// A round that plans for other inputs, or an earlier epoch, is over:
@@ -335,7 +331,7 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 		if !wanted {
 			return why
 		}
-		if _, err := s.db.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID); err != nil {
+		if err := s.db.UnwantRound(ctx, jobID); err != nil {
 			return err
 		}
 		s.syncMarkers(ctx)
@@ -380,9 +376,8 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 	case s.now().Sub(registered) > planGrantLife:
 		return unwanted(pending(DetailGrantOld))
 	}
-	var since string
-	if err := s.db.QueryRowContext(ctx, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
-		WHERE id = ? RETURNING IFNULL(plan_wanted_at, '')`, sqlitedb.FormatTime(s.now()), jobID).Scan(&since); err != nil {
+	since, err := s.db.WantRound(ctx, jobID, s.now())
+	if err != nil {
 		return err
 	}
 	if err := s.leaveMarker(username); err != nil {
@@ -407,20 +402,6 @@ func (s *Store) hasMarker(username string) bool {
 	return s.markers != nil && s.markers.Has(username)
 }
 
-// wantsRound is what makes a job one a round may be claimed for: it came to
-// planning, waits there for VNAS, and asked for a round. A job put back in
-// the queue, by replanning or by taking videos out, wants none until it
-// comes to planning again
-// (resume). It reads the jobs as j.
-const wantsRound = "j.plan_wanted = 1 AND j.state = 'waiting' AND j.wait_reason = '" + WaitVNAS + "' AND j.cancel_requested = 0"
-
-// keepsMarker is what keeps a member's marker: a job that wants a round, or
-// one that wanted it and is looking again right now (a waiting job runs for
-// an instant each time it looks, and leaves its marker as it goes back to
-// waiting). Without the second, a sync in that instant would take the marker
-// of a job that still waits.
-const keepsMarker = "j.plan_wanted = 1 AND j.cancel_requested = 0 AND (j.state = 'running' OR (j.state = 'waiting' AND j.wait_reason = '" + WaitVNAS + "'))"
-
 // SyncMarkers makes the markers say which members have a job wanting a
 // round: at start, as the run directory is empty after a restart, and
 // whenever a job stops wanting one.
@@ -428,22 +409,8 @@ func (s *Store) SyncMarkers(ctx context.Context) error {
 	if s.markers == nil {
 		return nil
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
-		WHERE `+keepsMarker+` AND g.registered_at >= ?`,
-		sqlitedb.FormatTime(s.now().Add(-planGrantLife)))
+	wanted, err := s.db.MarkedUsernames(ctx, WaitVNAS, s.now().Add(-planGrantLife))
 	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	wanted := map[string]bool{}
-	for rows.Next() {
-		var username string
-		if err := rows.Scan(&username); err != nil {
-			return err
-		}
-		wanted[username] = true
-	}
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	return s.markers.Keep(wanted)
@@ -481,10 +448,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 		}
 		var epoch int
 		var pickKey, settings string
-		err = tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
-			WHERE j.owner_user_id = ? AND `+wantsRound+`
-			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
-			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&claim.JobID, &epoch, &pickKey, &settings)
+		claim.JobID, epoch, pickKey, settings, err = tx.ClaimableJob(ctx, owner, WaitVNAS)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNoPlanWanted
 		}
@@ -504,8 +468,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 		if err := tx.AddRound(ctx, claim.RoundID, claim.JobID, owner, claim.AttemptToken, s.now(), epoch, claim.Template, pickKey); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", claim.JobID)
-		return err
+		return tx.UnwantRound(ctx, claim.JobID)
 	})
 	// Whether a round was claimed or none was wanted, the markers follow the
 	// jobs: the member's is gone unless another of their jobs wants a round.
@@ -541,7 +504,7 @@ func (s *Store) round(ctx context.Context, tx *db.Tx, owner, roundID string) (db
 // longer say the plan is unknown, a round in progress is over, and the
 // refusals so far are forgotten.
 func (s *Store) newPlanEpoch(ctx context.Context, tx *db.Tx, jobID, why string) error {
-	if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
+	if err := tx.NewPlanEpoch(ctx, jobID); err != nil {
 		return err
 	}
 	return tx.EndRounds(ctx, jobID, s.now(), why)
@@ -559,8 +522,8 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 		if err != nil {
 			return err
 		}
-		var cancelled bool
-		if err := tx.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", r.JobID).Scan(&cancelled); err != nil {
+		cancelled, err := tx.CancelRequested(ctx, r.JobID)
+		if err != nil {
 			return err
 		}
 		if r.State != RoundClaimed || cancelled {
@@ -643,16 +606,14 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result st
 // did not hand back is unknown).
 func (s *Store) SweepRounds(ctx context.Context) error {
 	now := s.now()
-	late := db.LateRounds
-	bounds := []any{sqlitedb.FormatTime(now.Add(-claimTimeout)), sqlitedb.FormatTime(now.Add(-handoverTimeout)), sqlitedb.FormatTime(now.Add(-planTimeout))}
+	claimed, started, called := now.Add(-claimTimeout), now.Add(-handoverTimeout), now.Add(-planTimeout)
 	var swept int64
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+late+")",
-			append([]any{sqlitedb.FormatTime(now)}, bounds...)...); err != nil {
+		if err := tx.DueLateRoundJobs(ctx, now, claimed, started, called); err != nil {
 			return err
 		}
 		var err error
-		swept, err = tx.EndLateRounds(ctx, now, "out of time", now.Add(-claimTimeout), now.Add(-handoverTimeout), now.Add(-planTimeout))
+		swept, err = tx.EndLateRounds(ctx, now, "out of time", claimed, started, called)
 		return err
 	})
 	if err != nil {
@@ -678,7 +639,6 @@ func truncate(text string, most int) string {
 
 // dueNow makes a job waiting for its plan due at once: the round it waited
 // on moved.
-func (s *Store) dueNow(ctx context.Context, q queryer, jobID string) error {
-	_, err := q.ExecContext(ctx, "UPDATE jobs SET not_before = ? WHERE id = ? AND state = 'waiting'", sqlitedb.FormatTime(s.now()), jobID)
-	return err
+func (s *Store) dueNow(ctx context.Context, tx *db.Tx, jobID string) error {
+	return tx.MakeWaitingJobDue(ctx, jobID, s.now())
 }

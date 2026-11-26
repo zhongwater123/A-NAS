@@ -358,7 +358,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 	if err := s.db.EndRounds(ctx, jobID, s.now(), "cancelled"); err != nil {
 		return domain.Job{}, err
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID); err != nil {
+	if err := s.db.UnwantRound(ctx, jobID); err != nil {
 		return domain.Job{}, err
 	}
 	s.syncMarkers(ctx)
