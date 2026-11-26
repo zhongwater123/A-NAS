@@ -637,11 +637,8 @@ func (r *saveRefusal) Unwrap() error { return r.error }
 func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	step, last := planStep("save", run.plan), run.plan >= run.plans
 	versionKey := run.keys[step]
-	var number int
-	var name string
-	if err := s.db.QueryRowContext(ctx, `SELECT IFNULL((SELECT number FROM versions WHERE version_key = ?),
-		(SELECT IFNULL(MAX(number), 0) + 1 FROM versions WHERE project_id = p.id)), p.name
-		FROM projects p WHERE p.id = ?`, versionKey, run.projectID).Scan(&number, &name); err != nil {
+	number, name, err := s.db.VersionNumber(ctx, versionKey, run.projectID)
+	if err != nil {
 		return nil, err
 	}
 	film, err := os.Open(filepath.Join(s.jobDir(run.id), run.render.Film))

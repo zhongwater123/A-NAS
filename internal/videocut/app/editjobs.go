@@ -97,7 +97,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		}
 		// An edit of a recut version is not a recut: its sentence and base
 		// stay with the version they planned.
-		settings.ProjectName, settings.Edit, settings.Recut = row.name, &edit, nil
+		settings.ProjectName, settings.Edit, settings.Recut = row.Name, &edit, nil
 		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindEdit, settings: settings, plans: 1,
 			sourceVersion: sql.NullString{String: src.versionID, Valid: true}, draft: sql.NullString{String: draftID, Valid: true},
 			draftRevision: sql.NullInt64{Int64: int64(draft.revision), Valid: true}}); err != nil {

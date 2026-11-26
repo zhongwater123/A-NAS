@@ -115,7 +115,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if err != nil {
 			return err
 		}
-		if row.state != "ready" {
+		if row.State != "ready" {
 			return domain.ErrNotFound
 		}
 		if err := projectIdle(ctx, tx, projectID); err != nil {
@@ -220,8 +220,8 @@ func jobSettings(ctx context.Context, q queryer, jobID string) (domain.JobSettin
 }
 
 // settingsOf is a project's settings as a job keeps them.
-func (s *Store) settingsOf(ctx context.Context, q queryer, row projectRow) (domain.JobSettings, error) {
-	settings := domain.JobSettings{Ask: row.ask, Chronological: row.chronological, ProjectName: row.name}
+func (s *Store) settingsOf(ctx context.Context, q queryer, row db.ProjectRow) (domain.JobSettings, error) {
+	settings := domain.JobSettings{Ask: row.Ask, Chronological: row.Chronological, ProjectName: row.Name}
 	if s.jobMusic != nil {
 		chosen := s.jobMusic.Chosen
 		if s.jobMusic == Music(s) {
@@ -231,7 +231,7 @@ func (s *Store) settingsOf(ctx context.Context, q queryer, row projectRow) (doma
 				return s.chosenIn(ctx, q, owner, projectID)
 			}
 		}
-		id, start, err := chosen(ctx, row.owner, row.id)
+		id, start, err := chosen(ctx, row.Owner, row.ID)
 		if err != nil {
 			return domain.JobSettings{}, err
 		}
@@ -421,10 +421,8 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 			return domain.Job{}, domain.ErrJobState
 		}
 	}
-	var count int
-	var grantID sql.NullString
-	if err := s.db.QueryRowContext(ctx, `SELECT grant_id, (SELECT COUNT(*) FROM job_assets WHERE job_id = ?)
-		FROM projects WHERE id = ?`, jobID, job.ProjectID).Scan(&grantID, &count); err != nil {
+	grantID, count, err := s.db.ProjectGrantAndJobAssets(ctx, job.ProjectID, jobID)
+	if err != nil {
 		return domain.Job{}, err
 	}
 	if count <= len(ids) {

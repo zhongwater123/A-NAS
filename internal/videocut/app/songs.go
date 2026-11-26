@@ -18,7 +18,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -226,7 +225,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	if row.state != "ready" {
+	if row.State != "ready" {
 		return domain.SongDetail{}, domain.ErrNotFound
 	}
 	if !utf8.ValidString(source.Title) || strings.ContainsRune(source.Title, 0) {
@@ -256,8 +255,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE projects SET song_id = ?, song_track = NULLIF(?, ''), song_start = NULL, song_selection = NULL, updated_at = ?
-			WHERE id = ? AND owner_user_id = ?`, songID, source.TrackID, sqlitedb.FormatTime(s.now()), projectID, owner); err != nil {
+		if err := tx.SetProjectSong(ctx, owner, projectID, songID, source.TrackID, s.now()); err != nil {
 			return err
 		}
 		return tx.ForgetUnusedSongs(ctx, owner)
@@ -350,27 +348,16 @@ func (s *Store) ReclaimSongs(ctx context.Context) error {
 	return nil
 }
 
-// projectSong is a project's song and the start the member chose.
-type projectSong struct {
-	songID    sql.NullString
-	trackID   sql.NullString
-	start     sql.NullFloat64
-	selection sql.NullString
-}
-
-func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID string) (projectSong, error) {
-	var song projectSong
-	var state string
-	err := q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
-		projectID, owner).Scan(&state, &song.songID, &song.trackID, &song.start, &song.selection)
+func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID string) (db.ProjectSong, error) {
+	state, song, err := q.ProjectSong(ctx, owner, projectID)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && state != "ready" {
-		return projectSong{}, domain.ErrNotFound
+		return db.ProjectSong{}, domain.ErrNotFound
 	}
 	if err != nil {
-		return projectSong{}, err
+		return db.ProjectSong{}, err
 	}
-	if !song.songID.Valid {
-		return projectSong{}, domain.ErrNoSong
+	if !song.SongID.Valid {
+		return db.ProjectSong{}, domain.ErrNoSong
 	}
 	return song, nil
 }
@@ -400,11 +387,11 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (domain.SongD
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	row, err := s.song(ctx, s.db, chosen.songID.String)
+	row, err := s.song(ctx, s.db, chosen.SongID.String)
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	detail := domain.SongDetail{ID: row.id, TrackID: chosen.trackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
+	detail := domain.SongDetail{ID: row.id, TrackID: chosen.TrackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
 		State: row.state, Reason: row.reason, Waiting: row.waiting}
 	if st := row.analysis.Structure; st != nil {
 		detail.Tempo, detail.Beats, detail.Downbeats, detail.Sections = st.BPM, st.Beats, st.Downbeats, st.Segments
@@ -412,9 +399,9 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (domain.SongD
 	if selection := row.analysis.Selection; selection != nil && row.state == SongReady {
 		start := selection.Excerpt[0]
 		detail.DefaultStart, detail.Selection = &start, selection
-		if chosen.selection.Valid {
+		if chosen.Selection.Valid {
 			var own keptSelection
-			if err := json.Unmarshal([]byte(chosen.selection.String), &own); err != nil {
+			if err := json.Unmarshal([]byte(chosen.Selection.String), &own); err != nil {
 				return domain.SongDetail{}, err
 			}
 			detail.Selection = &own.Selection
@@ -433,7 +420,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	row, err := s.song(ctx, s.db, chosen.songID.String)
+	row, err := s.song(ctx, s.db, chosen.SongID.String)
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
@@ -474,12 +461,11 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		}
 		keptStart, kept = start, string(encoded)
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE projects SET song_start = ?, song_selection = ?, updated_at = ?
-		WHERE id = ? AND owner_user_id = ? AND song_id = ?`, keptStart, kept, sqlitedb.FormatTime(s.now()), projectID, owner, row.id)
+	changed, err := s.db.SetSongStart(ctx, owner, projectID, row.id, keptStart, kept, s.now())
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+	if changed == 0 {
 		// The member chose another song meanwhile.
 		return domain.SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
 	}
@@ -506,7 +492,7 @@ func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (dom
 	if err != nil {
 		return domain.SongAudio{}, err
 	}
-	return s.openSong(ctx, chosen.songID.String)
+	return s.openSong(ctx, chosen.SongID.String)
 }
 
 // DecodeSong streams audio, a song OpenSongAudio opened, as FLAC from start

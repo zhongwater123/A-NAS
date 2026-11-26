@@ -16,7 +16,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
@@ -172,9 +171,7 @@ func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (do
 		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE projects SET chosen_version_id = ?, updated_at = ? WHERE id = ?",
-			versionID, sqlitedb.FormatTime(s.now()), projectID)
-		return err
+		return tx.ChooseVersion(ctx, projectID, versionID, s.now())
 	})
 	if err != nil {
 		return domain.ProjectDetail{}, err
@@ -329,10 +326,7 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 	if s.editing == nil {
 		return nil, domain.ErrJobsUnavailable
 	}
-	var grantID sql.NullString
-	var object string
-	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, a.object_id FROM projects p JOIN project_assets a ON a.project_id = p.id
-		WHERE p.id = ? AND p.owner_user_id = ? AND p.state = 'ready' AND a.asset_id = ?`, projectID, owner, assetID).Scan(&grantID, &object)
+	grantID, object, err := s.db.ReadyProjectAsset(ctx, owner, projectID, assetID)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !grantID.Valid {
 		return nil, domain.ErrNotFound
 	}

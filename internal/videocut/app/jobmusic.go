@@ -39,10 +39,10 @@ func (s *Store) chosenIn(ctx context.Context, q queryer, owner, projectID string
 		return "", 0, nil
 	case err != nil:
 		return "", 0, err
-	case chosen.start.Valid:
-		return chosen.songID.String, chosen.start.Float64, nil
+	case chosen.Start.Valid:
+		return chosen.SongID.String, chosen.Start.Float64, nil
 	}
-	return chosen.songID.String, DefaultStart, nil
+	return chosen.SongID.String, DefaultStart, nil
 }
 
 // ownSong is owner's song row.
@@ -119,9 +119,7 @@ func (s *Store) ExcerptKey(ctx context.Context, owner, songID string, start floa
 // draggedSelection is the excerpt one of owner's projects keeps for the song
 // from start (SongStart), nil when none does.
 func (s *Store) draggedSelection(ctx context.Context, owner, songID string, start float64) (*keptSelection, error) {
-	var text string
-	err := s.db.QueryRowContext(ctx, `SELECT song_selection FROM projects
-		WHERE owner_user_id = ? AND song_id = ? AND song_start = ? AND song_selection IS NOT NULL LIMIT 1`, owner, songID, start).Scan(&text)
+	text, err := s.db.DraggedSelection(ctx, owner, songID, start)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

@@ -13,7 +13,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
@@ -109,34 +108,19 @@ func assetGone(err error) bool {
 	return code == photosapi.GrantAssetNotFound || code == photosapi.GrantAssetsRefused
 }
 
-type projectRow struct {
-	id, owner, name, state string
-	grantID                sql.NullString
-	ask                    string
-	chronological          bool
-	created                time.Time
-	chosen                 string
-}
-
-func (s *Store) project(ctx context.Context, q queryer, owner, id string) (projectRow, error) {
-	var row projectRow
-	var created string
-	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
-		FROM projects WHERE id = ? AND owner_user_id = ?`, id, owner).
-		Scan(&row.id, &row.owner, &row.name, &row.state, &row.grantID, &row.ask, &row.chronological, &created, &row.chosen)
+func (s *Store) project(ctx context.Context, q queryer, owner, id string) (db.ProjectRow, error) {
+	row, err := q.Project(ctx, owner, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return projectRow{}, domain.ErrNotFound
+		return db.ProjectRow{}, domain.ErrNotFound
 	}
-	if err != nil {
-		return projectRow{}, err
-	}
-	row.created, err = time.Parse(time.RFC3339Nano, created)
 	return row, err
 }
 
 // queryer is the database or one transaction in it (db.DB, db.Tx).
 type queryer interface {
 	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
+	Project(ctx context.Context, owner, id string) (db.ProjectRow, error)
+	ProjectSong(ctx context.Context, owner, projectID string) (string, db.ProjectSong, error)
 	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
 	RoundStanding(ctx context.Context, owner, jobID, token string) (db.RoundStanding, error)
 	Song(ctx context.Context, id string) (db.SongRow, error)
@@ -164,11 +148,9 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 			return err
 		}
 		at := s.now()
-		now := sqlitedb.FormatTime(at)
 		if kind == kindCreate {
 			projectID = newID("project")
-			if _, err := tx.ExecContext(ctx, `INSERT INTO projects(id, owner_user_id, name, state, created_at, updated_at)
-				VALUES(?, ?, ?, 'registering', ?, ?)`, projectID, owner, name, now, now); err != nil {
+			if err := tx.AddRegisteringProject(ctx, projectID, owner, name, at); err != nil {
 				return err
 			}
 		}
@@ -195,7 +177,7 @@ func (s *Store) register(ctx context.Context, owner, session string, b db.BatchR
 	}
 	if b.Kind == kindCreate {
 		// Settling a batch that does not finish revokes this grant.
-		if _, err := s.db.ExecContext(ctx, "UPDATE projects SET grant_id = ? WHERE id = ? AND state = 'registering'", grant.ID, b.ProjectID); err != nil {
+		if err := s.db.SetRegisteringGrant(ctx, b.ProjectID, grant.ID); err != nil {
 			return err
 		}
 	}
@@ -232,16 +214,13 @@ func (s *Store) register(ctx context.Context, owner, session string, b db.BatchR
 	}
 	return s.db.Update(ctx, func(tx *db.Tx) error {
 		at := s.now()
-		now := sqlitedb.FormatTime(at)
 		for _, asset := range looked {
 			if err := tx.AddProjectAsset(ctx, b.ProjectID, asset.AssetID, asset.ObjectID, b.ID, at); err != nil {
 				return err
 			}
 		}
 		// An addition to a project whose grant was lost registered a new one.
-		if _, err := tx.ExecContext(ctx, `UPDATE projects SET state = 'ready', grant_id = ?, updated_at = ?,
-			name = CASE WHEN name = '' THEN ? ELSE name END WHERE id = ? AND owner_user_id = ?`,
-			grant.ID, now, defaultName(earliest, latest, s.now()), b.ProjectID, owner); err != nil {
+		if err := tx.ReadyProject(ctx, owner, b.ProjectID, grant.ID, defaultName(earliest, latest, s.now()), at); err != nil {
 			return err
 		}
 		return tx.FinishBatch(ctx, b.ID)
@@ -270,8 +249,7 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 	if b.Kind == kindCreate {
 		var revoke string
 		err := s.db.Update(ctx, func(tx *db.Tx) error {
-			var recorded sql.NullString
-			err := tx.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", b.ProjectID).Scan(&recorded)
+			recorded, err := tx.RegisteringGrant(ctx, b.ProjectID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
@@ -286,8 +264,7 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 					return err
 				}
 			}
-			_, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", b.ProjectID)
-			return err
+			return tx.DeleteProject(ctx, b.ProjectID)
 		})
 		return revoke, err
 	}
@@ -381,7 +358,7 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	if row.state != projectReady {
+	if row.State != projectReady {
 		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
 	b, err := s.batch(ctx, owner, requestKey, kindAdd, projectID, "", ids)
@@ -398,31 +375,26 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 
 // Projects lists owner's projects, newest first, from cursor.
 func (s *Store) Projects(ctx context.Context, owner, cursor string) (domain.ProjectPage, error) {
-	where, args := "p.owner_user_id = ? AND p.state = 'ready'", []any{owner}
+	var after *db.ProjectCursor
 	if cursor != "" {
 		at, id, ok := strings.Cut(cursor, "|")
 		if !ok {
 			return domain.ProjectPage{}, domain.ErrInvalid
 		}
-		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
-		args = append(args, at, at, id)
+		after = &db.ProjectCursor{At: at, ID: id}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT p.id, p.name, p.created_at, (SELECT COUNT(*) FROM project_assets a WHERE a.project_id = p.id),
-		IFNULL(v.id, ''), IFNULL(v.film_asset_id, '')
-		FROM projects p LEFT JOIN versions v ON v.id = p.chosen_version_id AND v.project_id = p.id
-		WHERE `+where+` ORDER BY p.created_at DESC, p.id DESC LIMIT ?`, append(args, pageSize+1)...)
+	// The store has one connection: the page's rows are read whole before
+	// the previews are.
+	listed, err := s.db.ProjectList(ctx, owner, after, pageSize+1)
 	if err != nil {
 		return domain.ProjectPage{}, err
 	}
-	defer rows.Close()
 	page := domain.ProjectPage{Items: []domain.Project{}}
 	var lastAt string
-	for rows.Next() {
-		var project domain.Project
-		var created string
-		if err := rows.Scan(&project.ID, &project.Name, &created, &project.AssetCount, &project.ChosenVersionID, &project.ChosenFilmAssetID); err != nil {
-			return domain.ProjectPage{}, err
-		}
+	for _, row := range listed {
+		project := domain.Project{ID: row.ID, Name: row.Name, AssetCount: row.AssetCount, ChosenVersionID: row.ChosenVersionID,
+			ChosenFilmAssetID: row.ChosenFilmAssetID}
+		created := row.Created
 		if len(page.Items) == pageSize {
 			page.Next = lastAt + "|" + page.Items[pageSize-1].ID
 			break
@@ -431,13 +403,6 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (domain.Proj
 			return domain.ProjectPage{}, err
 		}
 		page.Items, lastAt = append(page.Items, project), created
-	}
-	if err := rows.Err(); err != nil {
-		return domain.ProjectPage{}, err
-	}
-	// The store has one connection: the page's rows go before the previews are read.
-	if err := rows.Close(); err != nil {
-		return domain.ProjectPage{}, err
 	}
 	for i := range page.Items {
 		if page.Items[i].PreviewAssetIDs, err = s.previews(ctx, page.Items[i].ID); err != nil {
@@ -469,15 +434,15 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	if row.state != projectReady {
+	if row.State != projectReady {
 		return domain.ProjectDetail{}, domain.ErrNotFound
 	}
 	kept, err := s.db.ProjectAssets(ctx, projectID)
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	detail := domain.ProjectDetail{ID: row.id, Name: row.name, CreatedAt: row.created, Ask: row.ask,
-		Chronological: row.chronological, Assets: []domain.ProjectAsset{}}
+	detail := domain.ProjectDetail{ID: row.ID, Name: row.Name, CreatedAt: row.Created, Ask: row.Ask,
+		Chronological: row.Chronological, Assets: []domain.ProjectAsset{}}
 	objects := map[string]string{}
 	var ids []string
 	for _, k := range kept {
@@ -490,7 +455,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 		return domain.ProjectDetail{}, err
 	}
 	for _, version := range detail.Versions {
-		if version.ID == row.chosen {
+		if version.ID == row.Chosen {
 			detail.ChosenVersionID, detail.ChosenFilmAssetID = version.ID, version.FilmAssetID
 		}
 	}
@@ -511,7 +476,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 	for _, version := range detail.Versions {
 		asked = append(asked, version.FilmAssetID)
 	}
-	status, err := s.lookup(ctx, row.grantID.String, asked)
+	status, err := s.lookup(ctx, row.GrantID.String, asked)
 	if err != nil {
 		s.logger.WarnContext(ctx, "photo grant lookup failed", "project", projectID, "error", err)
 		for i := range detail.Assets {
@@ -562,24 +527,27 @@ func (s *Store) lookup(ctx context.Context, grantID string, ids []string) (map[s
 // UpdateProject renames owner's project or changes its settings. A job in
 // progress keeps the settings it started with.
 func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, change domain.ProjectChange) (domain.ProjectDetail, error) {
-	sets, args := []string{}, []any{}
+	var fields db.ProjectChange
+	given := 0
 	if change.Name != nil {
 		name := strings.TrimSpace(*change.Name)
 		if name == "" || !validText(name, MaxNameRunes) {
 			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
-		sets, args = append(sets, "name = ?"), append(args, name)
+		fields.Name, given = &name, given+1
 	}
 	if change.Ask != nil {
 		if !validText(*change.Ask, MaxAskRunes) {
 			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
-		sets, args = append(sets, "ask = ?"), append(args, strings.TrimSpace(*change.Ask))
+		ask := strings.TrimSpace(*change.Ask)
+		fields.Ask, given = &ask, given+1
 	}
 	if change.Chronological != nil {
-		sets, args = append(sets, "chronological = ?"), append(args, *change.Chronological)
+		chronological := *change.Chronological
+		fields.Chronological, given = &chronological, given+1
 	}
-	if len(sets) == 0 && change.SongStart == nil {
+	if given == 0 && change.SongStart == nil {
 		return domain.ProjectDetail{}, domain.ErrInvalid
 	}
 	if change.SongStart != nil {
@@ -588,17 +556,15 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		if _, err := s.SongStart(ctx, owner, projectID, *change.SongStart); err != nil {
 			return domain.ProjectDetail{}, err
 		}
-		if len(sets) == 0 {
+		if given == 0 {
 			return s.Project(ctx, owner, projectID)
 		}
 	}
-	sets, args = append(sets, "updated_at = ?"), append(args, sqlitedb.FormatTime(s.now()), projectID, owner)
-	result, err := s.db.ExecContext(ctx, "UPDATE projects SET "+strings.Join(sets, ", ")+
-		" WHERE id = ? AND owner_user_id = ? AND state = 'ready'", args...)
+	changed, err := s.db.UpdateReadyProject(ctx, owner, projectID, fields, s.now())
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
+	if changed == 0 {
 		return domain.ProjectDetail{}, errors.Join(domain.ErrNotFound, err)
 	}
 	return s.Project(ctx, owner, projectID)
@@ -622,10 +588,10 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		if err != nil {
 			return err
 		}
-		if row.state != projectReady {
+		if row.State != projectReady {
 			return domain.ErrNotFound
 		}
-		grantID = row.grantID
+		grantID = row.GrantID
 		// The jobs go with the project; a running one is stopped below.
 		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE project_id = ?", projectID); err != nil {
 			return err
@@ -635,7 +601,7 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 				return err
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", projectID); err != nil {
+		if err = tx.DeleteProject(ctx, projectID); err != nil {
 			return err
 		}
 		return tx.ForgetUnusedSongs(ctx, owner)
@@ -782,20 +748,7 @@ func (s *Store) reconcile(ctx context.Context) error {
 }
 
 func (s *Store) owners(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT owner_user_id FROM projects")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var owners []string
-	for rows.Next() {
-		var owner string
-		if err := rows.Scan(&owner); err != nil {
-			return nil, err
-		}
-		owners = append(owners, owner)
-	}
-	return owners, rows.Err()
+	return s.db.ProjectOwners(ctx)
 }
 
 func (s *Store) reconcileMember(ctx context.Context, owner string, grants []photos.Grant, seen map[string]bool, first bool) error {
@@ -804,7 +757,7 @@ func (s *Store) reconcileMember(ctx context.Context, owner string, grants []phot
 		return err
 	}
 	defer unlock()
-	projects, err := s.memberProjects(ctx, owner)
+	projects, err := s.db.MemberProjects(ctx, owner)
 	if err != nil {
 		return err
 	}
@@ -818,12 +771,12 @@ func (s *Store) reconcileMember(ctx context.Context, owner string, grants []phot
 			if err := s.queueRevocation(ctx, s.db, grant.ID); err != nil {
 				return err
 			}
-		case project.state == projectReady && project.grantID != grant.ID:
+		case project.State == projectReady && project.GrantID != grant.ID:
 			s.logger.InfoContext(ctx, "a project takes the grant registered for it again", "project", grant.ProjectID, "grant", grant.ID)
-			if _, err := s.db.ExecContext(ctx, "UPDATE projects SET grant_id = ? WHERE id = ?", grant.ID, grant.ProjectID); err != nil {
+			if err := s.db.SetProjectGrant(ctx, grant.ProjectID, grant.ID); err != nil {
 				return err
 			}
-			project.grantID = grant.ID
+			project.GrantID = grant.ID
 			projects[grant.ProjectID] = project
 		}
 	}
@@ -836,7 +789,7 @@ func (s *Store) reconcileMember(ctx context.Context, owner string, grants []phot
 			seen[b.ID] = true
 			continue
 		}
-		grantID := projects[b.ProjectID].grantID
+		grantID := projects[b.ProjectID].GrantID
 		if grantID == "" {
 			grantID = listed[b.ProjectID]
 		}
@@ -848,35 +801,12 @@ func (s *Store) reconcileMember(ctx context.Context, owner string, grants []phot
 	}
 	if first {
 		for id, project := range projects {
-			if project.state == projectReady && listed[id] == "" {
+			if project.State == projectReady && listed[id] == "" {
 				s.logger.WarnContext(ctx, "a project's photo grant is gone; its videos show as missing", "project", id)
 			}
 		}
 	}
 	return nil
-}
-
-// knownProject is what reconciling needs of a project.
-type knownProject struct {
-	state, grantID string
-}
-
-func (s *Store) memberProjects(ctx context.Context, owner string) (map[string]knownProject, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, state, COALESCE(grant_id, '') FROM projects WHERE owner_user_id = ?", owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	projects := map[string]knownProject{}
-	for rows.Next() {
-		var id string
-		var project knownProject
-		if err := rows.Scan(&id, &project.state, &project.grantID); err != nil {
-			return nil, err
-		}
-		projects[id] = project
-	}
-	return projects, rows.Err()
 }
 
 // RemoveAccount forgets a deleted account's projects. Its grants went with
@@ -892,7 +822,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", userID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM projects WHERE owner_user_id = ?", userID); err != nil {
+		if err := tx.DeleteOwnerProjects(ctx, userID); err != nil {
 			return err
 		}
 		// Their planning grant goes too: the name may be another member's later.
