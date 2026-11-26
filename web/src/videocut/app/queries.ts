@@ -1,5 +1,5 @@
 import { APIError } from "../../api/client";
-import { getProject, getSong, listProjects, type MontageSong } from "../api/client";
+import { getProject, getSong, listProjects, type VideoCutSong } from "../api/client";
 
 // The queries the window's pages share: the projects, one project, and its
 // song (null before one is chosen).
@@ -22,7 +22,7 @@ export const projectQuery = (projectId: string) => ({
 // window can be seen (shown).
 export const songQuery = (projectId: string, shown: boolean) => ({
   queryKey: songKey(projectId),
-  queryFn: async ({ signal }: { signal: AbortSignal }): Promise<MontageSong | null> => {
+  queryFn: async ({ signal }: { signal: AbortSignal }): Promise<VideoCutSong | null> => {
     try {
       return await getSong(projectId, signal);
     } catch (error) {
@@ -30,7 +30,7 @@ export const songQuery = (projectId: string, shown: boolean) => ({
       throw error;
     }
   },
-  refetchInterval: (query: { state: { data?: MontageSong | null } }) =>
+  refetchInterval: (query: { state: { data?: VideoCutSong | null } }) =>
     shown && query.state.data?.state === "analyzing" ? 4_000 : false,
   refetchIntervalInBackground: false,
 });

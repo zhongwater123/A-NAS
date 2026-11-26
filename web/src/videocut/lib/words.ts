@@ -1,7 +1,7 @@
 // What the montage window says about jobs (docs/specs/montage-center.md).
-import type { MontageJob } from "../api/client";
+import type { VideoCutJob } from "../api/client";
 
-export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
+export const stepNames: Record<VideoCutJob["steps"][number]["name"], string> = {
   analysis: "分析素材",
   catalog: "整理画面",
   song: "读取配乐",
@@ -46,7 +46,7 @@ export const actionLabels: Record<JobAction, string> = {
   replan: "重新规划",
 };
 
-type Reason = NonNullable<MontageJob["waitReason"]>;
+type Reason = NonNullable<VideoCutJob["waitReason"]>;
 
 // Why a job waits or stopped, and the member's ways out of it besides
 // cancelling: every reason the contract names has its line here. videos
@@ -75,17 +75,17 @@ const reasons: Record<Reason, { text: (videos: number) => string; actions?: JobA
 
 // actionsOf are the ways out of a job that needs the member, besides cancelling, and of a failed job whose
 // planning the member can start again.
-export const actionsOf = (job: MontageJob): JobAction[] =>
+export const actionsOf = (job: VideoCutJob): JobAction[] =>
   ((job.state === "needs_input" || (job.state === "failed" && job.waitReason === "plan_failed")) &&
     job.waitReason &&
     reasons[job.waitReason].actions) ||
   [];
 
-export const active = (job?: MontageJob) =>
+export const active = (job?: VideoCutJob) =>
   Boolean(job && (job.state === "queued" || job.state === "running" || job.state === "waiting"));
 
 // stateText says where a job stands in a line.
-export function stateText(job: MontageJob): string {
+export function stateText(job: VideoCutJob): string {
   const reason = job.waitReason ? reasons[job.waitReason] : undefined;
   const videos = job.missingAssetIds?.length ?? 0;
   switch (job.state) {
@@ -131,7 +131,7 @@ export function limitsOf(ask: string): string[] {
 // did. The montage center writes some failures for the member, in Chinese,
 // as the one that asks to check the photo library for a film it could not
 // confirm; the rest are its own diagnostics, which stay in its log.
-export function failureText(job: MontageJob): string | undefined {
+export function failureText(job: VideoCutJob): string | undefined {
   return forMember(job.error);
 }
 

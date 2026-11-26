@@ -10,14 +10,14 @@ import { Clapperboard } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { DeskNotice } from "../../ui/DeskNotice";
-import { listNotices, type MontageNotice, replan } from "../api/client";
+import { listNotices, replan, type VideoCutNotice } from "../api/client";
 import { forMember } from "../lib/words";
 import styles from "./notices.module.css";
 
 const POLL_MS = 60_000;
 const SEEN = "montage-notices-seen";
 
-const key = (notice: MontageNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
+const key = (notice: VideoCutNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
 
 function seen(): Set<string> {
   try {
@@ -37,7 +37,7 @@ function remember(keys: string[]) {
 }
 
 export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
-  const [notices, setNotices] = useState<MontageNotice[]>([]);
+  const [notices, setNotices] = useState<VideoCutNotice[]>([]);
 
   // Asked once a minute while the page is visible, and when it becomes
   // visible again; a hidden page asks nothing. Only the latest request is
@@ -105,7 +105,7 @@ export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
 
 // summarize says each notice in a line, the projects named; a job that still
 // waits for VNAS says why, when the montage center gave a reason.
-export function summarize(notices: MontageNotice[]): string[] {
+export function summarize(notices: VideoCutNotice[]): string[] {
   return notices.map((notice) => {
     const project = `「${notice.project}」`;
     switch (notice.kind) {
