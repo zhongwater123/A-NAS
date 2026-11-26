@@ -11,10 +11,10 @@ import (
 )
 
 // unknownOperation is how a Worker refuses an operation it does not have
-// (ai/anas_montage/worker.py, answer).
+// (ai/anas_videocut/worker.py, answer).
 const unknownOperation = "unknown operation"
 
-// Music asks for a song's excerpt and slots (ai/anas_montage/music_ops.py,
+// Music asks for a song's excerpt and slots (ai/anas_videocut/ops/music.py,
 // op_music): the eighth version's from allin1's structure and the song's
 // loudness, or from the start the member dragged it to.
 func (c Client) Music(ctx context.Context, request MusicRequest) (Selection, error) {

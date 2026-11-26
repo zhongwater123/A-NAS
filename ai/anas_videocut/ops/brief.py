@@ -10,10 +10,10 @@ wrote it; this module only rearranges what it builds.
 import statistics
 from pathlib import PurePath
 
-from .domain import plan as planrules
-from .domain.catalog import MARK, card_mark
-from .domain.options import Case, CutOptions
-from .domain.prompts import CARD_MARKS
+from ..algo import plan as planrules
+from ..algo.catalog import MARK, card_mark
+from ..algo.options import Case, CutOptions
+from ..algo.prompts import CARD_MARKS
 
 # The template the data and the schema go with (prompts/<TEMPLATE>.md); a recut's (#596) starts from a version's plan.
 TEMPLATE = "plan-v2"

@@ -8,7 +8,7 @@ import (
 )
 
 // The outline's schema gives each part its own limit of pictures, by
-// prefixItems (ai/anas_montage/domain/plan.py): a picture past its music
+// prefixItems (ai/anas_videocut/algo/plan.py): a picture past its music
 // part's slots is never filled, and the job failed at rendering once the
 // round had been spent. The checker has to honour prefixItems for that.
 func TestAnOutlineWithMorePicturesThanAPartHasSlotsIsRefused(t *testing.T) {

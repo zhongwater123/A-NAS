@@ -39,7 +39,7 @@ install -m 0644 /dev/null "$lib/empty.env"
 . "$src/scripts/lib/assistant-units.sh"
 install -d -m 0755 "$lib/managed-plan" "$lib/montage-prompts"
 derive_plan_policy "$lib/managed/config.yaml" "$src/ai/assistant/montage-mcp.yaml" "$lib/managed-plan/config.yaml"
-install -m 0644 "$src"/ai/anas_montage/prompts/*.md "$lib/montage-prompts/"
+install -m 0644 "$src"/ai/anas_videocut/prompts/*.md "$lib/montage-prompts/"
 ln -sfn /opt/a-nas/assistant-runtimes/spike "$lib/runtime"
 [[ -f "$lib/runtime/src/SOUL.md" ]] || { install -d /opt/a-nas/assistant-runtimes/spike/src && : > /opt/a-nas/assistant-runtimes/spike/src/SOUL.md; }
 

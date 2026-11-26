@@ -111,7 +111,7 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 // excerptVersion is how an excerpt is worked out from the song's analysis:
 // a new one makes the jobs' song steps, and what follows them, again.
 // frames-even: Excerpt.Frames rounds a half frame to even, as the fill
-// (ai/anas_montage/domain/fill.py) and filmFrame do; it rounded away from
+// (ai/anas_videocut/algo/fill.py) and filmFrame do; it rounded away from
 // zero, and an excerpt of 90.15 s was 2705 frames against the fill's 2704,
 // which failed the job at its fill.
 const excerptVersion = "frames-even"

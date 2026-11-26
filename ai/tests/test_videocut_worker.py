@@ -1,4 +1,4 @@
-"""The montage center's compute Worker (ai/anas_montage): its split of the
+"""The montage center's compute Worker (ai/anas_videocut): its split of the
 prototype's computation gives the prototype's numbers, its fill asks for what
 it lacks in a fixed order, and it speaks the protocol with memfd arrays.
 
@@ -23,8 +23,8 @@ if not RUNTIME and os.environ.get("ANAS_MONTAGE_PYTHON"):
 if RUNTIME:
     import numpy as np
 
-    from anas_montage import worker
-    from anas_montage.domain import cards as cardrules, fill, picture
+    from anas_videocut import worker
+    from anas_videocut.algo import cards as cardrules, fill, picture
 
 
 def memfd(array):
@@ -241,8 +241,8 @@ def brief_music():
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")
 class BriefTest(unittest.TestCase):
     def test_the_briefs_hold_data_and_the_eighth_versions_schemas(self):
-        from anas_montage import brief
-        from anas_montage.domain import plan as planrules
+        from anas_videocut.algo import plan as planrules
+        from anas_videocut.ops import brief
 
         cards = [described("v1-0", "photo:a", 0.0, 10.0), described("v2-0", "photo:b", 0.0, 12.0)]
         request = {"step": "pick", "cards": cards, "music": brief_music(), "ask": "多一点海", "chronological": False}
@@ -281,7 +281,7 @@ class BriefTest(unittest.TestCase):
         self.assertEqual(turned["answer"]["parts"][1]["pictures"][0]["beats"], ["v2-0/1"])
 
     def test_a_recuts_briefs_carry_its_sentence_and_the_plan_it_starts_from(self):
-        from anas_montage import brief
+        from anas_videocut.ops import brief
 
         cards = [described("v1-0", "photo:a", 0.0, 10.0), described("v2-0", "photo:b", 0.0, 12.0)]
         picked = {"design": "从海边开始", "opening": "v1-0", "ending": "v2-0", "unmet": [],
@@ -307,9 +307,9 @@ class BriefTest(unittest.TestCase):
             worker.op_plan_brief({**request, "step": "shots"}, {})
 
     def test_the_recut_template_starts_from_base_and_changes_only_what_change_asks(self):
-        from anas_montage import brief
+        from anas_videocut.ops import brief
 
-        prompts = os.path.join(os.path.dirname(brief.__file__), "prompts")
+        prompts = os.path.join(os.path.dirname(worker.__file__), "prompts")
         with open(os.path.join(prompts, brief.TEMPLATE + ".md"), encoding="utf-8") as f:
             plan = f.read()
         with open(os.path.join(prompts, brief.RECUT_TEMPLATE + ".md"), encoding="utf-8") as f:

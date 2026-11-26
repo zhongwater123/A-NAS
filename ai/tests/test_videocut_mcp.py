@@ -11,7 +11,7 @@ from pathlib import Path
 from tests import test_companion_mcp as companion_tests
 
 SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "anas_montage_mcp.py"
-PROMPT = Path(__file__).resolve().parents[1] / "anas_montage" / "prompts" / "plan-v2.md"
+PROMPT = Path(__file__).resolve().parents[1] / "anas_videocut" / "prompts" / "plan-v2.md"
 
 
 def montage_server():

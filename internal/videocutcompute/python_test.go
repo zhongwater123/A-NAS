@@ -20,7 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// The Go client and the Python Worker in ai/anas_montage must agree on
+// The Go client and the Python Worker in ai/anas_videocut must agree on
 // framing, arrays in memfds and answers. The Worker needs NumPy and Pillow,
 // which the AI runtime has: ANAS_MONTAGE_PYTHON names its python, or the
 // test looks for one on PATH that imports them.
@@ -52,7 +52,7 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := func() *exec.Cmd {
-		worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_montage.worker")
+		worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_videocut.worker")
 		worker.Dir = filepath.Join("..", "..", "ai")
 		worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
 		worker.ExtraFiles = []*os.File{inherited}

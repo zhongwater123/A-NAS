@@ -34,7 +34,7 @@ import (
 // until the job comes to them.
 
 // PlanTemplate is the version of the prompt template the planner fills
-// (ai/anas_montage/prompts/); a claim answers it, and a planner that has
+// (ai/anas_videocut/prompts/); a claim answers it, and a planner that has
 // another refuses the round.
 const PlanTemplate = "plan-v2"
 

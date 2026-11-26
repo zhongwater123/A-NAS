@@ -16,7 +16,7 @@ import (
 // the steps are tested without either Worker.
 
 // Compute is what the steps ask of the compute Worker
-// (ai/anas_montage/worker.py); videocutcompute.Client provides it.
+// (ai/anas_videocut/worker.py); videocutcompute.Client provides it.
 type Compute interface {
 	// Catalog lists the cards that may go into the film, in the order
 	// given.
@@ -29,7 +29,7 @@ type Compute interface {
 	// frames every half second after it up to hi, and from lo up to it.
 	Clear(ctx context.Context, request videocutcompute.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error)
 	// PlanBrief is a planning step's data and exact schema for the
-	// member's VNAS (ai/anas_montage/brief.py).
+	// member's VNAS (ai/anas_videocut/ops/brief.py).
 	PlanBrief(ctx context.Context, request videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error)
 	// ShotsAnswer turns the second step's answer back into the outline's
 	// pictures, as the fill reads them.

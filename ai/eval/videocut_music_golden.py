@@ -6,7 +6,7 @@ ANAS_MONTAGE_SAMPLES at the folder that holds 剪辑对比/ (on development
 machine C, ~/A-NAS-datasets) and ANAS_MONTAGE_SONGS at the songs (~/Music/QQ音乐),
 and run, with NumPy and FFmpeg:
 
-    python -m eval.montage_music_golden
+    python -m eval.videocut_music_golden
 
 For each structure-<song>.json it decodes the song as the eighth version did
 (adapters/music.py: FFmpeg, mono, 22050 Hz, float32) and as the montage
@@ -29,8 +29,8 @@ from pathlib import Path
 
 import numpy as np
 
-from anas_montage import music_ops
-from anas_montage.domain import music
+from anas_videocut.algo import music
+from anas_videocut.ops import music as music_ops
 
 CUTS = "剪辑对比/规划与成片"
 TARGET = 90.0
