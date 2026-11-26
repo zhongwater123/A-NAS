@@ -39,6 +39,7 @@ require (
 	github.com/qdrant/go-client v1.20.1
 	github.com/razsteinmetz/go-ptn v1.0.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+	github.com/tdewolff/parse/v2 v2.25.0
 	github.com/tus/tusd/v2 v2.10.1
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/crypto v0.58.0

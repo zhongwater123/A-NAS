@@ -307,8 +307,33 @@ func TestASelectionIsTheMembersOwnForHalfAnHour(t *testing.T) {
 	if _, ok := f.store.Selection(f.alice.AccountID); ok {
 		t.Fatal("a selection outlived half an hour")
 	}
-	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_a" || viewing.Version != 2 {
+}
+
+// What a member's desktop shows lasts while the desktop keeps saying so,
+// until it closes the page.
+func TestAMembersPageIsOpenWhileTheDesktopSaysSo(t *testing.T) {
+	f := newFixture(t)
+	start := *f.now
+	f.store.SetViewing(f.alice.AccountID, "page_a", 2)
+	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
+	f.store.SetViewing(f.alice.AccountID, "page_a", 2)
+	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
+	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_a" || viewing.Version != 2 || !viewing.Since.Equal(start) {
 		t.Fatalf("Viewing() = %+v, %v", viewing, ok)
+	}
+	*f.now = f.now.Add(time.Second)
+	if viewing, ok := f.store.Viewing(f.alice.AccountID); ok {
+		t.Fatalf("a desktop that went quiet still shows %+v", viewing)
+	}
+
+	f.store.SetViewing(f.alice.AccountID, "page_b", 1)
+	f.store.ClearViewing(f.alice.AccountID, "page_a")
+	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_b" {
+		t.Fatalf("closing another page = %+v, %v", viewing, ok)
+	}
+	f.store.ClearViewing(f.alice.AccountID, "page_b")
+	if _, ok := f.store.Viewing(f.alice.AccountID); ok {
+		t.Fatal("a closed page is still open")
 	}
 }
 
