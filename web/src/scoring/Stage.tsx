@@ -573,7 +573,10 @@ export function Stage({
     setTyped(undefined);
     if (!practice) {
       stash.current = { values: withTyped, item, reached };
-      left.current = ready && shown ? { token: shown.token, spent: timeOn(watch.current) } : undefined;
+      // It is asked for from the scoring guide, which covers the photo: the
+      // time is kept for a photo that has shown, not only a ready one.
+      left.current =
+        shown && visible === shown.token ? { token: shown.token, spent: timeOn(watch.current) } : undefined;
     }
     setPractice(practiceFor(dimensions));
     setValues({});

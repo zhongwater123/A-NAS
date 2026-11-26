@@ -370,6 +370,8 @@ describe("ScoringPanel for a rater", () => {
     expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
     expect(window.localStorage.getItem(`a-nas.scoring.coach.user:alice.${batch.id}`)).toBe("1");
     await user.keyboard("5");
+    // The photo has been looked at for a while before the guide comes again.
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
     // The scoring guide has the batch's own guide and then the handbook,
     // fitted to three levels: no 2 or 4, in the rules or the tries.
@@ -404,6 +406,8 @@ describe("ScoringPanel for a rater", () => {
     await user.keyboard("{Enter}3{Enter}");
     await waitFor(() => expect(answered).toHaveLength(1));
     expect(answered[0]).toMatchObject({ token: "t1", body: { kind: "score", score: 5, scores: { overall: 3 } } });
+    // The time on the photo goes on from before the guide.
+    expect((answered[0].body as { viewMs: number }).viewMs).toBeGreaterThanOrEqual(600);
   });
 
   it("scores a batch of three levels with 1, 3 and 5 and the arrows, showing the level", async () => {
