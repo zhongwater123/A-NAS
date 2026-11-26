@@ -205,7 +205,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `montage service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
 | anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
-| Host Agent | 会话查询、`EnsureMontageStore` 与卷上的调用、身份常量 |
+| Host Agent | 会话查询、`EnsureVideoCutStore` 与卷上的调用、身份常量 |
 | 路由 | `httpapi/product.go`、`routes.go` |
 | 日志 | 服务端白名单、`api/components/logs.yaml` 的枚举、网页的日志列表、[日志规格](../specs/logs.md) |
 | 系统更新 | 回滚时要停的服务与要恢复的数据库 |
@@ -724,7 +724,7 @@ montage/
 
 ## 接口
 
-新增 `api/paths/montage.yaml`，挂在 `/api/v1/montage`。约定：
+新增 `api/paths/videocut.yaml`，挂在 `/api/v1/montage`。约定：
 - 错误统一用 `ProductError`；
 - 创建类请求在请求体里带 `requestKey`，按成员限定唯一，沿用家庭中心的做法；
 - 长任务用“202 加轮询”，和应用中心安装、系统更新一致；
