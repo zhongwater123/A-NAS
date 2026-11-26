@@ -409,7 +409,8 @@ func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte
 // a 方案 already saved.
 func (s *Store) startStep(ctx context.Context, jobID string, st step, key string, later []step, saved map[int]bool) error {
 	name := st.name
-	now := sqlitedb.FormatTime(s.now())
+	at := s.now()
+	now := sqlitedb.FormatTime(at)
 	return s.db.Update(ctx, func(tx *db.Tx) error {
 		var stored string
 		err := tx.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&stored)
@@ -441,8 +442,7 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 					}
 				}
 				if base, plan := planOf(affected.name); stored != "" && (base == StepOutline || base == StepShots) {
-					if _, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND plan = ? AND step = ? AND voided_at IS NULL",
-						now, jobID, plan, base); err != nil {
+					if err := tx.VoidPlan(ctx, jobID, plan, base, at); err != nil {
 						return err
 					}
 				}
@@ -893,9 +893,7 @@ func (s *Store) planInput(run *jobRun, step string) domain.PlanInput {
 
 // accepted is a 方案's plan for a step taken for this catalog, not voided.
 func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, catalogKey string) (json.RawMessage, bool, error) {
-	var answer string
-	err := s.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
-		ORDER BY accepted_at DESC LIMIT 1`, jobID, plan, step, catalogKey).Scan(&answer)
+	answer, err := s.db.AcceptedPlan(ctx, jobID, plan, step, catalogKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
@@ -903,9 +901,7 @@ func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, cata
 }
 
 func (s *Store) accept(ctx context.Context, jobID string, plan int, step, catalogKey string, answer json.RawMessage) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO plans(job_id, plan, step, catalog_key, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)",
-		jobID, plan, step, catalogKey, string(answer), sqlitedb.FormatTime(s.now()))
-	return err
+	return s.db.AcceptPlan(ctx, jobID, plan, step, catalogKey, string(answer), s.now())
 }
 
 func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, domain.PlanInput) (json.RawMessage, error)) (any, error) {
@@ -939,12 +935,6 @@ func (s *Store) pick(ctx context.Context, run *jobRun) (any, error) {
 
 func (s *Store) shots(ctx context.Context, run *jobRun) (any, error) {
 	return s.plan(ctx, run, StepShots, s.planner.Shots)
-}
-
-// voidPlans voids the job's plans: the catalog changed.
-func voidPlans(ctx context.Context, tx *db.Tx, jobID string, at time.Time) error {
-	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
-	return err
 }
 
 // pins are an edit's slots with their beats (#596), nil for a job that

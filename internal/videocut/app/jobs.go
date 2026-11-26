@@ -476,7 +476,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		// The catalog changes: plans already taken are void, the rounds
 		// planning the old one are over, and both steps are planned again
 		// in a new epoch.
-		if err := voidPlans(ctx, tx, jobID, s.now()); err != nil {
+		if err := tx.VoidPlans(ctx, jobID, s.now()); err != nil {
 			return err
 		}
 		if err := s.newPlanEpoch(ctx, tx, jobID, "the job's videos changed"); err != nil {
