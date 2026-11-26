@@ -186,7 +186,14 @@ class CompanionToolTests(unittest.TestCase):
         self.assertIn("member-quiet", companion.TOOLS["wake"][0])
         self.assertIn("member-quiet", companion.TOOLS["lock"][0])
 
-    def test_a_position_that_stepped_aside_says_where_the_companion_went(self):
+    def test_position_and_throw_go_over_windows(self):
+        self.assertIn("窗口上也去", companion.TOOLS["position"][0])
+        self.assertIn("落在哪里就停在哪里", companion.TOOLS["throw"][0])
+        for tool in ("position", "throw"):
+            self.assertNotIn("stepped_aside", companion.TOOLS[tool][0])
+            self.assertNotIn("会自己让开", companion.TOOLS[tool][0])
+
+    def test_a_position_that_an_older_page_stepped_aside_says_where_the_companion_went(self):
         self.serve(200, {"status": "ok", "x": 0.198, "y": 0.5, "stepped_aside": True})
         result = companion.call("position", {"x": 0.5, "y": 0.5, "mode": "spring"})
         self.assertAnswered(result, "ok")
