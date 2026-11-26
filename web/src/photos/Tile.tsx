@@ -1,7 +1,7 @@
 import { Check, CircleAlert, Copy, Film, Play, RotateCcw } from "lucide-react";
 import { DragEvent, MouseEvent, memo, PointerEvent, ReactNode, useRef } from "react";
 
-import { lastPointerWasTouch, touchScreen } from "../lib/touch";
+import { lastPointerWasTouch } from "../lib/touch";
 import { displayURL, type PhotoAsset, previewURL } from "./api";
 import type { Box, PendingPhoto } from "./layout";
 import { clock } from "./model";
@@ -57,7 +57,7 @@ export const Tile = memo(function Tile({
       className={`${styles.phTile}${selected ? ` ${styles.selected}` : ""}${selecting ? ` ${styles.selecting}` : ""}${asset.video ? ` ${styles.video}` : ""}`}
       style={{ left: box.left, width: box.width, height: box.height }}
       data-asset-id={asset.id}
-      draggable={Boolean(onDragIds) && !touchScreen()}
+      draggable={Boolean(onDragIds)}
       onDragStart={onDragIds ? dragStart : undefined}
     >
       <button

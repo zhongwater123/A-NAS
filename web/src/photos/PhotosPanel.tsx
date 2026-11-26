@@ -2,7 +2,6 @@ import { CircleAlert, RefreshCw } from "lucide-react";
 import { type FormEvent, useCallback, useLayoutEffect, useRef, useState } from "react";
 
 import { useBabies } from "../family/useBabies";
-import { touchScreen } from "../lib/touch";
 import { useDialogs, useToasts } from "../ui/feedback";
 import { usePhoneLayout } from "../ui/usePhoneLayout";
 import { useStoredState } from "../ui/useStoredState";
@@ -53,8 +52,10 @@ const compactWidth = 520;
 // every permission; the panel only leaves out what it would refuse.
 export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled, onOpenFamily }: Props) {
   const [rowHeight, setRowHeight] = useStoredState("a-nas.photos.rowHeight", defaultRowHeight);
-  // A phone has no room beside the photo: the information starts hidden there.
-  const [info, setInfo] = useStoredState("a-nas.photos.info", !touchScreen());
+  // On a phone the sidebar gives way to a row of places under the toolbar, and
+  // with no room beside the photo the viewer's information starts hidden.
+  const phone = usePhoneLayout();
+  const [info, setInfo] = useStoredState("a-nas.photos.info", !phone);
   const [docked, setDocked] = useStoredState("a-nas.photos.sidebar", true);
   const [drawer, setDrawer] = useState(false);
   const [viewAssets, setViewAssets] = useState<PhotoAsset[]>([]);
@@ -96,8 +97,6 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
 
   const mine = ownLibrary(caller);
   const narrow = width < narrowWidth;
-  // On a phone the sidebar gives way to a row of places under the toolbar.
-  const phone = usePhoneLayout();
   const sidebarOpen = !phone && (narrow ? drawer : docked);
 
   const ai = useAIStatus();

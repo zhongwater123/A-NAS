@@ -1,4 +1,4 @@
-import { Images, Library, Plus, Shapes, Sparkles, Trash2 } from "lucide-react";
+import { Images, Library, type LucideIcon, Plus, Shapes, Sparkles, Trash2 } from "lucide-react";
 import { DragEvent, useEffect, useState } from "react";
 
 import { listAlbums, type PhotoAIStatus, type PhotoAlbum, type PhotoLibrary, thumbnailURL } from "./api";
@@ -94,72 +94,42 @@ export function Sidebar({
     };
   }, [libraryId, albumsKey]);
   const readOnly = Boolean(library?.viewing);
-  const at = (kind: Place["kind"]) =>
-    place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
-  const viewing = readOnly ? libraryId : "";
-  // Searches, AI clusters and tag groups all belong to AI 聚合.
-  const onAIPage =
-    place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image";
+  // The album list marks an album's own page; 相册 is current on the list of albums.
+  const tabs = placeTabs(library, place, { albumIsAlbums: false });
+  const albumsTab = tabs.find((tab) => tab.key === "albums")!;
 
   return (
     <nav className={styles.phSidebar} aria-label="相册导航">
-      <div className={styles.phLibraries} role="tablist" aria-label="图库">
-        {caller.libraries.map((item) => (
-          <LibraryTab
-            key={item.id}
-            caller={caller}
-            library={item}
-            active={item.id === libraryId}
-            onSelect={() => onLibrary(item)}
-            onDrop={(ids) => onDropOnLibrary(item, ids)}
-          />
-        ))}
-      </div>
+      <LibraryTabs caller={caller} library={library} onLibrary={onLibrary} onDropOnLibrary={onDropOnLibrary} />
 
       <div className={styles.phNav}>
-        {/* The library's photos and videos together, as in Apple's Photos. */}
-        <button
-          type="button"
-          className={at("timeline") ? styles.active : ""}
-          aria-current={at("timeline") ? "page" : undefined}
-          title="图库中的全部照片和视频"
-          onClick={() => onPlace({ kind: "timeline", libraryId })}
-        >
-          <Images />
-          <span>图库</span>
-          {count !== undefined && at("timeline") && <small>{count}</small>}
-        </button>
-        <button
-          type="button"
-          className={onAIPage ? styles.active : ""}
-          aria-current={onAIPage ? "page" : undefined}
-          onClick={() => onPlace({ kind: "search", viewing, query: "" })}
-        >
-          <Shapes />
-          <span>AI 聚合</span>
-        </button>
-        {!readOnly && (
-          <button
-            type="button"
-            className={at("trash") ? styles.active : ""}
-            aria-current={at("trash") ? "page" : undefined}
-            onClick={() => onPlace({ kind: "trash", libraryId })}
-          >
-            <Trash2 />
-            <span>回收站</span>
-          </button>
-        )}
+        {tabs
+          .filter((tab) => tab.key !== "albums")
+          .map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={tab.on ? styles.active : ""}
+              aria-current={tab.on ? "page" : undefined}
+              title={tab.title}
+              onClick={() => onPlace(tab.place)}
+            >
+              <tab.icon />
+              <span>{tab.label}</span>
+              {tab.key === "timeline" && tab.on && count !== undefined && <small>{count}</small>}
+            </button>
+          ))}
       </div>
 
       <div className={styles.phNavSection}>
         <button
           type="button"
-          className={`${styles.phNavHeading}${at("albums") ? ` ${styles.active}` : ""}`}
-          aria-current={at("albums") ? "page" : undefined}
-          onClick={() => onPlace({ kind: "albums", libraryId })}
+          className={`${styles.phNavHeading}${albumsTab.on ? ` ${styles.active}` : ""}`}
+          aria-current={albumsTab.on ? "page" : undefined}
+          onClick={() => onPlace(albumsTab.place)}
         >
-          <Library />
-          <span>相册</span>
+          <albumsTab.icon />
+          <span>{albumsTab.label}</span>
           <small>{albums.length || ""}</small>
         </button>
         {!readOnly && (
@@ -206,41 +176,17 @@ export function PlacesBar({
   onLibrary,
   onDropOnLibrary,
 }: Pick<Props, "caller" | "library" | "place" | "onPlace" | "onLibrary" | "onDropOnLibrary">) {
-  const libraryId = library?.id ?? "";
-  const readOnly = Boolean(library?.viewing);
-  const viewing = readOnly ? libraryId : "";
-  const at = (kind: Place["kind"]) =>
-    place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
-  const tabs: Array<{ label: string; on: boolean; place: Place }> = [
-    { label: "图库", on: at("timeline"), place: { kind: "timeline", libraryId } },
-    { label: "相册", on: at("albums") || place.kind === "album", place: { kind: "albums", libraryId } },
-    {
-      label: "AI 聚合",
-      on: place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image",
-      place: { kind: "search", viewing, query: "" },
-    },
-    ...(readOnly ? [] : [{ label: "回收站", on: at("trash"), place: { kind: "trash", libraryId } as Place }]),
-  ];
+  // With no album list to mark it in, an album's own page counts as 相册.
+  const tabs = placeTabs(library, place, { albumIsAlbums: true });
   return (
     <nav className={styles.phPlaces} aria-label="相册导航">
       {caller.libraries.length > 1 && (
-        <div className={styles.phLibraries} role="tablist" aria-label="图库">
-          {caller.libraries.map((item) => (
-            <LibraryTab
-              key={item.id}
-              caller={caller}
-              library={item}
-              active={item.id === libraryId}
-              onSelect={() => onLibrary(item)}
-              onDrop={(ids) => onDropOnLibrary(item, ids)}
-            />
-          ))}
-        </div>
+        <LibraryTabs caller={caller} library={library} onLibrary={onLibrary} onDropOnLibrary={onDropOnLibrary} />
       )}
       <div className={styles.phPlaceTabs}>
         {tabs.map((tab) => (
           <button
-            key={tab.label}
+            key={tab.key}
             type="button"
             className={tab.on ? styles.active : ""}
             aria-current={tab.on ? "page" : undefined}
@@ -251,6 +197,80 @@ export function PlacesBar({
         ))}
       </div>
     </nav>
+  );
+}
+
+// placeTabs is a library's places, in the order a phone's row shows them;
+// the sidebar lists 相册 apart, with its albums under it. Searches, AI
+// clusters and tag groups all belong to AI 聚合; a library viewed under a
+// grant has no 回收站.
+export function placeTabs(
+  library: PhotoLibrary | undefined,
+  place: Place,
+  { albumIsAlbums }: { albumIsAlbums: boolean },
+) {
+  const libraryId = library?.id ?? "";
+  const readOnly = Boolean(library?.viewing);
+  const at = (kind: Place["kind"]) =>
+    place.kind === kind && ("libraryId" in place ? place.libraryId === libraryId : true);
+  const tabs: Array<{
+    key: "timeline" | "albums" | "ai" | "trash";
+    label: string;
+    title?: string;
+    icon: LucideIcon;
+    on: boolean;
+    place: Place;
+  }> = [
+    // The library's photos and videos together, as in Apple's Photos.
+    {
+      key: "timeline",
+      label: "图库",
+      title: "图库中的全部照片和视频",
+      icon: Images,
+      on: at("timeline"),
+      place: { kind: "timeline", libraryId },
+    },
+    {
+      key: "albums",
+      label: "相册",
+      icon: Library,
+      on: at("albums") || (albumIsAlbums && at("album")),
+      place: { kind: "albums", libraryId },
+    },
+    {
+      key: "ai",
+      label: "AI 聚合",
+      icon: Shapes,
+      on: place.kind === "search" || place.kind === "cluster" || place.kind === "tag" || place.kind === "image",
+      place: { kind: "search", viewing: readOnly ? libraryId : "", query: "" },
+    },
+  ];
+  if (!readOnly)
+    tabs.push({ key: "trash", label: "回收站", icon: Trash2, on: at("trash"), place: { kind: "trash", libraryId } });
+  return tabs;
+}
+
+// LibraryTabs switches between the caller's libraries; photos dropped on one
+// are copied there.
+function LibraryTabs({
+  caller,
+  library,
+  onLibrary,
+  onDropOnLibrary,
+}: Pick<Props, "caller" | "library" | "onLibrary" | "onDropOnLibrary">) {
+  return (
+    <div className={styles.phLibraries} role="tablist" aria-label="图库">
+      {caller.libraries.map((item) => (
+        <LibraryTab
+          key={item.id}
+          caller={caller}
+          library={item}
+          active={item.id === library?.id}
+          onSelect={() => onLibrary(item)}
+          onDrop={(ids) => onDropOnLibrary(item, ids)}
+        />
+      ))}
+    </div>
   );
 }
 

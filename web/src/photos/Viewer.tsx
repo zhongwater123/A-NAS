@@ -15,6 +15,7 @@ import {
 import { KeyboardEvent, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ReactZoomPanPinchContentRef, TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
+import { swipeStep } from "../lib/swipe";
 import { displayURL, getPhoto, motionURL, type PhotoAsset, previewURL, thumbnailURL } from "./api";
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { type DetailsActions, PhotoDetails } from "./PhotoDetails";
@@ -112,7 +113,7 @@ export function Viewer({
   const [liveError, setLiveError] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   // Where a one-finger swipe across the photo began.
-  const swipe = useRef<{ x: number; y: number } | undefined>(undefined);
+  const swipe = useRef<{ x: number; y: number; at: number } | undefined>(undefined);
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
@@ -412,7 +413,7 @@ export function Viewer({
             const target = event.target as HTMLElement;
             swipe.current =
               event.touches.length === 1 && !zoomed && !target.closest("button, input, [role=slider]")
-                ? { x: event.touches[0].clientX, y: event.touches[0].clientY }
+                ? { x: event.touches[0].clientX, y: event.touches[0].clientY, at: event.timeStamp }
                 : undefined;
           }}
           onTouchEnd={(event) => {
@@ -422,7 +423,9 @@ export function Viewer({
             if (!start || !end || zoomed) return;
             const dx = end.clientX - start.x;
             const dy = end.clientY - start.y;
-            if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) go(dx < 0 ? 1 : -1);
+            if (Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+            const step = swipeStep(dx, (dx / Math.max(1, event.timeStamp - start.at)) * 1000);
+            if (step) go(step);
           }}
         >
           {video ? (

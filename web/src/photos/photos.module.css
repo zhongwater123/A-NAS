@@ -3301,11 +3301,8 @@ button.ph-face-name:hover {
 .ph-app.compact .ph-title {
   min-width: 0;
 }
-/* A phone: no sidebar. Its places are a row under the toolbar (PlacesBar),
-   and 上传 keeps its word as on a computer. */
-.ph-app.phone .ph-toolbar .ph-button:global(.primary) span {
-  display: inline;
-}
+/* A phone: no sidebar. Its places are a row under the toolbar (PlacesBar).
+   上传 keeps its word as on a computer (.narrow:not(.phone) below). */
 .ph-places {
   min-width: 0;
   display: flex;
@@ -3357,7 +3354,7 @@ button.ph-face-name:hover {
   border-radius: 2px;
   background: var(--ph-accent);
 }
-.ph-app.narrow .ph-button:global(.primary) span,
+.ph-app.narrow:not(.phone) .ph-button:global(.primary) span,
 .ph-app.narrow .ph-selection-hint,
 .ph-app.narrow .ph-selection-row > button span {
   display: none;
