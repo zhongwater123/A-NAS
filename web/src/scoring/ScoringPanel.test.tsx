@@ -269,7 +269,8 @@ describe("ScoringPanel for a rater", () => {
     const batch = raterBatch({
       id: `b-${Math.random()}`,
       scale: "five",
-      dimensions: dimensionsOf("overall", "composition", "emotion"),
+      // The handbook's order ends with 总体; 情绪 is a batch's from before.
+      dimensions: dimensionsOf("composition", "emotion", "overall"),
     });
     const { handlers, answered } = raterHandlers(batch, ["t1", "t2"]);
     server.use(...handlers);
@@ -278,8 +279,8 @@ describe("ScoringPanel for a rater", () => {
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
     await screen.findByRole("img", { name: "练习用的照片" });
     const said = () => bubble()?.querySelector("p")?.textContent;
-    expect(said()).toBe("这一张是练习，不计分。先看整张 3–5 秒，凭第一感觉打总体。");
-    expect(within(bubble() as HTMLElement).getByText("1 / 8")).toBeTruthy();
+    expect(said()).toBe("这一张是练习，不计分。先看整张，再按顺序逐项打。");
+    expect(within(bubble() as HTMLElement).getByText("1 / 9")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(said()).toBe("这里是现在要打的项和它的说明。每项只看它自己的那一方面。");
     await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -287,18 +288,22 @@ describe("ScoringPanel for a rater", () => {
     expect(said()).toBe("试着打一下：点一档，或按 1–5。只打整数。");
     expect(screen.queryByRole("button", { name: "下一步" })).toBeNull();
     await user.keyboard("4");
-    expect(said()).toMatch(/^你打了 4 分。手册给这张 3 分：.+差 1 分。$/);
+    expect(said()).toBe("你打了 4 分。手册给这张 3 分：端正，但平铺直叙，没有层次差 1 分。");
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(said()).toBe("看不出来按 S，图片有问题按 X：这张就跳过，不计分。");
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(said()).toMatch(/“打分标准”/);
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(said()).toBe("按 Enter 或点“下一项”。拿不准就按 ← → 调一档。");
-    // Enter moves on, and the guide is quiet until 情绪.
+    // Enter moves on to 情绪, which has a word of its own, and so does 总体
+    // last.
     await user.keyboard("{Enter}");
+    expect(said()).toBe("情绪不分好坏，只看感觉：1 平静，5 激烈。");
+    expect(within(bubble() as HTMLElement).getByText("8 / 9")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(bubble()).toBeNull();
     await user.keyboard("3{Enter}");
-    expect(said()).toBe("情绪不分好坏，只看感觉：1 平静，5 激烈。");
+    expect(said()).toBe("最后打总体：不是前面几项的平均。看完各项，你有多想多看一会儿这张照片？");
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(bubble()).toBeNull();
     await user.keyboard("2{Enter}");
@@ -371,6 +376,9 @@ describe("ScoringPanel for a rater", () => {
     await user.click(screen.getByRole("button", { name: "打分标准" }));
     const sheet = screen.getByRole("dialog", { name: "打分标准" });
     expect(within(sheet).getByText("看构图与光线")).toBeTruthy();
+    expect(
+      within(sheet).getByText("最后打“总体”：不是前面几项的平均。看完各项，你有多想多看一会儿这张照片。"),
+    ).toBeTruthy();
     expect(within(sheet).queryByText("只打整数")).toBeNull();
     expect(
       within(sheet).getByText("打 5 分，要说得出好在哪；打 1 分，要有看得见的毛病。说不出依据的，就打 3 分。"),
@@ -573,7 +581,7 @@ describe("ScoringPanel for an administrator", () => {
     expect(within(dialog).getByText("至少选一项", { exact: false })).toBeTruthy();
     expect(create.disabled).toBe(true);
     // Clicks in quick succession each count, and take out again.
-    const light = within(dialog).getByRole("button", { name: "光影色彩" });
+    const light = within(dialog).getByRole("button", { name: "光影" });
     const liking = within(dialog).getByRole("button", { name: "喜好程度" });
     act(() => {
       light.click();

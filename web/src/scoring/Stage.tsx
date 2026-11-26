@@ -27,12 +27,14 @@ import {
   scoringError,
 } from "./api";
 import {
+  asideFor,
   Bubble,
   type CoachStep,
   coachSteps,
   coachTarget,
   coachText,
   following,
+  isAside,
   type Practice,
   practiceFor,
   practiceToken,
@@ -652,15 +654,17 @@ export function Stage({
       endCompare();
       setItem(item + 1);
       setReached((furthest) => Math.max(furthest, item + 1));
-      // On the practice photo, 情绪 gets a bubble of its own; the guide ends
-      // its waiting for Enter at the first move on.
+      // On the practice photo, 情绪 and a 总体 after the first 打分项 get a
+      // bubble of their own; the guide ends its waiting for Enter at the
+      // first move on.
       if (practice && step !== undefined && step !== "done") {
         const moved = step === "confirm" ? "free" : step;
-        if (dimensions[item + 1].id === "emotion") {
-          resumeStep.current = moved === "emotion" ? "free" : moved;
-          setStep("emotion");
+        const aside = asideFor(dimensions[item + 1].id);
+        if (aside) {
+          resumeStep.current = isAside(moved) ? "free" : moved;
+          setStep(aside);
         } else {
-          setStep(moved === "emotion" ? resumeStep.current : moved);
+          setStep(isAside(moved) ? resumeStep.current : moved);
         }
       }
       return;
@@ -879,7 +883,7 @@ export function Stage({
   const steps = practice ? coachSteps(dimensions, named, practice) : [];
   const coachCount = coaching && coaching !== "done" ? `${steps.indexOf(coaching) + 1} / ${steps.length}` : undefined;
   const nextStep = () => {
-    if (step === "emotion") setStep(resumeStep.current);
+    if (isAside(step)) setStep(resumeStep.current);
     else if (step) setStep(following(step, named));
     root.current?.focus({ preventScroll: true });
   };

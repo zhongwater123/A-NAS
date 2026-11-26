@@ -805,13 +805,57 @@ func TestTheHandbooksDimensionsComeFirst(t *testing.T) {
 	ids := make([]string, len(BuiltIn))
 	for i, dimension := range BuiltIn {
 		ids[i] = dimension.ID
-		if i < 5 && dimension.Description == "" {
+		if i < 7 && dimension.Description == "" {
 			t.Errorf("%s has no description", dimension.ID)
 		}
 	}
-	want := []string{Overall, "composition", "light_color", "quality", Emotion, Sharpness, "narrative", "preference"}
-	if !slices.Equal(ids, want) || BuiltIn[0].Name != "总体" {
-		t.Fatalf("built-in %v, %s first", ids, BuiltIn[0].Name)
+	want := []string{"composition", "light_color", "narrative", "subject", Overall, "quality", Emotion, Sharpness, "preference"}
+	if !slices.Equal(ids, want) || BuiltIn[4].Name != "总体" {
+		t.Fatalf("built-in %v, %s fifth", ids, BuiltIn[4].Name)
+	}
+}
+
+func TestAVersionFiveDatabaseKeepsItsCustomNamesUniqueWithTheHandbooksNewNames(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const at = "2026-11-24T09:00:00.000000000Z"
+	statements := []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, "PRAGMA user_version = 5"}
+	for number, name := range []string{"主体", "叙事性", "叙事性（自定义）", "光影", "色彩"} {
+		statements = append(statements, fmt.Sprintf(`INSERT INTO custom_dimensions (id, number, name, description, created_by, created_at)
+			VALUES ('custom_%d', %d, '%s', '', 'user:admin', '%s')`, number+1, number+1, name, at))
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_ = db.Close()
+	photos := t.TempDir()
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	catalogue, err := store.Catalogue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, dimension := range catalogue[len(BuiltIn):] {
+		names = append(names, dimension.ID+" "+dimension.Name)
+	}
+	want := []string{"custom_1 主体（自定义）", "custom_2 叙事性（custom_2）", "custom_3 叙事性（自定义）", "custom_4 光影（自定义）", "custom_5 色彩"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("custom 打分项 %q", names)
+	}
+	// The names the built-in ones had are not for a new custom one.
+	for _, former := range []string{"光影色彩", "叙事意境"} {
+		if _, err := store.CreateDimension(context.Background(), "user:admin", former, ""); !errors.Is(err, ErrNameTaken) {
+			t.Errorf("a custom 打分项 named %s", former)
+		}
 	}
 }
 

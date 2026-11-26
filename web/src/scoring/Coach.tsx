@@ -8,19 +8,18 @@ import styles from "./scoring.module.css";
 // The steps of the guide a rater is walked through on a practice photo the
 // first time they open a batch, each a bubble beside what it is about.
 // pick and confirm wait for the rater to do it; free shows no bubble while
-// the practice photo is scored to the end; emotion shows when the rater
-// reaches 情绪 on it.
-export type CoachStep =
-  | "photo"
-  | "item"
-  | "pick"
-  | "feedback"
-  | "acts"
-  | "guide"
-  | "confirm"
-  | "free"
-  | "emotion"
-  | "done";
+// the practice photo is scored to the end; an aside shows when the rater
+// reaches its 打分项 on it.
+export type CoachStep = "photo" | "item" | "pick" | "feedback" | "acts" | "guide" | "confirm" | "free" | Aside | "done";
+
+// The asides: 情绪 is not good or bad, and 总体, scored last, is not the
+// average of the 打分项 before it.
+export type Aside = "emotion" | "overall";
+
+export const asideFor = (dimension: string): Aside | undefined =>
+  dimension === "emotion" || dimension === overall ? dimension : undefined;
+
+export const isAside = (step: CoachStep | undefined): step is Aside => step === "emotion" || step === "overall";
 
 // The practice photo: the handbook's example of level 3 for the batch's
 // first 打分项, with the handbook's answer for it. A batch whose first 打分项
@@ -57,11 +56,12 @@ export const coachTarget: Record<Exclude<CoachStep, "free">, string> = {
   guide: "guide",
   confirm: "confirm",
   emotion: "scale",
+  overall: "item",
   done: "photo",
 };
 
 // coachSteps are the steps of a batch's guide in order, for the count on
-// each bubble; emotion only where 情绪 comes after the first 打分项.
+// each bubble; an aside only where its 打分项 comes after the first.
 export function coachSteps(
   dimensions: readonly { id: string }[],
   named: boolean,
@@ -75,7 +75,7 @@ export function coachSteps(
     "acts",
     "guide",
     "confirm",
-    ...(dimensions.slice(1).some((dimension) => dimension.id === "emotion") ? (["emotion"] as const) : []),
+    ...dimensions.slice(1).flatMap((dimension) => asideFor(dimension.id) ?? []),
   ];
 }
 
@@ -150,6 +150,8 @@ export function coachText(
       return `按 Enter 或点“${next ? "下一项" : "确定"}”。${isLevels(scale) ? "拿不准就按 ← → 调一档。" : "← → 可以微调。"}`;
     case "emotion":
       return "情绪不分好坏，只看感觉：1 平静，5 激烈。";
+    case "overall":
+      return "最后打总体：不是前面几项的平均。看完各项，你有多想多看一会儿这张照片？";
     case "done":
       return "练习结束，这一张不计分。下面是要打分的照片。";
     case "free":

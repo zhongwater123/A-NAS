@@ -112,9 +112,7 @@ export function HandbookContent({ batch }: { batch: Pick<ScoringRaterBatch, "dim
   const ids = batch.dimensions.map((dimension) => dimension.id);
   const three = batch.scale === "three";
   const levels = three ? [1, 3, 5] : [1, 2, 3, 4, 5];
-  const shown = rules.filter(
-    (rule) => (!rule.fiveOnly || batch.scale === "five") && (!rule.dimension || ids.includes(rule.dimension)),
-  );
+  const shown = rules.filter((rule) => !rule.fiveOnly || batch.scale === "five");
   const explained = batch.dimensions.flatMap((dimension) => {
     const guide = dimensionGuides.find((candidate) => candidate.id === dimension.id);
     return guide ? [{ guide, name: dimension.name }] : [];

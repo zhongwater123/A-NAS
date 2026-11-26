@@ -1,5 +1,8 @@
-// The landscape scoring handbook as the tutorial shows it before a batch
-// (Lora-SFT docs/scoring-guideline.html, v1.3, final). Only what raters act
+// The landscape scoring handbook as the scoring guide shows it
+// (Lora-SFT docs/scoring-guideline.html, v1.3, final), with the 打分项 the
+// user chose on 2026-11-26: 构图, 光影, 叙事性 and 主体, then 总体 last, in
+// place of 画质 and 情绪 (decision 30 of
+// docs/decisions/2026-11-12-photo-scoring.md). Only what raters act
 // on is here: the project's own checks (the expected spread of scores,
 // calibration and spot checks, the version history) and what this module
 // does not ask for (keep, problem tags, comments, burst groups) are left
@@ -7,24 +10,24 @@
 // illustrate levels 1, 3 and 5 until calibration replaces them with the
 // project's own. EVA's repository is CC0-1.0, but its photos are AVA's
 // resized DPChallenge photos, whose rights stay with their photographers;
-// the user accepted shipping them (decision 28 of
-// docs/decisions/2026-11-12-photo-scoring.md).
+// the user accepted shipping them (decision 28); those of 画质 and 情绪
+// illustrate 叙事性 and 主体 now.
 
 import compositionLow from "./tutorial/composition-1.jpg";
 import compositionMid from "./tutorial/composition-3.jpg";
 import compositionHigh from "./tutorial/composition-5.jpg";
-import emotionLow from "./tutorial/emotion-1.jpg";
-import emotionMid from "./tutorial/emotion-3.jpg";
-import emotionHigh from "./tutorial/emotion-5.jpg";
 import lightLow from "./tutorial/light_color-1.jpg";
 import lightMid from "./tutorial/light_color-3.jpg";
 import lightHigh from "./tutorial/light_color-5.jpg";
 import overallLow from "./tutorial/overall-1.jpg";
 import overallMid from "./tutorial/overall-3.jpg";
+import narrativeLow from "./tutorial/narrative-1.jpg";
+import narrativeMid from "./tutorial/narrative-3.jpg";
+import narrativeHigh from "./tutorial/narrative-5.jpg";
 import overallHigh from "./tutorial/overall-5.jpg";
-import qualityLow from "./tutorial/quality-1.jpg";
-import qualityMid from "./tutorial/quality-3.jpg";
-import qualityHigh from "./tutorial/quality-5.jpg";
+import subjectLow from "./tutorial/subject-1.jpg";
+import subjectMid from "./tutorial/subject-3.jpg";
+import subjectHigh from "./tutorial/subject-5.jpg";
 
 // An example photo: the handbook's level for it and why.
 export interface Example {
@@ -41,7 +44,7 @@ export interface Example {
 export interface DimensionGuide {
   id: string;
   name: string;
-  // A word beside the name, such as 描述，不是好坏.
+  // A word beside the name, such as 最后打.
   note?: string;
   question: string;
   about: string;
@@ -58,40 +61,41 @@ export interface DimensionGuide {
 
 export const preparation = [
   "用电脑屏幕打分，不要用手机。屏幕亮度调到看网页舒服的程度，避免阳光直射屏幕。",
-  "浏览器缩放保持 100%，按正常大小看整张照片。画质也按正常大小判断，不点 100% 查看。",
+  "浏览器缩放保持 100%，按正常大小看整张照片，不点 100% 查看、不放大找细节。",
   "每打 1 小时休息 10 分钟，每天建议不超过 3 小时。人累了打分会越来越松或越来越严。",
   "打分是一个人独立完成的，打完之前不要和别人讨论具体照片。",
 ];
 
 // steps is what to do with each photo of a batch that scores these 打分项 in
-// this order. The handbook scores 总体 first, on the first impression; a
-// batch that asks for another 打分项 first is scored in its own order, as
-// the stage asks for them.
+// this order. The handbook scores 总体 last, after the 打分项 it is more than
+// the sum of; a batch made before, which scores 总体 first on the first
+// impression, and any other order are scored as the stage asks for them.
 export function steps(dimensions: readonly string[]): string[] {
   const several = dimensions.length > 1;
   const first =
     dimensions[0] === "overall"
       ? [
-          "看整张 3–5 秒，凭第一感觉打“总体”：拍得好不好、有没有让人想多看的感觉。先打总体，是为了不被后面的细节分析带偏。",
+          "看整张 3–5 秒，凭第一感觉打“总体”：拍得好不好、有没有让人想多看的感觉。",
           ...(several ? ["再按顺序打其余各项：每项只看它自己的那一方面，下面写了每项看什么、不看什么。"] : []),
         ]
       : [
           several
-            ? "按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。"
+            ? "先看整张，再按顺序逐项打：每项只看它自己的那一方面，下面写了每项看什么、不看什么。"
             : "只看这一项自己的那一方面，下面写了它看什么、不看什么。",
+          ...(several && dimensions.at(-1) === "overall"
+            ? ["最后打“总体”：不是前面几项的平均。看完各项，你有多想多看一会儿这张照片。"]
+            : []),
         ];
   return [...first, "一张照片大约 1 分钟。不要过度纠结，在两个分之间犹豫时，选更接近第一感觉的那个。"];
 }
 
-// A rule of the handbook. fiveOnly ones are shown only on five levels,
-// dimension ones only to a batch that scores it; three replaces the text on
-// three levels, which have no 2 or 4.
+// A rule of the handbook. fiveOnly ones are shown only on five levels; three
+// replaces the text on three levels, which have no 2 or 4.
 export interface Rule {
   title: string;
   text: string;
   three?: string;
   fiveOnly?: boolean;
-  dimension?: string;
 }
 
 export const rules: Rule[] = [
@@ -118,69 +122,19 @@ export const rules: Rule[] = [
     title: "每项单独看",
     text: "喜欢一张照片，不代表它每项都高；一项很差，也不代表其他项都差。同一个毛病只在它所属的那一项扣分。",
   },
-  {
-    title: "情绪是描述",
-    text: "其他各项是好坏，情绪只说平静还是激烈，3 分是中间，不是一般。“用满 1–5 分”不适用于情绪。",
-    dimension: "emotion",
-  },
   { title: "只看画面", text: "不考虑拍摄难度、地点有没有名、用的什么手机、是不是你自己拍的。" },
   { title: "按大多数人的眼光", text: "个人口味（比如不喜欢雪景、偏爱黑白）不加分也不扣分。" },
 ];
 
 export const dimensionGuides: DimensionGuide[] = [
   {
-    id: "overall",
-    name: "总体",
-    note: "主分",
-    question: "这张照片整体拍得好不好，有没有让人想多看一会儿的感觉？",
-    about: "第一眼的吸引力，加上它在讲什么、给人什么感觉。",
-    ignore: "拍摄难度、地点名气、器材；放大到原尺寸才看得出的细节。",
-    cues: [
-      "第一眼的吸引力",
-      "天气：暴风雨、雾、雪",
-      "时刻：日出、彩虹、闪电",
-      "季节感：秋叶、新绿",
-      "人迹与生命：远处行人、船、鸟、炊烟",
-      "氛围能不能打动人",
-    ],
-    levels: [
-      "想打印出来挂墙、想发给别人看；氛围或故事强烈，让人有感触",
-      "拍得不错，有明显的亮点或明确的氛围",
-      "普通记录照，能看出在哪、什么天气，但没有特别的感受",
-      "有明显问题，或内容平淡、看不出想拍什么",
-      "废片：没有内容、像误拍，或整张糊得看不清",
-    ],
-    examples: [
-      { level: 3, image: overallMid, width: 560, height: 420, alt: "树下的旧房子", why: "普通，没有特别的亮点" },
-      {
-        level: 5,
-        image: overallHigh,
-        width: 560,
-        height: 394,
-        alt: "雪山和湖面倒影",
-        why: "山、湖、云层次分明，想多看",
-      },
-      { level: 1, image: overallLow, width: 560, height: 315, alt: "灰蒙蒙的城市", why: "灰蒙蒙，看不出想拍什么" },
-    ],
-    pitfallsTitle: "容易打错",
-    pitfalls: [
-      "总体不是其他几项的平均。一项特别差（比如整张糊了）可以把总体拉得很低。",
-      "不要先打好其他几项再“推”总体，总体在第一步凭感觉打。",
-      "情绪激烈不等于总体高，平静的照片也可以打 5 分。",
-      "氛围不需要有人，空无一人的雾中树林也可以很有意境。",
-      "不是景点越有名分越高，看照片本身传达了什么。",
-      "说不出这张照片给你什么感觉时，一般不超过 3 分。",
-    ],
-  },
-  {
     id: "composition",
     name: "构图",
-    question: "画面安排得好不好，主体清不清楚？",
-    about: "视线有没有地方落、有没有路可走。",
-    ignore: "清不清楚、光线和颜色。照片糊了扣画质，不扣构图。",
+    question: "画面安排得好不好？",
+    about: "视线有没有地方落、有没有路可走，画面整不整齐。",
+    ignore: "主体突不突出（那是主体），光线和颜色，清不清楚。",
     cues: [
       "地平线水平",
-      "主体明确",
       "前景、中景、远景",
       "引导线：路、河、岸线",
       "裁切：山顶、楼顶被切",
@@ -188,11 +142,11 @@ export const dimensionGuides: DimensionGuide[] = [
       "天空和地面的比例",
     ],
     levels: [
-      "主体明确，层次丰富，视线有引导，边缘干净",
+      "层次丰富，视线有引导，边缘干净",
       "构图用心，有一两处小问题",
-      "端正，主体居中，平铺直叙",
-      "地平线略歪，或主体不明确，或边缘有杂物",
-      "明显歪斜，主体被切掉，画面杂乱",
+      "端正，平铺直叙",
+      "地平线略歪，或边缘有杂物，或比例别扭",
+      "明显歪斜，该有的被切掉，画面杂乱",
     ],
     examples: [
       {
@@ -217,7 +171,7 @@ export const dimensionGuides: DimensionGuide[] = [
         width: 560,
         height: 348,
         alt: "水边的房子",
-        why: "端正，但主体和背景混在一起",
+        why: "端正，但平铺直叙，没有层次",
       },
     ],
     pitfallsTitle: "容易打错",
@@ -229,10 +183,10 @@ export const dimensionGuides: DimensionGuide[] = [
   },
   {
     id: "light_color",
-    name: "光影色彩",
+    name: "光影",
     question: "光线和颜色好不好看？",
     about: "明暗和颜色是否合适。",
-    ignore: "构图和画质。雾、霾的朦胧属于这一项，不算画质问题。",
+    ignore: "构图和主体。雾、霾的朦胧属于这一项，不算毛病。",
     cues: [
       "光线方向：侧光、顺光、逆光",
       "光的软硬",
@@ -263,88 +217,141 @@ export const dimensionGuides: DimensionGuide[] = [
     ],
   },
   {
-    id: "quality",
-    name: "画质",
-    question: "按正常大小看，有没有看得出的画质毛病？",
-    about: "照片在窗口里完整显示时就看得出的抖动、虚焦、噪点。不点 100% 查看，不放大找细节。",
-    ignore: "构图、光线和颜色；只有放大才看得出的细节。有意的长曝光和背景虚化不扣分。",
-    cues: ["对焦：主体实不实", "手抖：双重边缘、拖影", "噪点：暗部彩色颗粒", "涂抹感：树叶草地像油画", "压缩块、色带"],
-    levels: [
-      "干净利落，看不出任何毛病",
-      "仔细看能发现轻微发软或少量噪点",
-      "有些发软或噪点，但不影响看清内容",
-      "一眼就看出发软、手抖或噪点",
-      "整张糊，看不清",
-    ],
-    examples: [
-      { level: 3, image: qualityMid, width: 560, height: 292, alt: "湖和远山", why: "远处偏软，但内容清楚" },
-      { level: 1, image: qualityLow, width: 560, height: 374, alt: "模糊的山坡", why: "整张糊，前景拖影" },
-      { level: 5, image: qualityHigh, width: 560, height: 379, alt: "岩壁和溪流", why: "岩壁、树木的细节都清楚" },
-    ],
-    pitfallsTitle: "这些不扣画质",
-    pitfalls: [
-      "有意的长曝光：瀑布、流水拍成丝绸状。",
-      "雾、霾、水汽造成的朦胧，这算光影色彩，不算画质问题。",
-      "有意的背景虚化，只要主体清楚。",
-      "屏幕小或分辨率低时看不清细节，不算照片的毛病：看不出毛病就按没有毛病打。",
-    ],
-  },
-  {
-    id: "emotion",
-    name: "情绪",
-    note: "描述，不是好坏",
-    question: "画面给人的感觉是平静还是激烈？",
-    about: "只看情绪有多强、多紧张，不看拍得好不好。3 分是不平静也不激烈，不代表一般。",
-    ignore: "照片好不好看、技术好坏。平静的照片可以总体 5 分、情绪 1 分。",
+    id: "narrative",
+    name: "叙事性",
+    question: "这张照片有没有在讲一件事、一种处境？",
+    about: "看完说不说得出它在讲什么：一个时刻、一种天气里的处境、人和自然的关系、季节的变化。",
+    ignore: "拍得好不好看、构图和光线；地点有没有名。",
     cues: [
-      "天气：暴风雨、雷电、狂风暴雪",
-      "水：惊涛、急流、飞溅",
-      "天空：翻涌的云、压城的乌云",
-      "光：强烈的明暗对比",
-      "平静：薄雾、静水、空旷的雪原",
+      "人迹与生命：人、船、动物、炊烟",
+      "正在发生的事：暴风雨要来、日出那一刻",
+      "时刻与季节：初雪、秋叶、新绿",
+      "对比：渺小与辽阔、新与旧",
+      "看完记得住什么",
     ],
     levels: [
-      "激烈紧张：暴风雨、惊涛拍岸、雷电、狂风暴雪",
-      "有明显的动感或压迫感：翻涌的云、湍急的河、阴云压顶",
-      "不平静也不激烈：普通天气下的山水",
-      "安静：微风、缓流、柔和的光",
-      "非常平静，几乎凝固：静水倒影、雾中空林、雪后旷野",
+      "一眼看出在讲什么，看完还会想：人和风景之间有处境、有故事",
+      "有明确想说的事，比如一个时刻、一种天气里的感受",
+      "能看出在哪、什么天气，但说不出它想讲什么",
+      "内容平淡，只是一片景",
+      "看不出想拍什么",
     ],
     examples: [
+      {
+        level: 3,
+        image: narrativeMid,
+        width: 560,
+        height: 522,
+        alt: "草坡上吃草的马",
+        why: "有马、有滑翔伞，但说不出想讲什么",
+      },
+      { level: 1, image: narrativeLow, width: 560, height: 374, alt: "模糊的山坡和鸟群", why: "看不出想拍什么" },
       {
         level: 5,
-        image: emotionHigh,
+        image: narrativeHigh,
         width: 560,
         height: 336,
-        alt: "乌云下浪打礁石",
-        why: "乌云压顶，浪打礁石，让人紧张",
-      },
-      { level: 3, image: emotionMid, width: 560, height: 522, alt: "晴天的绿色草坡", why: "晴天的草坡，平常的感觉" },
-      {
-        level: 1,
-        image: emotionLow,
-        width: 470,
-        height: 720,
-        alt: "雾中树林倒映在静水里",
-        why: "雾中树林倒映在静水里，几乎凝固",
+        alt: "崖边的人看着暴风雨下的海",
+        why: "一个人站在崖边面对风暴，看完记得住",
       },
     ],
     pitfallsTitle: "容易打错",
     pitfalls: [
-      "情绪不是好坏，不要把喜欢的照片往高处打。",
-      "肃杀的画面看有没有张力：寒风、乌云、暴雪让人紧张的打 4–5；静止的枯林、荒原打 1–2。",
-      "拿不准时问自己：看这张照片，心里是静下来还是绷起来。",
+      "叙事性不等于有人：空无一人的雪原也可以讲“冬天来了”。",
+      "不是景点越有名分越高，看照片本身讲了什么。",
+      "说不出它在讲什么时，一般不超过 3 分。",
+    ],
+  },
+  {
+    id: "subject",
+    name: "主体",
+    question: "有没有一眼就看到的主体，它突不突出？",
+    about: "第一眼落在哪，那个东西和背景分不分得开。",
+    ignore: "主体放在哪个位置、画面怎样安排（那是构图）；主体本身好不好看。",
+    cues: [
+      "一眼先看到什么",
+      "主体和背景：明暗、颜色、虚实分没分开",
+      "抢眼的杂物",
+      "主体太小、被挡住",
+      "几样东西在抢注意",
+    ],
+    levels: [
+      "主体一眼就看到，和背景分得很开，没有东西抢",
+      "主体清楚，有一点干扰",
+      "有主体，但不够突出，或有别的东西分走注意",
+      "要找一下才知道拍的是什么",
+      "找不到主体，画面散",
+    ],
+    examples: [
+      {
+        level: 1,
+        image: subjectLow,
+        width: 560,
+        height: 292,
+        alt: "湖、山和小镇的全景",
+        why: "湖、山、小镇平铺，找不到一眼看到的",
+      },
+      { level: 5, image: subjectHigh, width: 470, height: 720, alt: "雾中的树干", why: "雾隐去了背景，树干一眼就看到" },
+      {
+        level: 3,
+        image: subjectMid,
+        width: 560,
+        height: 379,
+        alt: "岩壁和溪流",
+        why: "岩壁是主体，但右边的山和前景的石头分走注意",
+      },
+    ],
+    pitfallsTitle: "容易打错",
+    pitfalls: [
+      "大场景也可以有主体：一座山、一棵树、一道光。",
+      "主体不一定在中间，放在哪里是构图的事。",
+      "整片花海、整片云这样以“一片”为主体的，看它是否撑满画面、有没有东西抢。",
+    ],
+  },
+  {
+    id: "overall",
+    name: "总体",
+    note: "最后打",
+    question: "看完各项，这张照片整体拍得好不好，有多想多看一会儿？",
+    about: "前面几项之外的东西：第一眼的吸引力、氛围、能不能打动人，以及一处毛病对整张的伤害。",
+    ignore: "拍摄难度、地点名气、器材；放大到原尺寸才看得出的细节。",
+    cues: ["第一眼的吸引力", "氛围能不能打动人", "想不想发给别人看", "一处毛病有多伤整张：糊了、歪得厉害"],
+    levels: [
+      "想打印出来挂墙、想发给别人看；氛围或故事强烈，让人有感触",
+      "拍得不错，有明显的亮点或明确的氛围",
+      "普通记录照，能看出在哪、什么天气，但没有特别的感受",
+      "有明显问题，或内容平淡、看不出想拍什么",
+      "废片：没有内容、像误拍，或整张糊得看不清",
+    ],
+    examples: [
+      { level: 3, image: overallMid, width: 560, height: 420, alt: "树下的旧房子", why: "普通，没有特别的亮点" },
+      {
+        level: 5,
+        image: overallHigh,
+        width: 560,
+        height: 394,
+        alt: "雪山和湖面倒影",
+        why: "山、湖、云层次分明，想多看",
+      },
+      { level: 1, image: overallLow, width: 560, height: 315, alt: "灰蒙蒙的城市", why: "灰蒙蒙，看不出想拍什么" },
+    ],
+    pitfallsTitle: "容易打错",
+    pitfalls: [
+      "总体不是前面几项的平均，可以比哪一项都高或都低。不要算平均分，问自己有多想多看一会儿。",
+      "清不清楚没有单独的项：糊、抖、噪点影响观看时，在总体里扣。一处毛病很重可以把总体拉得很低。",
+      "氛围不需要有人，空无一人的雾中树林也可以很有意境。",
+      "说不出这张照片给你什么感觉时，一般不超过 3 分。",
     ],
   },
 ];
 
 // What to do in cases the scale does not cover, with this module's keys.
 export const specialCases: [string, string][] = [
-  ["画面里有人", "人很小、只是风景的一部分：正常打，人迹可以算总体的看点。人占画面主体：按 S“无法判断”跳过。"],
-  ["黑白照片", "正常打。光影色彩只看明暗层次。"],
-  ["长曝光", "流水丝滑、车流光轨是有意的，不扣画质。"],
-  ["夜景", "按夜景的标准看：灯光、层次、噪点。暗本身不扣分。"],
-  ["后期很重", "HDR 感、颜色过艳，在光影色彩里扣分。"],
+  ["画面里有人", "人很小、只是风景的一部分：正常打，人迹可以算叙事性的看点。人占画面主体：按 S“无法判断”跳过。"],
+  ["黑白照片", "正常打。光影只看明暗层次。"],
+  ["长曝光", "流水丝滑、车流光轨是有意的，不算毛病。"],
+  ["夜景", "按夜景的标准看：灯光和明暗层次。暗本身不扣分。"],
+  ["后期很重", "HDR 感、颜色过艳，在光影里扣分。"],
   ["截图、水印、拼图、全景", "不应该出现。按 X“图片有问题”。"],
   ["认识这个地方或拍摄人", "照常按画面打，不加分不减分。"],
   ["两个分之间犹豫", "选更接近第一感觉的那个。不要每次都退回 3 分。"],
