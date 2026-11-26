@@ -13,6 +13,7 @@ import type { FileEntry, Space } from "../api.generated";
 import { VersionsDialog } from "../backup/VersionsDialog";
 import { nameProblem } from "../lib/fileNames";
 import { carriesFiles, PickedFile, pickedFromDrop } from "../lib/pickedFiles";
+import { lastPointerWasTouch, touchScreen } from "../lib/touch";
 import { displayName, usePeople } from "../people/people";
 import { endViewing } from "../settings/api";
 import { useShares } from "../shares/SharesProvider";
@@ -100,6 +101,10 @@ export function FilePanel({
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [selectedItemID, setSelectedItemID] = useState("");
   const [selectedItemIDs, setSelectedItemIDs] = useState<string[]>([]);
+  // On a touch screen a long press starts choosing several items; taps then
+  // add to or take from the selection until nothing is left selected.
+  const [longPressed, setLongPressed] = useState(false);
+  const picking = longPressed && selectedItemIDs.length > 0;
   const [collapsedSpaceIDs, setCollapsedSpaceIDs] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<FileClipboard>();
   const [activity, setActivity] = useState("");
@@ -171,9 +176,10 @@ export function FilePanel({
   const selectedSpace = spaces.find((space) => space.id === spaceID);
   const viewing = selectedSpace?.viewing;
   const showResources = selectedSpace?.kind === "private" && !viewing && trail.length === 0;
+  const opens = touchScreen() ? "点按" : "双击";
   const browserItems: FileBrowserItem[] = [
     ...(showResources ? personalFileResources : []),
-    ...entries.map(browserItem),
+    ...entries.map((entry) => browserItem(entry, opens)),
   ];
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const orderedItems = sortFiles(browserItems, order);
@@ -278,6 +284,7 @@ export function FilePanel({
       .catch((caught) => setError(messageOf(caught)));
   };
   const showViewer = (entry: FileEntry) => {
+    setLongPressed(false);
     setViewingID(entry.id);
     setSelectedItemIDs([entry.id]);
     setSelectedItemID(entry.id);
@@ -325,6 +332,7 @@ export function FilePanel({
     event.preventDefault();
     event.stopPropagation();
     if (item && !selectedItemIDs.includes(item.id)) selectItem(item);
+    if (item) setLongPressed(lastPointerWasTouch());
     const bounds = managerRef.current?.getBoundingClientRect();
     if (!bounds) return;
     const width = 178;
@@ -597,6 +605,7 @@ export function FilePanel({
           view={view}
           items={visibleItems}
           selectedIDs={selectedItemIDs}
+          picking={picking}
           order={order}
           loading={loading}
           hasSpace={Boolean(spaceID)}

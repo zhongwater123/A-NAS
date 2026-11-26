@@ -2,6 +2,7 @@ import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "luci
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
+import { lastPointerWasTouch } from "../lib/touch";
 import { FileArtwork } from "./FileIcon";
 import styles from "./files.module.css";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
@@ -24,6 +25,7 @@ export function FileList({
   view,
   items,
   selectedIDs,
+  picking,
   order,
   loading,
   hasSpace,
@@ -40,6 +42,8 @@ export function FileList({
   view: FileView;
   items: FileBrowserItem[];
   selectedIDs: string[];
+  // A long press on a touch screen started choosing several items.
+  picking: boolean;
   order: FileOrder;
   loading: boolean;
   hasSpace: boolean;
@@ -58,7 +62,12 @@ export function FileList({
   const [selectionRect, setSelectionRect] = useState<SelectionRect>();
   const { sortBy, direction } = order;
   const beginBoxSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("[data-file-item], button, a, input, select"))
+    // A finger on empty space scrolls the list; a selection box is for a mouse.
+    if (
+      event.button !== 0 ||
+      event.pointerType === "touch" ||
+      (event.target as HTMLElement).closest("[data-file-item], button, a, input, select")
+    )
       return;
     const shell = shellRef.current;
     if (!shell) return;
@@ -98,7 +107,16 @@ export function FileList({
   const itemProps = (item: FileBrowserItem) => ({
     "data-file-item": item.id,
     ...dragProps(item),
-    onClick: (event: ReactMouseEvent) => onSelect(item, event),
+    onClick: (event: ReactMouseEvent) => {
+      // A tap opens, as a double click does; while choosing several items
+      // (after a long press), taps add to or take from the selection.
+      if (lastPointerWasTouch() && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        if (picking) onSelect(item, { ctrlKey: true, metaKey: false, shiftKey: false });
+        else onOpen(item);
+        return;
+      }
+      onSelect(item, event);
+    },
     onDoubleClick: () => onOpen(item),
     onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
   });
