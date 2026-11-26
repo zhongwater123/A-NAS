@@ -118,7 +118,7 @@ func (s *Store) RecoverJobs(ctx context.Context) error {
 	now := sqlitedb.FormatTime(s.now())
 	if err := s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
-			WHERE cancel_requested = 1 AND `+activeStateQuery, now, now); err != nil {
+			WHERE cancel_requested = 1 AND `+db.ActiveStateQuery, now, now); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
@@ -145,7 +145,7 @@ func (s *Store) removeEndedFiles(ctx context.Context) error {
 	}
 	for _, entry := range entries {
 		var active bool
-		if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+activeStateQuery+")",
+		if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+db.ActiveStateQuery+")",
 			entry.Name()).Scan(&active); err != nil {
 			return err
 		}
@@ -398,6 +398,6 @@ func (s *Store) cancelRequested(ctx context.Context, jobID string) bool {
 
 func (s *Store) finished(ctx context.Context, jobID string) bool {
 	var active bool
-	err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+activeStateQuery+")", jobID).Scan(&active)
+	err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+db.ActiveStateQuery+")", jobID).Scan(&active)
 	return err == nil && !active
 }

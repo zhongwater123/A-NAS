@@ -139,6 +139,7 @@ type queryer interface {
 	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
 	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
 	RoundStanding(ctx context.Context, owner, jobID, token string) (db.RoundStanding, error)
+	Song(ctx context.Context, id string) (db.SongRow, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -637,7 +638,7 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		if _, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", projectID); err != nil {
 			return err
 		}
-		return forgetUnusedSongs(ctx, tx, owner)
+		return tx.ForgetUnusedSongs(ctx, owner)
 	})
 	if err != nil {
 		return err
@@ -898,8 +899,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 		if err := tx.DeletePlanGrant(ctx, userID); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ?", userID)
-		return err
+		return tx.DeleteOwnerSongs(ctx, userID)
 	})
 	if err != nil {
 		return err

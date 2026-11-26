@@ -54,13 +54,11 @@ const (
 	NeedStorageFull = "storage_full"
 	// FailPlanning: the planning was tried maxPlanRounds rounds and none
 	// finished it; the job failed, its error says how the last ended.
-	FailPlanning     = "plan_failed"
-	jobLease         = 5 * time.Minute
-	jobMaxAttempts   = 3
-	jobRetryDelay    = time.Minute
-	lifecycleCheck   = 10 * time.Minute
-	finishedStates   = "'done', 'failed', 'cancelled'"
-	activeStateQuery = "state NOT IN (" + finishedStates + ")"
+	FailPlanning   = "plan_failed"
+	jobLease       = 5 * time.Minute
+	jobMaxAttempts = 3
+	jobRetryDelay  = time.Minute
+	lifecycleCheck = 10 * time.Minute
 )
 
 // The kinds of job and of version (#596).
@@ -186,7 +184,7 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, s
 // ended: a project has one job in progress at a time, of any kind.
 func projectIdle(ctx context.Context, tx *db.Tx, projectID string) error {
 	var active bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+db.ActiveStateQuery+")", projectID).Scan(&active); err != nil {
 		return err
 	}
 	if active {
@@ -370,7 +368,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 	err = s.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
 		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
 		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
-		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+activeStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
+		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+db.ActiveStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := s.Job(ctx, owner, jobID); err != nil {
 			return domain.Job{}, err

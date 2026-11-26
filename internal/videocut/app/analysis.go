@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -97,16 +96,11 @@ func (s *Store) AnalyzeWaiting(ctx context.Context) error {
 // unusable: what changed since may be what refused them. Songs that are ready
 // keep the analysis their projects were set up with.
 func (s *Store) requeueStale(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE songs SET state = 'analyzing', reason = '', waiting = '', attempts = 0, next_try = NULL,
-		analysis_json = NULL, loudness = NULL, updated_at = ? WHERE state = 'unusable' AND analysis_version != ?`,
-		sqlitedb.FormatTime(s.now()), AnalysisVersion)
-	return err
+	return s.db.RequeueStaleSongs(ctx, s.now(), AnalysisVersion)
 }
 
 func (s *Store) nextSong(ctx context.Context) (string, bool, error) {
-	var sha string
-	err := s.db.QueryRowContext(ctx, `SELECT sha256 FROM songs WHERE state = 'analyzing' AND (next_try IS NULL OR next_try <= ?)
-		ORDER BY created_at, id LIMIT 1`, sqlitedb.FormatTime(s.now())).Scan(&sha)
+	sha, err := s.db.NextSong(ctx, s.now())
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -192,10 +186,7 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 
 // knownStructure is what an earlier attempt found for the content.
 func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, []float32, error) {
-	var text sql.NullString
-	var blob []byte
-	err := s.db.QueryRowContext(ctx, `SELECT analysis_json, loudness FROM songs WHERE sha256 = ? AND analysis_json IS NOT NULL
-		ORDER BY updated_at DESC LIMIT 1`, sha).Scan(&text, &blob)
+	text, blob, err := s.db.KnownStructure(ctx, sha)
 	if errors.Is(err, sql.ErrNoRows) {
 		return songAnalysis{}, nil, nil
 	}
@@ -294,18 +285,14 @@ func (s *Store) keepStructure(ctx context.Context, sha string, analysis songAnal
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE songs SET analysis_json = ?, loudness = ?, analysis_version = ?, updated_at = ?
-		WHERE sha256 = ? AND state = 'analyzing'`, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
-	return err
+	return s.db.KeepSongStructure(ctx, sha, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, s.now())
 }
 
 // finish records the analysis in every row of the content still waiting.
 func (s *Store) finish(ctx context.Context, sha, state, reason string, analysis songAnalysis, loudness []float32) {
 	encoded, err := json.Marshal(analysis)
 	if err == nil {
-		_, err = s.db.ExecContext(ctx, `UPDATE songs SET state = ?, reason = ?, waiting = '', next_try = NULL, analysis_json = ?,
-			loudness = ?, analysis_version = ?, updated_at = ? WHERE sha256 = ? AND state = 'analyzing'`,
-			state, reason, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
+		err = s.db.FinishSong(ctx, sha, state, reason, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, s.now())
 	}
 	if err != nil {
 		s.logger.WarnContext(ctx, "recording a song's analysis failed", "error", err)
@@ -315,8 +302,7 @@ func (s *Store) finish(ctx context.Context, sha, state, reason string, analysis 
 
 // wait leaves the content's rows waiting for a Worker that is away.
 func (s *Store) wait(ctx context.Context, sha, why string) {
-	if _, err := s.db.ExecContext(ctx, `UPDATE songs SET waiting = ?, next_try = ?
-		WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
+	if err := s.db.WaitSong(ctx, sha, why, s.now().Add(analysisRetry)); err != nil {
 		s.logger.WarnContext(ctx, "recording a waiting song failed", "error", err)
 	}
 }
@@ -329,13 +315,14 @@ func (s *Store) wait(ctx context.Context, sha, why string) {
 func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalysis, loudness []float32) {
 	var attempts int
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE songs SET waiting = ?, attempts = attempts + 1, next_try = ?
-			WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
+		if err := tx.FailSongAttempt(ctx, sha, why, s.now().Add(analysisRetry)); err != nil {
 			return err
 		}
 		// A member who chose the content later joins the count of those
 		// already waiting.
-		return tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(attempts), 0) FROM songs WHERE sha256 = ? AND state = 'analyzing'", sha).Scan(&attempts)
+		var err error
+		attempts, err = tx.SongAttempts(ctx, sha)
+		return err
 	})
 	if err != nil {
 		s.logger.WarnContext(ctx, "recording a failed analysis failed", "error", err)

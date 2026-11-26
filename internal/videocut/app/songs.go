@@ -260,7 +260,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 			WHERE id = ? AND owner_user_id = ?`, songID, source.TrackID, sqlitedb.FormatTime(s.now()), projectID, owner); err != nil {
 			return err
 		}
-		return forgetUnusedSongs(ctx, tx, owner)
+		return tx.ForgetUnusedSongs(ctx, owner)
 	})
 	if err != nil {
 		return domain.SongDetail{}, err
@@ -274,48 +274,28 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 // row takes the analysis another member's row has finished for the same
 // content.
 func (s *Store) songRowFor(ctx context.Context, tx *db.Tx, owner, sha, title, contentType string, duration float64) (string, error) {
-	now := sqlitedb.FormatTime(s.now())
-	var id string
-	err := tx.QueryRowContext(ctx, "SELECT id FROM songs WHERE owner_user_id = ? AND sha256 = ?", owner, sha).Scan(&id)
+	now := s.now()
+	id, err := tx.SongID(ctx, owner, sha)
 	if err == nil {
-		_, err = tx.ExecContext(ctx, "UPDATE songs SET title = ?, updated_at = ? WHERE id = ?", title, now, id)
+		err = tx.RetitleSong(ctx, id, title, now)
 		return id, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	id = newID("song")
-	if _, err := tx.ExecContext(ctx, `INSERT INTO songs(id, owner_user_id, sha256, title, duration, content_type, state, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, 'analyzing', ?, ?)`, id, owner, sha, title, duration, contentType, now, now); err != nil {
+	if err := tx.AddSong(ctx, id, owner, sha, title, duration, contentType, now); err != nil {
 		return "", err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE songs SET (state, reason, analysis_version, analysis_json, loudness) =
-		(SELECT state, reason, analysis_version, analysis_json, loudness FROM songs o
-		 WHERE o.sha256 = songs.sha256 AND o.id != songs.id AND o.state != 'analyzing' ORDER BY o.updated_at DESC LIMIT 1)
-		WHERE id = ? AND EXISTS (SELECT 1 FROM songs o WHERE o.sha256 = songs.sha256 AND o.id != songs.id AND o.state != 'analyzing')`, id)
+	err = tx.CopySongAnalysis(ctx, id)
 	return id, err
-}
-
-// A copy is needed by the current project, by the settings captured by an
-// unfinished job, even after the project has changed its song, and by any
-// version's job: editing a version renders and previews it with the song it
-// was made with (#596).
-const unusedSongs = `NOT EXISTS (SELECT 1 FROM projects WHERE song_id = songs.id)
-	AND NOT EXISTS (SELECT 1 FROM jobs WHERE owner_user_id = songs.owner_user_id AND ` + activeStateQuery + `
-		AND json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.songId') = songs.id)
-	AND NOT EXISTS (SELECT 1 FROM versions v JOIN jobs j ON j.id = v.job_id WHERE j.owner_user_id = songs.owner_user_id
-		AND json_extract(CASE WHEN json_valid(j.settings_json) THEN j.settings_json END, '$.songId') = songs.id)`
-
-func forgetUnusedSongs(ctx context.Context, q queryer, owner string) error {
-	_, err := q.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ? AND "+unusedSongs, owner)
-	return err
 }
 
 // releaseSong removes a finished job's song when its last reference goes.
 func (s *Store) releaseSong(ctx context.Context, owner string) {
 	s.songs.Lock()
 	defer s.songs.Unlock()
-	if err := forgetUnusedSongs(ctx, s.db, owner); err != nil {
+	if err := s.db.ForgetUnusedSongs(ctx, owner); err != nil {
 		s.logger.WarnContext(ctx, "releasing a finished job's song failed", "error", err)
 		return
 	}
@@ -340,7 +320,8 @@ func (s *Store) removeUnusedCopies(ctx context.Context) {
 		}
 		var used bool
 		if validDigest(name) {
-			if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM songs WHERE sha256 = ?)", name).Scan(&used); err != nil {
+			var err error
+			if used, err = s.db.SongContentKept(ctx, name); err != nil {
 				s.logger.WarnContext(ctx, "checking a song copy failed", "song", name, "error", err)
 				continue
 			}
@@ -359,7 +340,7 @@ func (s *Store) removeUnusedCopies(ctx context.Context) {
 func (s *Store) ReclaimSongs(ctx context.Context) error {
 	s.songs.Lock()
 	defer s.songs.Unlock()
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM songs WHERE "+unusedSongs); err != nil {
+	if err := s.db.ForgetAllUnusedSongs(ctx); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(filepath.Join(s.songsRoot(), incomingDir)); err != nil {
@@ -395,19 +376,16 @@ func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID str
 }
 
 func (s *Store) song(ctx context.Context, q queryer, id string) (songRow, error) {
-	var row songRow
-	var analysis sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
-		duration, analysis_json, loudness FROM songs WHERE id = ?`, id).
-		Scan(&row.id, &row.owner, &row.sha, &row.title, &row.contentType, &row.state, &row.reason, &row.waiting, &row.version,
-			&row.duration, &analysis, &row.loudness)
+	kept, err := q.Song(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return songRow{}, domain.ErrNoSong
 	}
 	if err != nil {
 		return songRow{}, err
 	}
-	if analysis.Valid {
+	row := songRow{id: kept.ID, owner: kept.Owner, sha: kept.Sha, title: kept.Title, contentType: kept.ContentType, state: kept.State,
+		reason: kept.Reason, waiting: kept.Waiting, version: kept.Version, duration: kept.Duration, loudness: kept.Loudness}
+	if analysis := kept.Analysis; analysis.Valid {
 		if err := json.Unmarshal([]byte(analysis.String), &row.analysis); err != nil {
 			return songRow{}, fmt.Errorf("song %s: %w", id, err)
 		}
