@@ -1,10 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse } from "msw";
 import { type ReactElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadTaskNotices, resetTaskNotices } from "../assistant/taskNotices";
-import { publishFocusedWindow } from "../desktop/focusedWindow";
 import { http, server } from "../test/server";
 import { Companion } from "./Companion";
 import { resetCompanionCommands, runCompanionCommand, stopTurnCommands } from "./commands";
@@ -102,7 +101,6 @@ afterEach(() => {
     companionState.writePet("main", "sleep", { sleeping: false });
     companionState.writePet("main", "lock", { locked: false });
   });
-  publishFocusedWindow(null);
   act(() => resetTaskNotices());
   localStorage.clear();
   act(() => resetCompanionMode());
@@ -1225,6 +1223,45 @@ describe("what VNAS asks of the companion", () => {
     });
   });
 
+  describe("its own menu", () => {
+    it("opens on a right click and makes it quiet, then wakes it", async () => {
+      serve([IDLE, "睡觉-开始", "睡觉-循环", "睡觉-起来"]);
+      const { pet } = await mount();
+      fireEvent.contextMenu(pet, { clientX: 900, clientY: 640 });
+      const menu = screen.getByRole("menu", { name: "大肥鱼" });
+      expect(within(menu).getByRole("menuitem", { name: "让她安静" })).toHaveFocus();
+      fireEvent.click(within(menu).getByRole("menuitem", { name: "让她安静" }));
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(companionMode()).toBe("quiet");
+      await plays("睡觉-开始");
+      fireEvent.contextMenu(pet, { clientX: 900, clientY: 640 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "叫醒她" }));
+      expect(companionMode()).toBe("normal");
+    });
+
+    it("hides it on this device, until Settings brings it back", async () => {
+      serve([IDLE]);
+      const { pet } = await mount();
+      fireEvent.contextMenu(pet);
+      expect(screen.getByRole("menu")).toHaveTextContent("隐藏后在 设置 → 概览 里打开");
+      fireEvent.click(screen.getByRole("menuitem", { name: "隐藏伙伴" }));
+      expect(companionMode()).toBe("hidden");
+      await waitFor(() => expect(screen.queryByLabelText("大肥鱼")).toBeNull());
+    });
+
+    it("closes on Esc or a press elsewhere, changing nothing", async () => {
+      serve([IDLE]);
+      const { pet } = await mount();
+      fireEvent.contextMenu(pet);
+      fireEvent.keyDown(screen.getByRole("menuitem", { name: "让她安静" }), { key: "Escape" });
+      expect(screen.queryByRole("menu")).toBeNull();
+      fireEvent.contextMenu(pet);
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(companionMode()).toBe("normal");
+    });
+  });
+
   it("holds still under a lock, and goes on when the lock ends", async () => {
     serve([IDLE]);
     const { videos } = await mount();
@@ -1700,11 +1737,48 @@ describe("walking, throwing and resting", () => {
       onOpenHealth: () => {
         opened.health += 1;
       },
+      onOpenChat: (beside: DOMRect | null) => {
+        chats.push(beside);
+      },
     };
+    /** Where each chat was asked to open beside: the companion's hit area. */
+    const chats: (DOMRect | null)[] = [];
     beforeEach(() => {
       opened.vnas = 0;
       opened.runs = [];
       opened.health = 0;
+      chats.length = 0;
+    });
+
+    it("opens VNAS to talk beside it with nothing to tell, and plays a click response", async () => {
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      fireEvent.click(pet);
+      await plays("点击回应-元气挥手");
+      expect(chats).toHaveLength(1);
+      expect(chats[0]).toBeInstanceOf(DOMRect);
+      expect(opened).toEqual({ vnas: 0, runs: [], health: 0 });
+    });
+
+    it("tells what waits rather than opening a chat", async () => {
+      serve([IDLE, "点击回应-元气挥手", "工作状态-原地踱步张望"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      act(() => {
+        startTurn("live0001");
+        reportCards([{ requestId: "r1", sessionId: "live0001", status: "awaiting" }]);
+      });
+      fireEvent.click(pet);
+      expect((await screen.findAllByText("等你确认"))[0]).toBeInTheDocument();
+      expect(chats).toEqual([]);
+    });
+
+    it("opens no chat on the screen the family shares", async () => {
+      cover.local = true;
+      serve([IDLE, "点击回应-元气挥手"]);
+      const { pet } = await mount(<Companion {...openers} />);
+      fireEvent.click(pet);
+      await plays("点击回应-元气挥手");
+      expect(chats).toEqual([]);
     });
 
     it("opens Settings' overview while the device is in critical trouble, before a card that waits", async () => {
@@ -2010,172 +2084,46 @@ describe("walking, throwing and resting", () => {
     const y = Number.parseFloat(root.style.top);
     return { left: x + 75, top: y + 30, right: x + 165, bottom: y + 137 };
   };
-  const clear = (hit: ReturnType<typeof hitArea>, window: { x: number; y: number; width: number; height: number }) =>
-    hit.right <= window.x ||
-    hit.left >= window.x + window.width ||
-    hit.bottom <= window.y ||
-    hit.top >= window.y + window.height;
-  /** A window on top, laid out where it is (jsdom lays nothing out), as the desktop publishes it. */
-  const openWindow = (window: { x: number; y: number; width: number; height: number }) => {
-    document.querySelector(`[data-window-id="assistant"]`)?.remove();
-    const element = document.createElement("section");
-    element.dataset.windowId = "assistant";
-    for (const [name, value] of Object.entries({
-      offsetLeft: window.x,
-      offsetTop: window.y,
-      offsetWidth: window.width,
-      offsetHeight: window.height,
-    }))
-      Object.defineProperty(element, name, { configurable: true, value });
-    document.body.append(element);
-    act(() => publishFocusedWindow({ id: "assistant", ...window, maximized: false }));
-  };
   const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
-  afterEach(() => document.querySelector(`[data-window-id="assistant"]`)?.remove());
 
-  it("steps aside from a window that opens over it, springing from its corner, without a clip of its own", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    await settle();
-    fetched = [];
-    // On a 1024×768 page its corner is at the bottom right: a window from 200 to 1000 covers it.
-    const window = { x: 200, y: 40, width: 800, height: 700 };
-    openWindow(window);
-    // It springs from where it is, not in one jump.
-    frames(2);
-    expect(queue.size).toBeGreaterThan(0);
-    expect(hitArea(root).left).toBeGreaterThan(700);
-    frames(400);
-    expect(queue.size).toBe(0);
-    // Out to the window's left, at the same height.
-    expect(hitArea(root).right).toBeCloseTo(200 - 12, 0);
-    expect(hitArea(root).top).toBeCloseTo(768 - 88 - 135 + 30, 0);
-    expect(clear(hitArea(root), window)).toBe(true);
-    expect(saved()?.rx).toBeCloseTo((200 - 12 - 90 - 75 + 120) / 1024, 3);
-    expect(fetched).toEqual([]);
-  });
-
-  it("goes there at once when motion is reduced", async () => {
-    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("reduce"), media: query }));
-    serve([IDLE]);
-    const { root } = await mount();
-    openWindow({ x: 200, y: 40, width: 800, height: 700 });
-    expect(queue.size).toBe(0);
-    expect(hitArea(root).right).toBeCloseTo(200 - 12, 0);
-  });
-
-  it("steps aside from the window it is dropped on, once let go", async () => {
+  it("stays where it is dropped over a window, and goes where VNAS puts it over one", async () => {
     serve([IDLE, "被鼠标拖拽悬空反馈"]);
     const { pet, root } = await mount();
-    const window = { x: 500, y: 200, width: 520, height: 400 };
-    openWindow(window);
-    write("position", { x: 0.25, y: 0.5, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
-    // Clear of the window where VNAS put it: it stays.
-    expect(clear(hitArea(root), window)).toBe(true);
-    const box = root.getBoundingClientRect();
-    const [x, y] = [box.x + 120, box.y + 60];
-    drag(
-      pet,
-      [
-        [x, y],
-        [x + 100, y],
-        [x + 200, y],
-        [x + 300, y],
-      ],
-      60,
-    );
-    frames(400);
-    await wait(200);
-    frames(400);
-    expect(queue.size).toBe(0);
-    expect(hitArea(root).right).toBeCloseTo(500 - 12, 0);
-    expect(clear(hitArea(root), window)).toBe(true);
-  });
-
-  it("goes on stepping aside after a click cuts it short", async () => {
-    serve([IDLE, "点击回应-元气挥手"]);
-    const { pet, root } = await mount();
-    write("position", { x: 0.25, y: 0.5, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
-    const window = { x: 150, y: 100, width: 700, height: 500 };
-    openWindow(window);
-    frames(3);
-    // The press stops the move halfway, over the window, and a click leaves no place behind it.
-    const box = root.getBoundingClientRect();
-    drag(pet, [[box.x + 120, box.y + 60]]);
-    expect(queue.size).toBe(0);
-    expect(clear(hitArea(root), window)).toBe(false);
-    await wait(200);
-    frames(400);
-    expect(clear(hitArea(root), window)).toBe(true);
-  });
-
-  it("goes on stepping aside after a lock that starts cuts it short", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    write("position", { x: 0.25, y: 0.5, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
-    const window = { x: 150, y: 100, width: 700, height: 500 };
-    openWindow(window);
-    frames(3);
-    write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
-    expect(clear(hitArea(root), window)).toBe(false);
-    // Once it holds still: a flight would be left to land.
-    await wait(200);
-    frames(400);
-    expect(clear(hitArea(root), window)).toBe(true);
-  });
-
-  it("goes on stepping aside after a lock that starts once an earlier one ran out", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    write("position", { x: 0.25, y: 0.5, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
-    write("lock", { locked: true, expiresAt: Date.now() + 50 });
-    await wait(100);
-    const window = { x: 150, y: 100, width: 700, height: 500 };
-    openWindow(window);
-    frames(3);
-    write("lock", { locked: true, expiresAt: Date.now() + 60_000 });
-    await wait(200);
-    frames(400);
-    expect(clear(hitArea(root), window)).toBe(true);
-  });
-
-  it("lets VNAS's move go on when it starts soon after a step aside", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    // From its corner it steps to the right of a window from 500 to 900.
-    openWindow({ x: 500, y: 40, width: 400, height: 700 });
-    frames(400);
-    expect(hitArea(root).left).toBeCloseTo(900 + 12, 0);
-    // VNAS sends it across the window to the left, within the step aside's 1.5 s.
-    write("position", { x: 0.2, y: 0.5, mode: "line", duration: 3000 });
-    frames(10);
-    await wait(1600);
-    frames(300);
-    expect(root.style.left).toBe(left(0.2));
-  });
-
-  it("checks the window again when an animation cuts VNAS's move short over it", { timeout: 10_000 }, async () => {
-    serve([IDLE, "点击回应-元气挥手"]);
-    const { root } = await mount();
-    const window = { x: 300, y: 100, width: 400, height: 400 };
-    openWindow(window);
-    write("position", { x: 0.12, y: 0.4, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.12)));
-    write("position", { x: 0.85, y: 0.4, mode: "line", duration: 1000 });
-    frames(25);
-    write("anim", { name: "点击回应-元气挥手" });
-    frames(2);
-    expect(clear(hitArea(root), window)).toBe(false);
-    // Its hold runs out (the move's 1 s and 1.5 s more): then it steps aside.
-    await wait(2700);
-    frames(400);
-    await wait(50);
-    frames(400);
-    expect(clear(hitArea(root), window)).toBe(true);
+    // VNAS's window over the middle of a 1024×768 page, as the desktop lays it out.
+    const element = document.createElement("section");
+    element.dataset.windowId = "assistant";
+    for (const [name, value] of Object.entries({ offsetLeft: 200, offsetTop: 40, offsetWidth: 800, offsetHeight: 700 }))
+      Object.defineProperty(element, name, { configurable: true, value });
+    document.body.append(element);
+    try {
+      write("position", { x: 0.5, y: 0.5, mode: "instant" });
+      await waitFor(() => expect(root.style.left).toBe(left(0.5)));
+      await wait(400);
+      frames(100);
+      expect(root.style.left).toBe(left(0.5));
+      // Dragged slowly a little further over the window, it is put down there and stays.
+      const box = root.getBoundingClientRect();
+      const [x, y] = [box.x + 120, box.y + 60];
+      drag(
+        pet,
+        [
+          [x, y],
+          [x - 40, y],
+          [x - 80, y],
+          [x - 120, y],
+        ],
+        60,
+      );
+      await settle();
+      const dropped = Number.parseFloat(root.style.left);
+      expect(dropped).toBeLessThan(Number.parseFloat(left(0.5)));
+      expect(hitArea(root).left).toBeGreaterThan(200);
+      await wait(400);
+      frames(100);
+      expect(Number.parseFloat(root.style.left)).toBe(dropped);
+    } finally {
+      element.remove();
+    }
   });
 
   it("goes on to VNAS's target though the page is resized on the way", async () => {
@@ -2185,7 +2133,6 @@ describe("walking, throwing and resting", () => {
     await waitFor(() => expect(root.style.left).toBe(left(0.25)));
     write("position", { x: 0.75, y: 0.3, mode: "line", duration: 3000 });
     frames(10);
-    openWindow({ x: 150, y: 330, width: 400, height: 300 });
     const width = Object.getOwnPropertyDescriptor(globalThis, "innerWidth");
     Object.defineProperty(globalThis, "innerWidth", { configurable: true, value: 1000 });
     try {
@@ -2196,80 +2143,6 @@ describe("walking, throwing and resting", () => {
     } finally {
       if (width) Object.defineProperty(globalThis, "innerWidth", width);
     }
-  });
-
-  it("stops a walk under way when a window comes up within its reach", async () => {
-    serve([IDLE, "螃蟹走路"]);
-    const { root, videos } = await mount();
-    write("position", { x: 0.6, y: 0.8, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.6)));
-    vi.spyOn(Math, "random").mockReturnValue(0.975);
-    act(() => fireEvent(front(videos), new Event("ended")));
-    await plays("螃蟹走路");
-    await ready(videos);
-    Object.defineProperty(front(videos), "currentTime", { configurable: true, value: 5 });
-    frames(3);
-    expect(queue.size).toBe(1);
-    const walked = root.style.left;
-    expect(walked).not.toBe(left(0.6));
-    // Clear of it, within a walk's reach to its left.
-    openWindow({ x: 250, y: 300, width: 240, height: 400 });
-    expect(queue.size).toBe(0);
-    expect(Number.parseFloat(root.style.left)).toBeCloseTo(Number.parseFloat(walked), 3);
-    expect((saved()?.rx ?? 0) * 1024 - 120).toBeCloseTo(Number.parseFloat(walked), 0);
-  });
-
-  it("lets VNAS's move land before it checks the window that came up on the way", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    write("position", { x: 0.25, y: 0.5, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.25)));
-    write("position", { x: 0.75, y: 0.3, mode: "line", duration: 3000 });
-    frames(10);
-    // Over where it set out from, clear of where VNAS sends it.
-    openWindow({ x: 150, y: 330, width: 400, height: 300 });
-    frames(300);
-    expect(root.style.left).toBe(left(0.75));
-    expect(saved()).toEqual({ rx: 0.75, ry: 0.3 });
-  });
-
-  it("steps aside when the page is resized under a window", async () => {
-    serve([IDLE]);
-    const { root } = await mount();
-    // Clear of its corner on a 1024-wide page; over it on a 700-wide one.
-    const window = { x: 100, y: 40, width: 500, height: 700 };
-    openWindow(window);
-    await settle();
-    expect(root.style.left).toBe("");
-    const width = Object.getOwnPropertyDescriptor(globalThis, "innerWidth");
-    Object.defineProperty(globalThis, "innerWidth", { configurable: true, value: 700 });
-    try {
-      act(() => globalThis.dispatchEvent(new Event("resize")));
-      await wait(250);
-      frames(400);
-      await wait(50);
-      frames(400);
-      expect(clear(hitArea(root), window)).toBe(true);
-      expect(hitArea(root).right).toBeLessThanOrEqual(700 - 8);
-    } finally {
-      if (width) Object.defineProperty(globalThis, "innerWidth", width);
-    }
-  });
-
-  it("does not walk where a walk could end on the window on top", async () => {
-    serve([IDLE, "螃蟹走路"]);
-    const { root, videos } = await mount();
-    write("position", { x: 0.6, y: 0.8, mode: "instant" });
-    await waitFor(() => expect(root.style.left).toBe(left(0.6)));
-    // 29 px to its left, within a walk's reach (166 px at its size).
-    openWindow({ x: 300, y: 300, width: 240, height: 400 });
-    await settle();
-    fetched = [];
-    // Every roll would land on a move (animations.ts weighs idle 97, turn 0, move 1 of 100).
-    vi.spyOn(Math, "random").mockReturnValue(0.975);
-    act(() => fireEvent(front(videos), new Event("ended")));
-    await settle();
-    expect(fetched).not.toContain("螃蟹走路");
   });
 
   it("comes back wholly on the page from a place remembered at its very corner", async () => {

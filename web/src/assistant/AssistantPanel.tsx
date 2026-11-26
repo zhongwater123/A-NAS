@@ -156,7 +156,7 @@ export function AssistantPanel({
    * What the desktop asks the window to show: a run of a scheduled task, or the tasks; or, for the companion,
    * a conversation at the cards that wait for the member.
    */
-  intent?: { sessionId?: string; title?: string; conversationId?: string };
+  intent?: { sessionId?: string; title?: string; conversationId?: string; latest?: boolean };
   onIntentHandled?(handled: { sessionId?: string; title?: string; conversationId?: string }): void;
 }) {
   const gateway = useAssistantGateway();
@@ -502,6 +502,12 @@ export function AssistantPanel({
   // for the member, from another conversation or from the memory or the tasks, at its cards (toCards).
   const [intentBefore, setIntentBefore] = useState<typeof intent>();
   const [toCards, setToCards] = useState<{ conversation: string }>();
+  // The latest conversation, once the list is in (it lists the most recent first); none, a new one.
+  const [toLatest, setToLatest] = useState(false);
+  if (toLatest && sessionsLoaded) {
+    setToLatest(false);
+    setActiveId(sessions[0]?.id);
+  }
   if (intentBefore !== intent) {
     setIntentBefore(intent);
     if (intent?.conversationId) {
@@ -509,11 +515,12 @@ export function AssistantPanel({
       setView("chat");
       setToCards({ conversation: intent.conversationId });
     } else if (intent?.sessionId) showRun(intent.sessionId, intent.title ?? "定时任务");
-    else if (intent) setView("tasks");
+    else if (intent?.latest) {
+      setView("chat");
+      setToLatest(true);
+    } else if (intent) setView("tasks");
   } else if (toCards && (activeId !== toCards.conversation || view !== "chat")) setToCards(undefined);
-  const intentHandled = useEffectEvent((handled: { sessionId?: string; title?: string; conversationId?: string }) =>
-    onIntentHandled?.(handled),
-  );
+  const intentHandled = useEffectEvent((handled: NonNullable<typeof intent>) => onIntentHandled?.(handled));
   useEffect(() => {
     if (!intent) return;
     if (intent.sessionId) readRun(intent.sessionId);
@@ -744,6 +751,20 @@ export function AssistantPanel({
                 <LoaderCircle />
                 正在连接 VNAS
               </span>
+            )}
+            {/* A narrow window has no conversation list (assistant.module.css): its new conversation is here. */}
+            {view === "chat" && activeId && (
+              <button
+                type="button"
+                className={styles.asHeadNew}
+                onClick={() => {
+                  setActiveId(undefined);
+                  setView("chat");
+                }}
+              >
+                <MessageSquarePlus />
+                新对话
+              </button>
             )}
           </header>
 

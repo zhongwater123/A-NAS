@@ -51,7 +51,6 @@ import {
 import { DesktopGrid } from "./DesktopGrid";
 import { Dock } from "./Dock";
 import styles from "./desktop.module.css";
-import { publishFocusedWindow } from "./focusedWindow";
 import { isLocalConsole, onLocalConsoleDismissed } from "./LocalConsoleScreenSaver";
 import { NotificationCenter } from "./NotificationCenter";
 import { StatusBar } from "./StatusBar";
@@ -59,7 +58,16 @@ import { DesktopView, SystemRail } from "./SystemRail";
 import { useHostState } from "./useHostState";
 import { useReadOnShow } from "./useReadOnShow";
 import { useWallpaper, wallpaperBackground } from "./wallpaper";
-import { closedWindow, windowReducer } from "./windows";
+import { closedWindow, MAXIMIZED_INSET, windowReducer } from "./windows";
+
+/**
+ * The VNAS window as the companion opens it to talk: small, beside the companion. As narrow as a window may
+ * be (desktop.module.css), which drops VNAS's conversation list (assistant.module.css).
+ */
+const VNAS_CHAT = { width: 520, height: 560 };
+/** Between it and the companion, and between it and the page's edges. */
+const GAP = 12;
+const EDGE = 8;
 
 // 家庭中心's hint, 剪辑中心's notices and 待办's reminder load after the
 // desktop, so their code and styles stay out of the first load.
@@ -157,6 +165,46 @@ export function Desktop({
       setIntents((current) => (current[id] === handled ? { ...current, [id]: undefined } : current)),
     [],
   );
+  // The companion asked to talk (companion/petCard.tsx): the VNAS window, small, beside the companion, at
+  // the latest conversation. A VNAS window already in view only comes to the front, as it is. Opened small,
+  // it gets its own size and place back once it is closed, so VNAS opens as ever from the launcher.
+  const chatOpened = useRef(false);
+  const openChat = useCallback(
+    (beside: DOMRect | null) => {
+      const vnas = windows.find((window) => window.id === "assistant");
+      if (vnas?.open && !vnas.minimized) {
+        open("assistant");
+        return;
+      }
+      open("assistant", { latest: true });
+      if (vnas?.maximized) dispatch({ type: "maximize", id: "assistant" });
+      const page = { width: window.innerWidth, height: window.innerHeight };
+      const width = Math.min(VNAS_CHAT.width, page.width - MAXIMIZED_INSET.left - EDGE);
+      const height = Math.min(VNAS_CHAT.height, page.height - 2 * EDGE);
+      const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), Math.max(low, high));
+      // To the companion's left, its bottom level with the companion's; to its right where the left has no room.
+      const left = beside ? beside.left - GAP - width : page.width - width - EDGE;
+      const x = beside && left < MAXIMIZED_INSET.left ? beside.right + GAP : left;
+      const y = beside ? beside.bottom - height : page.height - height - EDGE;
+      dispatch({
+        type: "move",
+        id: "assistant",
+        x: clamp(x, MAXIMIZED_INSET.left, page.width - width - EDGE),
+        y: clamp(y, EDGE, page.height - height - EDGE),
+      });
+      dispatch({ type: "resize", id: "assistant", width, height });
+      chatOpened.current = true;
+    },
+    [open, windows],
+  );
+  const vnasOpen = isOpen("assistant");
+  useEffect(() => {
+    if (vnasOpen || !chatOpened.current) return;
+    chatOpened.current = false;
+    const { x, y, width, height } = apps.assistant.bounds;
+    dispatch({ type: "move", id: "assistant", x, y });
+    dispatch({ type: "resize", id: "assistant", width, height });
+  }, [vnasOpen]);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("overview");
   const storagePlan = useStoragePlan();
   // anchor brings a row of the section into view, as the search does: one there already shows again.
@@ -256,9 +304,6 @@ export function Desktop({
   const visible = windows.filter((window) => window.open && !window.minimized);
   const focusedWindow = visible.length ? visible.reduce((top, window) => (window.z > top.z ? window : top)) : undefined;
   const focusedID = focusedWindow?.id;
-  // What floats above the windows, the companion, keeps clear of the one on top (focusedWindow.ts).
-  useEffect(() => publishFocusedWindow(focusedWindow ?? null), [focusedWindow]);
-  useEffect(() => () => publishFocusedWindow(null), []);
   // Windows hidden by "show desktop" come back on the next press, as long as
   // nothing was reopened in between; windows minimized by hand stay down.
   const [revealed, setRevealed] = useState<WindowID[]>([]);
@@ -419,6 +464,7 @@ export function Desktop({
             }
             onOpenTaskRun={showTaskRun}
             onOpenHealth={() => openSettings("overview", "health")}
+            onOpenChat={openChat}
           />
         </ShellPart>
         <ShellPart name="feedback">

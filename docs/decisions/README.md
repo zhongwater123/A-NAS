@@ -69,6 +69,7 @@
 - [2026-11-06：虚拟伙伴（大肥鱼）V1 的形象、实现方式与 VNAS 的控制](2026-11-06-companion-v1.md)
 - [2026-11-06：虚拟伙伴 V1 是否不含待办与专注计时](2026-11-06-companion-v1-no-todo-focus.md)（pending）
 - [2026-11-06：虚拟伙伴旧分支中的第三方素材怎么清除](2026-11-06-companion-old-branches.md)（pending）
+- [2026-11-26：虚拟伙伴停在成员放的地方、点它和 VNAS 说话、自己的开关菜单](2026-11-26-companion-stays-and-talks.md)
 
 ### 家庭中心
 

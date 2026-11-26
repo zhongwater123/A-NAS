@@ -40,15 +40,7 @@ import type { PlaybackRecord } from "./dsh-pet/host/playback/store";
 import { pickSleepNames } from "./dsh-pet/host/sleep";
 import { companionLock, companionPlayback, companionSleep } from "./host";
 import { memberQuiet } from "./quiet";
-import { clearCenter } from "./stepAside";
-import {
-  COMPANION_PET,
-  COMPANION_SIZE,
-  companionPaused,
-  companionReady,
-  companionState,
-  isPrompting,
-} from "./workStatus";
+import { COMPANION_PET, companionPaused, companionReady, companionState, isPrompting } from "./workStatus";
 
 /** One command: the companion tool VNAS called and its arguments, as the product service checked them. */
 export interface CompanionCommand {
@@ -336,15 +328,9 @@ async function carryOut(
       const blocked = lockBlocked(args.lock);
       if (blocked) return blocked;
       carry(action);
-      // The companion keeps clear of the window on top (stepAside.ts): where that would cover it, it goes to
-      // where it steps aside to instead, and VNAS hears where that is.
-      const page = { width: window.innerWidth, height: window.innerHeight };
-      const clear = clearCenter({ rx: d.x, ry: d.y }, COMPANION_SIZE, page);
-      const leaf = positionLeafData(d);
-      companionState.writePet(d.petId, "position", clear ? { ...leaf, x: clear.rx, y: clear.ry } : leaf);
-      if (!clear) return ok({ status: "ok", x: d.x, y: d.y });
-      const short = (value: number) => Math.round(value * 1000) / 1000;
-      return ok({ status: "ok", x: short(clear.rx), y: short(clear.ry), stepped_aside: true });
+      // It goes where it is asked, over a window too: it stays above the windows (petCard.tsx).
+      companionState.writePet(d.petId, "position", positionLeafData(d));
+      return ok({ status: "ok", x: d.x, y: d.y });
     }
     case "throw": {
       const d = decideThrow({ cfg, requested: COMPANION_PET, angle: args.angle, power: args.power });

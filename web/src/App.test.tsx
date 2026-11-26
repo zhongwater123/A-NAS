@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import type { AppShortcut, Transfer } from "./api.generated";
-import { focusedWindow } from "./desktop/focusedWindow";
 import { resetSystemUpdate } from "./systemupdate/status";
 import { healthyState, metricsState, session as signIn } from "./test/fixtures";
 import { appsHandlers } from "./test/handlers/apps";
@@ -31,6 +30,15 @@ import { resetWebSearch } from "./websearch/status";
 // mounts them, and the trash can be made to fail, for the tests of window
 // isolation; otherwise they are the real windows.
 const panels = vi.hoisted(() => ({ trashRenders: 0, trashMounts: 0, trashFails: false, transfersMounts: 0 }));
+// The companion shows nothing without its animations: here it is a button that asks to talk, as a click on
+// it does, beside a hit area at the bottom right of the 1024×768 page.
+vi.mock("./companion/Companion", () => ({
+  Companion: ({ onOpenChat }: { onOpenChat?: (beside: DOMRect | null) => void }) => (
+    <button type="button" onClick={() => onOpenChat?.(new DOMRect(900, 600, 90, 107))}>
+      和伙伴说话
+    </button>
+  ),
+}));
 vi.mock("./trash/TrashPanel", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./trash/TrashPanel")>();
   const { useEffect } = await import("react");
@@ -207,6 +215,34 @@ describe("A-NAS v1.0.1 desktop", () => {
     }
   });
 
+  it("opens VNAS small beside the companion asked to talk, and only brings it up once it is in view", async () => {
+    serveDesktop();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "和伙伴说话" }));
+    const vnas = await screen.findByRole("dialog", { name: "VNAS" });
+    // To the companion's left, its bottom level with the companion's: 900 − 12 − 520 and 707 − 560.
+    expect(vnas.style).toMatchObject({ left: "368px", top: "147px", width: "520px", height: "560px" });
+    await user.click(within(vnas).getByRole("button", { name: "最大化VNAS" }));
+    await user.click(screen.getByRole("button", { name: "和伙伴说话" }));
+    expect(within(screen.getByRole("dialog", { name: "VNAS" })).getByRole("button", { name: "还原VNAS" })).toBeTruthy();
+  });
+
+  it("gives VNAS its own size back once the small window the companion opened is closed", async () => {
+    serveDesktop({ assistant: { available: true } });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "和伙伴说话" }));
+    const small = await screen.findByRole("dialog", { name: "VNAS" });
+    expect(small.style.width).toBe("520px");
+    await user.click(within(small).getByRole("button", { name: "关闭VNAS" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "VNAS" })).toBeNull());
+    // Opened as ever, from the launcher: where and as large as VNAS's window always opens.
+    await user.click(await screen.findByRole("button", { name: "打开 VNAS" }));
+    const vnas = await screen.findByRole("dialog", { name: "VNAS" });
+    expect(vnas.style).toMatchObject({ left: "260px", top: "54px", width: "1040px", height: "700px" });
+  });
+
   it("shows authenticated host health and keeps the clock advancing", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-10-07T10:00:00Z"));
@@ -263,62 +299,6 @@ describe("A-NAS v1.0.1 desktop", () => {
     await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
     await user.click(screen.getByRole("button", { name: "恢复设置" }));
     expect(screen.getByRole("dialog", { name: "设置" })).toBeTruthy();
-  });
-
-  it("tells what floats above the windows which window is on top, as windows open, move, change and go", async () => {
-    serveDesktop();
-    serveWindows();
-    const user = userEvent.setup();
-    const capture = Object.getOwnPropertyDescriptor(Element.prototype, "setPointerCapture");
-    // jsdom captures no pointer, which a window's title bar and handle take.
-    Object.defineProperty(Element.prototype, "setPointerCapture", { configurable: true, value: vi.fn() });
-    try {
-      render(<App />);
-      const desktop = await screen.findByRole("region", { name: "桌面应用" });
-      const onTop = () => focusedWindow()?.id ?? null;
-      expect(onTop()).toBeNull();
-      await user.click(within(desktop).getByRole("button", { name: "打开设置" }));
-      expect(onTop()).toBe("settings");
-      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
-      expect(onTop()).toBe("trash");
-      // Brought to the front by a press.
-      const settings = screen.getByRole("dialog", { name: "设置" });
-      fireEvent.pointerDown(settings);
-      expect(onTop()).toBe("settings");
-      // Moved and resized: once the pointer lets go.
-      const at = { ...focusedWindow() };
-      const pointer = { button: 0, pointerId: 1, pointerType: "mouse" };
-      const titleBar = settings.firstElementChild as HTMLElement;
-      fireEvent.pointerDown(titleBar, { ...pointer, clientX: 400, clientY: 80 });
-      fireEvent.pointerMove(titleBar, { ...pointer, clientX: 500, clientY: 120 });
-      expect(focusedWindow()?.x).toBe(at.x);
-      fireEvent.pointerUp(titleBar, { ...pointer, clientX: 500, clientY: 120 });
-      expect(focusedWindow()).toMatchObject({ x: (at.x ?? 0) + 100, y: (at.y ?? 0) + 40 });
-      const handle = settings.lastElementChild as HTMLElement;
-      fireEvent.pointerDown(handle, { ...pointer, clientX: 900, clientY: 700 });
-      fireEvent.pointerMove(handle, { ...pointer, clientX: 950, clientY: 720 });
-      fireEvent.pointerUp(handle, { ...pointer, clientX: 950, clientY: 720 });
-      expect(focusedWindow()).toMatchObject({ width: (at.width ?? 0) + 50, height: (at.height ?? 0) + 20 });
-      await user.click(within(settings).getByRole("button", { name: "最大化设置" }));
-      expect(focusedWindow()?.maximized).toBe(true);
-      await user.click(within(settings).getByRole("button", { name: "还原设置" }));
-      expect(focusedWindow()?.maximized).toBe(false);
-      // Minimized, the one under it is on top; closed, none.
-      await user.click(within(settings).getByRole("button", { name: "最小化设置" }));
-      expect(onTop()).toBe("trash");
-      await user.click(
-        within(screen.getByRole("dialog", { name: "回收站" })).getByRole("button", { name: "关闭回收站" }),
-      );
-      expect(onTop()).toBeNull();
-      // 显示桌面 puts every window away.
-      await user.click(within(desktop).getByRole("button", { name: "打开回收站" }));
-      expect(onTop()).toBe("trash");
-      await user.click(screen.getByRole("button", { name: "显示桌面" }));
-      expect(onTop()).toBeNull();
-    } finally {
-      if (capture) Object.defineProperty(Element.prototype, "setPointerCapture", capture);
-      else delete (Element.prototype as Partial<Element>).setPointerCapture;
-    }
   });
 
   it("maximizes a window above the dock and restores it", async () => {

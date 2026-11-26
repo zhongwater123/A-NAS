@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -195,6 +195,29 @@ describe("the VNAS window", () => {
     await emit("anas.approval", card("req-3", "approved", "rm -rf 缓存"));
     expect(screen.queryByText("rm -rf 缓存")).toBeNull();
     expect(screen.queryByRole("region", { name: "本对话中等你确认或回答的事" })).toBeNull();
+  });
+
+  it("opens the latest conversation when the companion asks to talk, and a new one from its header", async () => {
+    const OTHER = "20261021_100000_bbbbbb";
+    server.use(
+      ...assistantHandlers({
+        // The most recent first, as the product service lists them.
+        sessions: [
+          assistantSession(OTHER, { title: "整理相册", messageCount: 2 }),
+          assistantSession(STORED, { title: "操作桌面", messageCount: 2 }),
+        ],
+        messages: history,
+      }),
+    );
+    render(<AssistantPanel username="admin" intent={{ latest: true }} />);
+    expect(await screen.findByRole("heading", { level: 2, name: "整理相册" })).toBeInTheDocument();
+    // The header's own: shown only in a narrow window, which drops the sidebar (a container query jsdom does
+    // not apply, so here it is hidden).
+    const head = screen.getByRole("heading", { level: 2, name: "整理相册" }).parentElement as HTMLElement;
+    fireEvent.click(within(head).getByText("新对话"));
+    expect(screen.queryByRole("heading", { level: 2, name: "整理相册" })).toBeNull();
+    // A new conversation has no header button of its own: the composer is where it starts.
+    expect(within(head).queryByText("新对话")).toBeNull();
   });
 
   it("opens the conversation whose card waits, at its cards, from another conversation, the memory or the tasks", async () => {

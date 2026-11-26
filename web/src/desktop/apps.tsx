@@ -63,7 +63,8 @@ export interface WindowIntentPayloads {
   docker: { project: string };
   // A toast of a scheduled task opens its run in VNAS, or the tasks; the companion, a conversation at the
   // cards that wait for the member.
-  assistant: { sessionId?: string; title?: string; conversationId?: string };
+  // The companion asked to talk opens the latest conversation (latest).
+  assistant: { sessionId?: string; title?: string; conversationId?: string; latest?: boolean };
   // A row of a section to bring into view, as the search finds one: the companion's dot, the system health
   // in 概览. The section itself is SettingsState's.
   settings: { anchor: string };

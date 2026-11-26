@@ -32,7 +32,6 @@ import {
   useTaskNotices,
 } from "../assistant/taskNotices";
 import type { AssistantTaskNotice } from "../desktop/api";
-import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
 import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine, shortDetail } from "./behaviors";
@@ -42,22 +41,14 @@ import { prefersMov } from "./dsh-pet/client/pet/animation/media";
 import { createPetCard } from "./dsh-pet/client/pet/card/pet-card";
 import type { PetCardProps } from "./dsh-pet/client/pet/card/props";
 import { injectPetCss } from "./dsh-pet/client/pet/css";
-import {
-  type BoxPoint,
-  boxToRatio,
-  type Center,
-  centerToBox,
-  derivePetMetrics,
-  type Viewport,
-} from "./dsh-pet/client/pet/motion/geometry";
+import type { Center } from "./dsh-pet/client/pet/motion/geometry";
 import { makePlaybackReporter } from "./dsh-pet/client/pet/playback-report";
 import { BUBBLE_DURATION_MS } from "./dsh-pet/client/pet/timings";
 import type { RuntimePet } from "./dsh-pet/client/pet/types";
 import { parsePlaybackPath } from "./dsh-pet/host/playback/parse";
 import { isTerminalStatus } from "./dsh-pet/host/playback/status";
 import { pickSleepNames } from "./dsh-pet/host/sleep";
-import { DRAG_THRESHOLD, PET_REF_WIDTH, ROUTE_PATH } from "./dsh-pet/shared/constants";
-import { bodyPixelBox } from "./dsh-pet/shared/physics";
+import { DRAG_THRESHOLD, ROUTE_PATH } from "./dsh-pet/shared/constants";
 import { pick } from "./dsh-pet/shared/pickers";
 import {
   flattenCounters,
@@ -78,8 +69,15 @@ import {
 import type { Animations } from "./dsh-pet/shared/types";
 import type { DeviceTrouble } from "./health";
 import { companionLock, companionPlayback, companionSleep } from "./host";
-import { memberQuiet, memberSleep, setCompanionMode, setMemberSleep, useCompanionMode } from "./quiet";
-import { clearBox, withinArea } from "./stepAside";
+import { withinArea } from "./placement";
+import {
+  type CompanionMode,
+  memberQuiet,
+  memberSleep,
+  setCompanionMode,
+  setMemberSleep,
+  useCompanionMode,
+} from "./quiet";
 import {
   COMPANION_PET,
   COMPANION_SIZE,
@@ -374,7 +372,7 @@ function rememberedPlace(): unknown {
     const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null") as { rx?: unknown; ry?: unknown } | null;
     if (typeof saved?.rx !== "number" || typeof saved.ry !== "number") return null;
     // Wholly within the part of the page it may use: a place left on a larger page, or hanging off its
-    // edge, comes back on it. Where it lands, it then keeps clear of the window on top as ever.
+    // edge, comes back on it.
     const page = { width: window.innerWidth, height: window.innerHeight };
     const { rx, ry } = withinArea({ rx: saved.rx, ry: saved.ry }, pet.size, page);
     return { x: rx, y: ry, mode: "instant" };
@@ -382,52 +380,6 @@ function rememberedPlace(): unknown {
     // An unreadable position leaves the companion in its corner.
     return null;
   }
-}
-
-/** The companion's box in its corner, where it is until it is first moved (dsh-pet's css.ts). */
-function cornerBox(page: Viewport): BoxPoint {
-  const { corner, marginX, marginY } = pet.position;
-  const height = (pet.size * 9) / 16;
-  return {
-    x: corner.endsWith("left") ? marginX : page.width - marginX - pet.size,
-    y: corner.startsWith("top") ? marginY : page.height - marginY - height,
-  };
-}
-
-/** How long a step aside of its own may take before the companion checks that it got clear. */
-const SETTLE_MS = 1_500;
-/** How long a throw may fly before the companion checks the window on top again without its landing. */
-const FLIGHT_MS = 10_000;
-/** How many times a step aside goes again that did not get there: cut short, or the page's frames held back. */
-const RETRIES = 2;
-/** How long the companion must hold still after a release or a lock before it is checked again. */
-const STILL_MS = 150;
-
-/** A move under way: until when (performance.now()), and the centre it goes to; null for a throw. */
-interface Hold {
-  until: number;
-  target: Center | null;
-}
-
-/** The companion's box where it was last left, or in its corner. */
-function placedBox(placed: Center | null, page: Viewport): BoxPoint {
-  const { halfW, halfH } = derivePetMetrics(pet.size);
-  return placed ? centerToBox(placed, page, { w: halfW, h: halfH }) : cornerBox(page);
-}
-
-/** Whether a place is a move's target, within a pixel. */
-function reached(center: Center, target: Center, page: Viewport): boolean {
-  return Math.abs(center.rx - target.rx) * page.width < 1 && Math.abs(center.ry - target.ry) * page.height < 1;
-}
-
-const pageSize = (): Viewport => ({ width: window.innerWidth, height: window.innerHeight });
-const stillMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-
-/** The farthest a walk of its own can take the companion: dsh-pet's moves, scaled to its size. */
-function walkReach(animations: Animations): number {
-  const { moves } = animations;
-  const farthest = Math.max(0, ...moves.actions.map((action) => ({ ...moves.default, ...action.params }).maxDist));
-  return (farthest * pet.size) / PET_REF_WIDTH;
 }
 
 function remember(center: Center): void {
@@ -493,8 +445,6 @@ function Card({
   trouble?: DeviceTrouble;
   openers?: CompanionOpeners;
 }) {
-  /** Whether a walk of its own could not end on the window on top: where one could, it does not walk. */
-  const [walkable, setWalkable] = useState(true);
   const [first] = useState(() => {
     const opening = asleepFromTheStart(animations);
     return { ...firstRead(companionState.read()), opening };
@@ -506,11 +456,11 @@ function Card({
     () => ({
       ...pet,
       animations: opening ? { ...animations, idle: [opening, ...animations.idle] } : animations,
-      animationWeights: walkable ? companionWeights : { ...companionWeights, move: 0 },
+      animationWeights: companionWeights,
       stepReplayMs: STEP_REPLAY_MS,
       ...(pool ? { assetVersion: pool } : {}),
     }),
-    [animations, opening, pool, walkable],
+    [animations, opening, pool],
   );
   const arena = useRef<PetCardProps["arena"]["current"]>({ slots: {} });
   const clipSpeed = useClipSpeed();
@@ -553,189 +503,10 @@ function Card({
   }, []);
   /** Woken from quiet, it plays the clip it wakes with: what waits is told after it. */
   const wakingUp = useRef(false);
-  /** Where the companion was last left, null while it is in its corner. */
-  const placed = useRef<Center | null>(null);
-  /**
-   * A move under way, whose landing is checked rather than the window on the way: VNAS's position (to its
-   * target), VNAS's throw, or a step aside of its own (to where it steps). Until when, by performance.now().
-   */
-  const hold = useRef<Hold | null>(null);
-  /** Checks again when the hold ends, though the move never landed (an animation, a whisper or sleep cut it). */
-  const holdTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  /** The step aside about to go has just put the card's box where the companion is, for its spring to start. */
-  const seeded = useRef(false);
-  /** Step asides sent since the companion was last clear of the window. */
-  const sent = useRef(0);
-  /** A stillness check after a release or a lock, so that a flight is left to land. */
-  const stillTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const reach = useMemo(() => walkReach(animations), [animations]);
-
-  /** Where the companion's box is now: where a move has drawn it, else its last place or its corner. */
-  const liveBox = useCallback(
-    (page: Viewport): BoxPoint => {
-      const root = clipSpeed.current?.querySelector<HTMLElement>(".dsh-pet-root");
-      if (root?.style.left && root.style.top)
-        return { x: Number.parseFloat(root.style.left), y: Number.parseFloat(root.style.top) };
-      return placedBox(placed.current, page);
-    },
-    [clipSpeed],
-  );
-  const moveTo = useCallback((box: BoxPoint, mode: "instant" | "spring") => {
-    const { halfW, halfH } = derivePetMetrics(pet.size);
-    const center = boxToRatio(box, pageSize(), { w: halfW, h: halfH });
-    const data = { x: center.rx, y: center.ry, mode };
-    setLeaves((current) => withLeaf(current, "position", { counter: 0, data }));
-  }, []);
-
-  // The companion stays above the windows but keeps clear of the one on top (stepAside.ts): when that window
-  // changes, the page is resized, or a move of the companion's ends (a drag let go, a walk, a flight, VNAS's
-  // position or throw), a hit area that covers the window goes to the nearest free place. It goes by the
-  // card's own position command, as VNAS's does: no clip changes, and it moves resting, asleep or locked
-  // too. The member who drops it on the window sees it step aside: the window comes first. A move under
-  // way is left to land, and checked then, or when its hold runs out. A lock that starts or a press on the
-  // companion stops a move: once it holds still, what it stopped is checked again.
-  /** The check again, for the timers. */
-  const again = useRef(() => {});
-  const startHold = useCallback((next: Hold | null) => {
-    hold.current = next;
-    globalThis.clearTimeout(holdTimer.current);
-    if (next === null) return;
-    holdTimer.current = globalThis.setTimeout(
-      () => {
-        if (hold.current !== next) return;
-        hold.current = null;
-        again.current();
-      },
-      Math.max(0, next.until - performance.now()),
-    );
-  }, []);
-  const keepClear = useCallback(() => {
-    const held = hold.current;
-    if (held !== null) {
-      if (performance.now() < held.until) return;
-      startHold(null);
-    }
-    const page = pageSize();
-    const box = liveBox(page);
-    const onTop = focusedWindowBox();
-    const hit = bodyPixelBox({ ...box, size: pet.size, bottomPad: derivePetMetrics(pet.size).bottomPad });
-    const walkable =
-      onTop === null ||
-      hit.right + reach <= onTop.left ||
-      hit.left - reach >= onTop.right ||
-      hit.bottom <= onTop.top ||
-      hit.top >= onTop.bottom;
-    setWalkable(walkable);
-    // A walk of its own under way (drawn off its last place at the same height) that could end on the window
-    // stops where it is: an instant move there, whose landing comes back here.
-    const last = placedBox(placed.current, page);
-    if (!walkable && Math.abs(box.x - last.x) >= 1 && Math.abs(box.y - last.y) < 1) {
-      moveTo(box, "instant");
-      return;
-    }
-    const to = clearBox(box, pet.size, page);
-    if (to === null) {
-      seeded.current = false;
-      sent.current = 0;
-      return;
-    }
-    if (stillMotion()) {
-      moveTo(to, "instant");
-      return;
-    }
-    // A spring starts from the card's box, which is not known in the corner and is stale after a resize: an
-    // instant move to where the companion is first, whose landing comes back here.
-    if (!seeded.current) {
-      seeded.current = true;
-      moveTo(box, "instant");
-      return;
-    }
-    seeded.current = false;
-    // Sent at most RETRIES more times when it does not get there (cut short, or the page's frames held back).
-    if (sent.current > RETRIES) return;
-    sent.current += 1;
-    const { halfW, halfH } = derivePetMetrics(pet.size);
-    startHold({ until: performance.now() + SETTLE_MS, target: boxToRatio(to, page, { w: halfW, h: halfH }) });
-    moveTo(to, "spring");
-  }, [liveBox, moveTo, reach, startHold]);
-  useEffect(() => {
-    again.current = keepClear;
-  }, [keepClear]);
-  /** Checks again once the companion holds still for a moment, its hold let go: not while it flies. */
-  const whenStill = useCallback(() => {
-    const before = liveBox(pageSize());
-    globalThis.clearTimeout(stillTimer.current);
-    stillTimer.current = globalThis.setTimeout(() => {
-      const after = liveBox(pageSize());
-      if (Math.abs(after.x - before.x) >= 1 || Math.abs(after.y - before.y) >= 1) return;
-      startHold(null);
-      keepClear();
-    }, STILL_MS);
-  }, [keepClear, liveBox, startHold]);
-  const place = useCallback(
-    (center: Center) => {
-      remember(center);
-      placed.current = center;
-      const held = hold.current;
-      if (held === null) {
-        keepClear();
-        return;
-      }
-      // dsh-pet's own re-layout after a resize sets a place too, which is not the move's end: a move to a
-      // target ends there, and a throw once the companion holds still.
-      if (held.target === null) whenStill();
-      else if (reached(center, held.target, pageSize())) {
-        startHold(null);
-        keepClear();
-      }
-    },
-    [keepClear, startHold, whenStill],
-  );
-  useEffect(
-    () => () => {
-      globalThis.clearTimeout(holdTimer.current);
-      globalThis.clearTimeout(stillTimer.current);
-    },
-    [],
-  );
-  // A lock that starts stops the move under way (lock-freeze.ts). It starts when none was held: none before,
-  // or one whose time had run out.
-  const lock = leaves.lock ?? null;
-  const lastLock = useRef(lock);
-  useEffect(() => {
-    const before = lastLock.current;
-    lastLock.current = lock;
-    const now = Date.now();
-    const held = lock?.locked === true && lock.expiresAt > now;
-    const heldBefore = before?.locked === true && before.expiresAt > now;
-    if (held && !heldBefore) whenStill();
-  }, [lock, whenStill]);
-  // So does a press on the companion. Once it is let go, unless it is on its way (thrown, or going on to
-  // where a drag left it, which is checked where it lands).
-  useEffect(() => {
-    const layer = clipSpeed.current;
-    if (!layer) return;
-    layer.addEventListener("pointerup", whenStill, true);
-    layer.addEventListener("pointercancel", whenStill, true);
-    return () => {
-      layer.removeEventListener("pointerup", whenStill, true);
-      layer.removeEventListener("pointercancel", whenStill, true);
-    };
-  }, [clipSpeed, whenStill]);
-  useEffect(() => {
-    let resized: number | undefined;
-    const resize = () => {
-      window.clearTimeout(resized);
-      resized = window.setTimeout(keepClear, 200);
-    };
-    const stop = subscribeFocusedWindow(keepClear);
-    window.addEventListener("resize", resize);
-    return () => {
-      stop();
-      window.clearTimeout(resized);
-      window.removeEventListener("resize", resize);
-    };
-  }, [keepClear]);
+  // The companion stays where it is put, above the windows and below the system's notices: it does not
+  // move out of a window's way. The member puts it elsewhere by dragging it; where a drag, a walk, a flight
+  // or VNAS's move leaves it is remembered on this device.
+  const place = useCallback((center: Center) => remember(center), []);
 
   // The companion stops while the member is away: after IDLE_MS without input, which is always
   // before the local console's screen saver (180 s without input) covers the page, or while the
@@ -863,15 +634,6 @@ function Card({
           // its reply without touching anything: it ends a pause their absence started, and counts
           // as their input, so that a pause does not start in the middle of what it shows.
           resume.current();
-          // VNAS's move lands before the companion checks the window on top again: at its target, or for a
-          // throw where it comes to rest. It takes over from a step aside under way.
-          const position = name === "position" ? readPosition(leaf) : null;
-          if (position) {
-            const until = performance.now() + position.duration + SETTLE_MS;
-            startHold({ until, target: { rx: position.x, ry: position.y } });
-          }
-          if (name === "throw") startHold({ until: performance.now() + FLIGHT_MS, target: null });
-          if (position || name === "throw") sent.current = 0;
           taken.push([name, leaf]);
         } else if (name === "sleep") heldSleep.current = leaf;
         else {
@@ -893,9 +655,7 @@ function Card({
     queueMicrotask(() => {
       if (!placing) return;
       const remembered = rememberedPlace();
-      // From where it was left it steps aside when it gets there; from its corner, now.
       if (remembered) setLeaves((current) => withLeaf(current, "position", { counter: 0, data: remembered }));
-      else keepClear();
     });
     setActionHandler(answer);
     setCompanionReady(true);
@@ -911,7 +671,7 @@ function Card({
       setActionHandler(null);
       setCompanionReady(false);
     };
-  }, [first, keepClear, startHold]);
+  }, [first]);
 
   // A new result of a scheduled task: a wave, on any screen (its content stays in VNAS). A result is
   // new by its notice's id: a task's next result replaces its notice under a new id, so the number of
@@ -1164,6 +924,12 @@ function Card({
     if (hit && hit.getAttribute("aria-describedby") !== troubleLine) hit.setAttribute("aria-describedby", troubleLine);
   });
 
+  // A right click on the companion, a long press (dsh-pet's drag.ts sends the same contextmenu) or the
+  // menu key opens its own small menu: quiet (it sleeps) or wake, and hide on this device, the same modes
+  // as Settings (quiet.ts). Hidden, it is called back in Settings' overview.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const mode = useCompanionMode();
+
   const ask = useRef<() => boolean>(() => false);
   useEffect(() => {
     ask.current = () => {
@@ -1224,6 +990,11 @@ function Card({
         return true;
       }
       if (trouble) return tellTrouble(trouble);
+      // Nothing to tell: it is asked to talk. VNAS's window comes up small beside it, at the latest
+      // conversation, and the card plays its click response as ever. Not on the screen the family shares,
+      // where a conversation is nobody's to show.
+      if (!shared)
+        openers.onOpenChat?.(clipSpeed.current?.querySelector(".dsh-pet-hit")?.getBoundingClientRect() ?? null);
       return false;
     };
   }, [clipSpeed, openers, work, trouble]);
@@ -1259,13 +1030,24 @@ function Card({
       // A key the companion took is the member's input still.
       resume.current();
     };
+    const context = (event: MouseEvent) => {
+      if (!onPet(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const box = (event.target as Element).getBoundingClientRect();
+      // From the keyboard the menu key gives no place: the menu opens at the companion.
+      const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.top };
+      setMenu(at);
+    };
     layer.addEventListener("pointerdown", press, true);
     layer.addEventListener("click", click, true);
     layer.addEventListener("keydown", key, true);
+    layer.addEventListener("contextmenu", context, true);
     return () => {
       layer.removeEventListener("pointerdown", press, true);
       layer.removeEventListener("click", click, true);
       layer.removeEventListener("keydown", key, true);
+      layer.removeEventListener("contextmenu", context, true);
     };
   }, [clipSpeed]);
   // VNAS moves the companion with its own tools: the desktop it reads leaves the companion out, as it
@@ -1292,10 +1074,64 @@ function Card({
       <p className="sr-only" aria-live="polite">
         {spoken.text && <span key={spoken.count}>{spoken.text}</span>}
       </p>
+      {menu && (
+        <CompanionMenu
+          at={menu}
+          quiet={mode === "quiet"}
+          onChoose={(next) => {
+            setMenu(null);
+            if (next) setCompanionMode(next);
+          }}
+        />
+      )}
       {/* On the page from the start, so that a trouble that comes is read out as it comes. */}
       <p id={troubleLine} className="sr-only" aria-live="polite">
         {trouble ? `设备需要处理：${trouble.text}` : ""}
       </p>
+    </div>
+  );
+}
+
+/** The companion's own menu, where it was asked for; it closes on a choice, Esc, or a press elsewhere. */
+function CompanionMenu({
+  at,
+  quiet,
+  onChoose,
+}: {
+  at: { x: number; y: number };
+  quiet: boolean;
+  onChoose: (mode: CompanionMode | null) => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    box.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const away = (event: PointerEvent) => {
+      if (!(event.target instanceof Node && box.current?.contains(event.target))) onChoose(null);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onChoose(null);
+    };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", key, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", key, true);
+    };
+  }, [onChoose]);
+  // Within the page: it opens up and to the left of where it was asked for when there is no room.
+  const style = {
+    left: Math.max(8, Math.min(at.x, window.innerWidth - 180)),
+    top: Math.max(8, Math.min(at.y, window.innerHeight - 120)),
+  };
+  return (
+    <div ref={box} role="menu" aria-label="大肥鱼" className={styles.menu} style={style}>
+      <button type="button" role="menuitem" onClick={() => onChoose(quiet ? "normal" : "quiet")}>
+        {quiet ? "叫醒她" : "让她安静"}
+      </button>
+      <button type="button" role="menuitem" onClick={() => onChoose("hidden")}>
+        隐藏伙伴
+      </button>
+      <small>隐藏后在 设置 → 概览 里打开</small>
     </div>
   );
 }

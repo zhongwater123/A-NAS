@@ -51,6 +51,11 @@ export interface CompanionOpeners {
   onOpenVnas?: (atCards?: { conversation: string }) => void;
   onOpenTaskRun?: (run: AssistantTaskNotice) => void;
   onOpenHealth?: () => void;
+  /**
+   * Opens VNAS to talk to it: its window, small, beside the companion (whose box on the page is given), at
+   * the latest conversation; a VNAS window already in view only comes to the front.
+   */
+  onOpenChat?: (beside: DOMRect | null) => void;
 }
 
 /**
