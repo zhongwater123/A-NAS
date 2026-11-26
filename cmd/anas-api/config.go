@@ -208,11 +208,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 	}
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
-	if c.AccountDeletionDelay != "" {
-		if c.DeletionDelay, err = time.ParseDuration(c.AccountDeletionDelay); err != nil || c.DeletionDelay <= 0 {
-			problem(errors.New("ANAS_ACCOUNT_DELETION_DELAY must be a positive duration such as 30s"))
-		}
-	}
+	c.DeletionDelay, err = envconfig.PositiveDuration("ANAS_ACCOUNT_DELETION_DELAY", c.AccountDeletionDelay)
+	problem(err)
 	switch {
 	case c.FakeStorage == "":
 	case live:
@@ -409,7 +406,11 @@ type photoServiceConfig struct {
 	// work starts, for the system test; products keep the default.
 	QuietPeriod string        `env:"ANAS_PHOTOS_AI_QUIET_PERIOD"`
 	Quiet       time.Duration `env:"-"`
-	Media       MediaConfig
+	// VectorIdleTimeout shortens how long an unused connection to the vector
+	// index stays open, for the system test; products keep the default.
+	VectorIdleTimeout string        `env:"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT"`
+	VectorIdle        time.Duration `env:"-"`
+	Media             MediaConfig
 }
 
 // loadPhotoServiceConfig resolves and validates the photo service's
@@ -425,10 +426,11 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 		"ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
 		"ANAS_FFMPEG_SOCKET":          &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
-	if c.QuietPeriod != "" {
-		if c.Quiet, err = time.ParseDuration(c.QuietPeriod); err != nil || c.Quiet <= 0 {
-			problems = append(problems, errors.New("ANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"))
-		}
+	if c.Quiet, err = envconfig.PositiveDuration("ANAS_PHOTOS_AI_QUIET_PERIOD", c.QuietPeriod); err != nil {
+		problems = append(problems, err)
+	}
+	if c.VectorIdle, err = envconfig.PositiveDuration("ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT", c.VectorIdleTimeout); err != nil {
+		problems = append(problems, err)
 	}
 	if len(problems) > 0 {
 		return photoServiceConfig{}, errors.Join(problems...)
