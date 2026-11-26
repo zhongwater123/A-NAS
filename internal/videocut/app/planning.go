@@ -459,7 +459,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		claim.TargetSeconds = excerptSeconds(excerpt.String)
+		claim.TargetSeconds = domain.ExcerptSeconds(excerpt.String)
 		var kept domain.JobSettings
 		if json.Unmarshal([]byte(settings), &kept) == nil {
 			claim.Project = kept.ProjectName
@@ -480,16 +480,6 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 	}
 	s.logger.InfoContext(ctx, "planning round claimed", "round", claim.RoundID, "job", claim.JobID)
 	return claim, nil
-}
-
-// excerptSeconds is the target length of the film in whole seconds, from
-// the song step's stored excerpt.
-func excerptSeconds(stored string) int {
-	var excerpt domain.Excerpt
-	if stored == "" || json.Unmarshal([]byte(stored), &excerpt) != nil || excerpt.Frames <= 0 {
-		return 0
-	}
-	return (excerpt.Frames + domain.FilmRate/2) / domain.FilmRate
 }
 
 func (s *Store) round(ctx context.Context, tx *db.Tx, owner, roundID string) (db.RoundRow, error) {

@@ -78,11 +78,11 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 		return selection.Excerpt[0], nil
 	}
 	if len(st.Downbeats) > 0 {
-		start = nearest(st.Downbeats, start)
+		start = domain.Nearest(st.Downbeats, start)
 		// The default excerpt's start is kept to two decimals and a
 		// downbeat to three, so the two are compared as downbeats: a start
 		// on the default's is the default excerpt, as in SongStart.
-		if start == defaultDownbeat(st, selection) {
+		if start == domain.DefaultDownbeat(st, selection) {
 			return selection.Excerpt[0], nil
 		}
 	}
@@ -136,22 +136,6 @@ func (s *Store) draggedSelection(ctx context.Context, owner, songID string, star
 	return &kept, nil
 }
 
-// named is the excerpt music as the domain reads it, with title for its
-// song. An analysis is shared by every member who chose the same content, so
-// it names no song; the plan's music note shows each member their own.
-func named(music json.RawMessage, title string) (json.RawMessage, error) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(music, &fields); err != nil {
-		return nil, err
-	}
-	song, err := json.Marshal(title)
-	if err != nil {
-		return nil, err
-	}
-	fields["song"] = song
-	return json.Marshal(fields)
-}
-
 // Excerpt is owner's song's excerpt from start, or the default one for
 // DefaultStart (or any negative start).
 func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64) (domain.Excerpt, error) {
@@ -193,7 +177,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		}
 		selection, music = &kept.Selection, kept.Music
 	}
-	music, err = named(music, row.title)
+	music, err = domain.Named(music, row.title)
 	if err != nil {
 		return domain.Excerpt{}, err
 	}

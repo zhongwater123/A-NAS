@@ -122,13 +122,6 @@ func SongTitle(title string) string {
 	return title
 }
 
-// defaultDownbeat is the downbeat that stands for the default excerpt's
-// start. That start is a section's bound kept to two decimals, and need not
-// be a downbeat itself; a start the member drags always is one.
-func defaultDownbeat(st *videocutcompute.Structure, selection *videocutcompute.Selection) float64 {
-	return nearest(st.Downbeats, selection.Excerpt[0])
-}
-
 func (s *Store) songsRoot() string { return filepath.Join(s.root, songsDir) }
 
 // songPath is the copy of the song with this digest.
@@ -431,12 +424,12 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	if math.IsNaN(at) || math.IsInf(at, 0) || at < 0 || at > row.duration {
 		return domain.SongDetail{}, domain.ErrInvalid
 	}
-	start := nearest(st.Downbeats, at)
+	start := domain.Nearest(st.Downbeats, at)
 	// What the project keeps: nothing on the default start, where the
 	// eighth version's rule picks the excerpt, which ends on a section's
 	// bound and not a fixed length after the start.
 	var keptStart, kept any
-	if def := row.analysis.Selection; def == nil || start != defaultDownbeat(st, def) {
+	if def := row.analysis.Selection; def == nil || start != domain.DefaultDownbeat(st, def) {
 		if s.compute == nil {
 			return domain.SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 		}
@@ -470,20 +463,6 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		return domain.SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
 	}
 	return s.Song(ctx, owner, projectID)
-}
-
-// nearest is the time in times closest to at; times is sorted.
-func nearest(times []float64, at float64) float64 {
-	i, _ := slices.BinarySearch(times, at)
-	switch {
-	case i == 0:
-		return times[0]
-	case i == len(times):
-		return times[len(times)-1]
-	case at-times[i-1] <= times[i]-at:
-		return times[i-1]
-	}
-	return times[i]
 }
 
 // OpenSongAudio opens owner's project's song for the member to hear.
