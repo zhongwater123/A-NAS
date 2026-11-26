@@ -76,7 +76,7 @@ func (a *askedIndex) asked() [][]int {
 func reddish(t *testing.T, count int) (*photos.Service, *colorEmbedder, *askedIndex, *fallbacks, *clocktest.Clock, string, []photos.Asset) {
 	t.Helper()
 	instance := vectorindextest.Start(t)
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = client.Close() })
 	asked := &askedIndex{Client: client}
 	worker := &colorEmbedder{}
@@ -191,7 +191,7 @@ INSERT INTO vector_outbox(object_id) SELECT 'object:waiting-' || i FROM n`); err
 func indexedLibrary(t *testing.T) (*photos.Service, *colorDetector, *vectorindex.Client, *fallbacks, photos.Library, []photos.Asset) {
 	t.Helper()
 	instance := vectorindextest.Start(t)
-	vectors := vectorindex.New(instance.Socket, nil)
+	vectors := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = vectors.Close() })
 	calibration, err := objects.ParseCalibration([]byte(`{"model": "detector-1", "weight": 0.2,
 		"tierCoverage": 0.6, "fusion": [62, 140], "words": {"62": {"fusion": true, "tierScore": 0.6},
@@ -545,7 +545,7 @@ func (f *failingIndex) count() (calls, prepared int) {
 func smallIndexedLibrary(t *testing.T) (*photos.Service, *failingIndex, *vectorindex.Client, *clocktest.Clock, *fallbacks) {
 	t.Helper()
 	instance := vectorindextest.Start(t)
-	vectors := vectorindex.New(instance.Socket, nil)
+	vectors := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = vectors.Close() })
 	failing := &failingIndex{VectorIndex: vectors}
 	clock := newClock()

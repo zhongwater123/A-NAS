@@ -8,10 +8,3 @@ func SetCallTimeout(d time.Duration) (restore func()) {
 	callTimeout = d
 	return func() { callTimeout = previous }
 }
-
-// SetIdleTimeout shortens how long an unused connection stays open.
-func SetIdleTimeout(d time.Duration) (restore func()) {
-	previous := idleTimeout
-	idleTimeout = d
-	return func() { idleTimeout = previous }
-}

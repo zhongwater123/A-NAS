@@ -234,9 +234,12 @@ else
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
 # AI starts once the photo library has gone unused for this long, so that the
-# test sees a photo organised in the Worker's sandbox.
+# test sees a photo organised in the Worker's sandbox; and the photo service
+# lets its vector index connection go after 5 idle seconds instead of a
+# minute, so that the test sees the instance stop without waiting it out.
 install -d /etc/systemd/system/anas-photos.service.d
-printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
+printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT=5s\n' \
+  > /etc/systemd/system/anas-photos.service.d/system-test.conf
 # A deleted account is removed after 10 seconds instead of 30 days, so that
 # the test sees it go (docs/specs/account-enable-and-delete.md).
 install -d /etc/systemd/system/anas-api.service.d
@@ -713,7 +716,13 @@ late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
 ip link add anas-late0 type veth peer name anas-late1
 install -d /etc/systemd/system/smbd.service.d
 ip link set anas-late0 up
-sed "s/\b$iface\b/anas-late0/g" /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+# The product waits 20 s for the address and tries again 5 s later; the
+# test's copy waits 5 s and tries again after 1 s.
+{
+  sed -e "s/\b$iface\b/anas-late0/g" -e 's/timeout 20 sh/timeout 5 sh/' /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf
+  echo 'RestartSec=1s'
+} >"$late_dropin"
+check "the test's copy of smbd's address wait is shorter" grep -Fq 'timeout 5 sh' "$late_dropin"
 systemctl daemon-reload
 systemctl stop smbd
 systemctl start --no-block smbd
@@ -1888,7 +1897,7 @@ while len(frame) < 9:
 sys.exit(0 if frame[3] == 4 else 1)
 PY
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle minute included
+unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle timeout included
   for _ in $(seq 1 180); do
     systemctl is-active --quiet "$1" || return 0
     sleep 0.5
@@ -2001,16 +2010,16 @@ index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{
 wait "$holder"
 check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
 printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
-failed_starts=0
-until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
-  failed_starts=$((failed_starts + 1))
-  ((failed_starts < 5)) || break
-  sleep 1
-done
+damaged_at=$(journal_mark)
+# The connection waits in the socket's queue and starts the instance again
+# each time a start fails, a few seconds after Qdrant panics (wait-ready.sh);
+# the third start empties the storage and answers it.
+check "a damaged vector index answers once it has started empty" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+failed_starts=$(journalctl -u anas-vectors@a-nas-photos.service --after-cursor "$damaged_at" -o cat --no-pager |
+  grep -c 'Failed with result' || true)
 echo "INFO starts that failed on the damaged index: $failed_starts"
-check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
-check "and starts empty after two failures in a row" \
-  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "after two failed starts in a row" test "$failed_starts" -eq 2 -a ! -e "$vectors_state/storage/collections/damaged"
 check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
 # A probe in the vector index's own unit, in place of Qdrant.
 cat > /usr/local/lib/anas-vectors-probe.py <<'PY'

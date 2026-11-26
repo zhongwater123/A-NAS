@@ -349,7 +349,7 @@ func TestWindowSearchWorksWithTheIndexStopped(t *testing.T) {
 	photos.UseVectorIndex(f.service, nil)
 	want := f.searchWindows(t, namedAlice, f.tripGrant, 10)
 	// The collection is in the index; then the instance stops.
-	stopped := vectorindex.New(filepath.Join(t.TempDir(), "stopped.sock"), nil)
+	stopped := vectorindex.New(filepath.Join(t.TempDir(), "stopped.sock"), vectorindex.Options{})
 	t.Cleanup(func() { _ = stopped.Close() })
 	photos.UseVectorIndex(f.service, stopped)
 	if got := f.searchWindows(t, namedAlice, f.tripGrant, 10); !reflect.DeepEqual(got, want) {
