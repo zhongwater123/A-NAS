@@ -70,6 +70,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](docs/adr/0034
 | `anas-photos` | `a-nas-photos` | 相册服务，独占数据卷上的照片库（[ADR 0011](docs/adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)） |
 | `anas-shares` | `a-nas-shares` | 成员分享的独立副本（[ADR 0023](docs/adr/0023-isolate-member-share-copies-in-a-dedicated-service.md)） |
 | `anas-family` | `a-nas-family` | 家庭中心（[ADR 0029](docs/adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)） |
+| `anas-workspace` | `a-nas-workspace` | 共享工作区：成员与他们的 agent 共写的 HTML 页面，无网络（[ADR 0040](docs/adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)） |
 | `anas-ai` | `a-nas-ai` | 相册的本地 AI Worker，经套接字按需启动，无网络、看不到数据卷（[ADR 0016](docs/adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)） |
 | `anas-ffmpeg@` | 动态身份 | FFmpeg Worker（FFmpeg 与 libheif），按连接启动，无网络、看不到数据卷 |
 | `anas-vectors@` | `a-nas-vec-<所有者>` | 向量索引：每个所有者一个可重建的 Qdrant 实例，无网络（[ADR 0028](docs/adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)） |

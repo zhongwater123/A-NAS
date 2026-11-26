@@ -61,6 +61,12 @@ type Config[S io.Closer] struct {
 	CheckStore    func(string) error
 	RetryInterval time.Duration
 	Logger        *slog.Logger
+	// Authenticate, when set, wraps the API in place of
+	// modules.Authenticate, for a service that takes more than sessions:
+	// the shared workspace adds agent tokens and one-time transfer links
+	// (ADR 0040) and leaves sessions to modules.Authenticate. It must
+	// confirm every caller with the Host Agent itself.
+	Authenticate func(http.Handler) http.Handler
 }
 
 // shutdownGrace is how long stopping waits for open requests.
@@ -112,7 +118,13 @@ func Run[S io.Closer](parent context.Context, config Config[S]) error {
 	// carries no session; what to do comes from the Host Agent.
 	routes := http.NewServeMux()
 	routes.Handle(accountremoval.Path, served)
-	routes.Handle("/", modules.Authenticate(config.Sessions, config.Name, config.Unavailable, config.Logger, served))
+	authenticate := config.Authenticate
+	if authenticate == nil {
+		authenticate = func(next http.Handler) http.Handler {
+			return modules.Authenticate(config.Sessions, config.Name, config.Unavailable, config.Logger, next)
+		}
+	}
+	routes.Handle("/", authenticate(served))
 	server := &http.Server{
 		Handler:           routes,
 		ReadHeaderTimeout: 5 * time.Second, IdleTimeout: time.Minute, MaxHeaderBytes: 1 << 20,
@@ -250,14 +262,21 @@ func upkeep[S io.Closer](ctx context.Context, config Config[S], store S) func() 
 	if config.Upkeep == nil {
 		return func() {}
 	}
+	return Every(ctx, config.UpkeepInterval, func(ctx context.Context) { config.Upkeep(ctx, store) })
+}
+
+// Every runs run now and then every interval until what it returns is
+// called, which ends the run in progress and waits for it: call it before
+// closing what run uses. Development runs a store's upkeep this way too.
+func Every(ctx context.Context, interval time.Duration, run func(context.Context)) (stop func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(config.UpkeepInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
-			config.Upkeep(ctx, store)
+			run(ctx)
 			select {
 			case <-ctx.Done():
 				return

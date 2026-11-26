@@ -91,6 +91,8 @@ type Config struct {
 	// shows no entry, and hiding the entry alone would not stop the API.
 	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
 	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	// WorkspaceSocket is the shared workspace's service (ADR 0040).
+	WorkspaceSocket string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
 	// MontageMusicSocket and MontageComputeSocket reach the montage
 	// center's Workers in development, where the montage center runs in
 	// this process; without them its songs wait.
@@ -206,11 +208,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 	}
 	live := c.Live()
 	problem(loopbackAddress("ANAS_HTTP_ADDR", c.HTTPAddr))
-	if c.AccountDeletionDelay != "" {
-		if c.DeletionDelay, err = time.ParseDuration(c.AccountDeletionDelay); err != nil || c.DeletionDelay <= 0 {
-			problem(errors.New("ANAS_ACCOUNT_DELETION_DELAY must be a positive duration such as 30s"))
-		}
-	}
+	c.DeletionDelay, err = envconfig.PositiveDuration("ANAS_ACCOUNT_DELETION_DELAY", c.AccountDeletionDelay)
+	problem(err)
 	switch {
 	case c.FakeStorage == "":
 	case live:
@@ -259,7 +258,8 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket},
+		{"ANAS_WORKSPACE_SOCKET", &c.WorkspaceSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
 		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
 		{"ANAS_COMPANION_DIRECTORY", &c.CompanionDirectory},
@@ -406,7 +406,11 @@ type photoServiceConfig struct {
 	// work starts, for the system test; products keep the default.
 	QuietPeriod string        `env:"ANAS_PHOTOS_AI_QUIET_PERIOD"`
 	Quiet       time.Duration `env:"-"`
-	Media       MediaConfig
+	// VectorIdleTimeout shortens how long an unused connection to the vector
+	// index stays open, for the system test; products keep the default.
+	VectorIdleTimeout string        `env:"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT"`
+	VectorIdle        time.Duration `env:"-"`
+	Media             MediaConfig
 }
 
 // loadPhotoServiceConfig resolves and validates the photo service's
@@ -422,10 +426,11 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 		"ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
 		"ANAS_FFMPEG_SOCKET":          &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
-	if c.QuietPeriod != "" {
-		if c.Quiet, err = time.ParseDuration(c.QuietPeriod); err != nil || c.Quiet <= 0 {
-			problems = append(problems, errors.New("ANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"))
-		}
+	if c.Quiet, err = envconfig.PositiveDuration("ANAS_PHOTOS_AI_QUIET_PERIOD", c.QuietPeriod); err != nil {
+		problems = append(problems, err)
+	}
+	if c.VectorIdle, err = envconfig.PositiveDuration("ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT", c.VectorIdleTimeout); err != nil {
+		problems = append(problems, err)
 	}
 	if len(problems) > 0 {
 		return photoServiceConfig{}, errors.Join(problems...)
@@ -519,6 +524,30 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 	})
 	if len(problems) > 0 {
 		return montageServiceConfig{}, errors.Join(problems...)
+	}
+	return c, nil
+}
+
+// workspaceServiceConfig configures the shared workspace's service (ADR
+// 0040), which runs from this binary as its own process and identity.
+type workspaceServiceConfig struct {
+	Root          string `env:"ANAS_WORKSPACE_ROOT" envDefault:"/srv/a-nas/data/workspace"`
+	Socket        string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
+	SessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
+}
+
+// loadWorkspaceServiceConfig resolves and validates the workspace service's
+// configuration, reporting every problem at once.
+func loadWorkspaceServiceConfig(environment map[string]string) (workspaceServiceConfig, error) {
+	c, err := envconfig.Parse[workspaceServiceConfig](environment)
+	if err != nil {
+		return workspaceServiceConfig{}, err
+	}
+	problems := absolutePaths(map[string]*string{
+		"ANAS_WORKSPACE_ROOT": &c.Root, "ANAS_WORKSPACE_SOCKET": &c.Socket, "ANAS_WORKSPACE_SESSION_SOCKET": &c.SessionSocket,
+	})
+	if len(problems) > 0 {
+		return workspaceServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

@@ -1145,3 +1145,40 @@ func TestRestoringTheDatabasesNeedsTheMontageServiceStopped(t *testing.T) {
 		}
 	}
 }
+
+// The shared workspace service (ADR 0040) stops on its own before the copies
+// go back and starts after them, like the montage service: a release before
+// it has no such unit, and any other failure to stop it stops the restore.
+func TestRestoringTheDatabasesTakesTheWorkspaceServiceAlong(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	if err := service.restoreDatabases(context.Background(), "20261125T000000Z-1"); err != nil {
+		t.Fatal(err)
+	}
+	restore := slices.IndexFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage workspace;") &&
+			strings.Contains(call, "/srv/a-nas/data/workspace/workspace.db-wal")
+	})
+	stopped := slices.Index(host.calls, "systemctl stop anas-workspace")
+	started := slices.Index(host.calls, "systemctl start anas-workspace")
+	if stopped < 0 || stopped > restore || restore > started {
+		t.Fatalf("calls = %v; want the workspace service stopped, the databases restored and the service started", host.calls)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		fails    error
+		restored bool
+	}{
+		{"no such unit", exitStatus(5), true},
+		{"stop failed", exitStatus(1), false},
+	} {
+		host := newFakeHost()
+		host.fails = map[string]error{"systemctl stop anas-workspace": tc.fails}
+		service, _ := newService(t, host)
+		err := service.restoreDatabases(context.Background(), "20261125T000000Z-1")
+		if restored := host.ran("sh -c"); (err == nil) != tc.restored || restored != tc.restored {
+			t.Errorf("%s: err = %v, restored = %t; calls = %v", tc.name, err, restored, host.calls)
+		}
+	}
+}

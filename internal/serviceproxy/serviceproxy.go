@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,6 +23,15 @@ import (
 // SessionHeader carries the browser's session token to the service, and the
 // member's to the assistant's change executor.
 const SessionHeader = "X-A-NAS-Session"
+
+// AgentTokenHeader carries an agent's token from the Product Service's agent
+// posture to the service behind it, which confirms it again (ADR 0040);
+// AgentOriginHeader the scheme and host the agent reached the device at.
+const (
+	//nolint:gosec // G101: the header's name, not a credential.
+	AgentTokenHeader  = "X-A-NAS-Agent-Token"
+	AgentOriginHeader = "X-A-NAS-Agent-Origin"
+)
 
 // ResponseHeaderTimeout is how long a service may take to start answering a
 // request it has received in full, such as importing an uploaded video or
@@ -78,8 +88,11 @@ type trustedHeader struct{ name, value string }
 
 // WithInternalHeader carries a header constructed by the Product Service
 // through the proxy after browser-supplied internal headers are removed.
+// Each call adds one; a name given again replaces its value.
 func WithInternalHeader(ctx context.Context, name, value string) context.Context {
-	return context.WithValue(ctx, trustedHeaderKey{}, trustedHeader{name, value})
+	headers, _ := ctx.Value(trustedHeaderKey{}).([]trustedHeader)
+	headers = append(slices.Clone(headers), trustedHeader{name, value})
+	return context.WithValue(ctx, trustedHeaderKey{}, headers)
 }
 
 // onlyTheSession replaces what identifies the browser with the session token
@@ -94,7 +107,8 @@ func onlyTheSession(ctx context.Context, header http.Header) {
 			header.Del(name)
 		}
 	}
-	if h, ok := ctx.Value(trustedHeaderKey{}).(trustedHeader); ok {
+	headers, _ := ctx.Value(trustedHeaderKey{}).([]trustedHeader)
+	for _, h := range headers {
 		header.Set(h.name, h.value)
 	}
 	header.Set(SessionHeader, accounts.SessionToken(ctx))

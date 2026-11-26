@@ -906,7 +906,9 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	// members' scheduled tasks, through which a round of a member's tasks
 	// would start it again while montage.db is restored; the socket starts
 	// again with the service.
-	for _, unit := range []string{"anas-montage-assistant.socket", "anas-montage"} {
+	// The shared workspace service (ADR 0040) came later still, and stops for
+	// the same reason.
+	for _, unit := range []string{"anas-montage-assistant.socket", "anas-montage", "anas-workspace"} {
 		if output, err := s.Commands.Run(ctx, "systemctl", "stop", unit); err != nil && !unitNotLoaded(err) {
 			return fmt.Errorf("stop %s: %w: %s", unit, err, lastLines(string(output), 3))
 		}
@@ -921,9 +923,10 @@ rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
   /srv/a-nas/data/photos/catalog.db-wal /srv/a-nas/data/photos/catalog.db-shm \
   /srv/a-nas/data/shares/catalog.db-wal /srv/a-nas/data/shares/catalog.db-shm \
   /srv/a-nas/data/family/family.db-wal /srv/a-nas/data/family/family.db-shm \
-  /srv/a-nas/data/montage/montage.db-wal /srv/a-nas/data/montage/montage.db-shm
+  /srv/a-nas/data/montage/montage.db-wal /srv/a-nas/data/montage/montage.db-shm \
+  /srv/a-nas/data/workspace/workspace.db-wal /srv/a-nas/data/workspace/workspace.db-shm
 cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-for store in photos shares family montage; do
+for store in photos shares family montage workspace; do
   if [ -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]; then
     cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   fi
@@ -932,6 +935,7 @@ done`
 	slices.Reverse(services)
 	_, _ = s.Commands.Run(ctx, "systemctl", append([]string{"start"}, services...)...)
 	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-montage")
+	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-workspace")
 	if err != nil {
 		return fmt.Errorf("restore the databases: %w: %s", err, lastLines(string(output), 3))
 	}

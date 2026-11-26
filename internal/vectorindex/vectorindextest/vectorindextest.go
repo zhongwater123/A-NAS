@@ -99,6 +99,7 @@ func start(t testing.TB, binary, root string) (Instance, error) {
 	//nolint:gosec // G702: the pinned binary, fetched by hash or named by the developer for tests.
 	command := exec.Command(binary, "--config-path", filepath.Join(root, "deploy", "qdrant", "config.yaml"), "--disable-telemetry")
 	command.Dir = work
+	command.SysProcAttr = serverAttributes()
 	command.Env = append(os.Environ(),
 		"QDRANT__STORAGE__STORAGE_PATH="+filepath.Join(work, "storage"),
 		"QDRANT__STORAGE__SNAPSHOTS_PATH="+filepath.Join(work, "snapshots"),

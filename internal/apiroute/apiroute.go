@@ -37,6 +37,11 @@ const (
 	// Admin routes need an administrator, and the CSRF token for anything
 	// but GET and HEAD.
 	Admin
+	// Agent routes take a member's agent token as a bearer token and never
+	// a session cookie, so they need no CSRF token; a request a browser
+	// sends is refused (ADR 0040). The service behind the route confirms the
+	// token again with the Host Agent.
+	Agent
 )
 
 func (p Posture) String() string {
@@ -49,6 +54,8 @@ func (p Posture) String() string {
 		return "mutation"
 	case Admin:
 		return "admin"
+	case Agent:
+		return "agent"
 	}
 	return "unknown"
 }

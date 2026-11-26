@@ -103,6 +103,13 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == workspaceServiceCommand {
+		if err := runWorkspaceService(logger); err != nil {
+			logger.Error("A-NAS workspace service stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == familyServiceCommand {
 		if err := runFamilyService(logger); err != nil {
 			logger.Error("A-NAS family service stopped", "error", err)
@@ -150,7 +157,7 @@ func runPhotoService(logger *slog.Logger) error {
 	lookup := sessionlookup.NewClient(config.SessionSocket)
 	var vectors photos.VectorIndex
 	if config.VectorSocket != "" {
-		client := vectorindex.New(config.VectorSocket, logger)
+		client := vectorindex.New(config.VectorSocket, vectorindex.Options{Logger: logger, IdleTimeout: config.VectorIdle})
 		defer func() { _ = client.Close() }()
 		vectors = client
 	}
@@ -279,7 +286,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
-		montageGrants = photoservice.LocalGrants(photoService, sessions, logger)
+		montageGrants = photoservice.LocalGrants(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -369,6 +376,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeMontage()
+	workspaceAPI, removeWorkspace, closeWorkspace, err := configuredWorkspace(config, filepath.Join(stateDirectory, "control.db"), logger)
+	if err != nil {
+		return err
+	}
+	defer closeWorkspace()
 	// The assistants' companion tools call from the member's own UID; the
 	// account store says whose it is.
 	uids := accounts.NewSessionDirectory(filepath.Join(stateDirectory, "control.db"))
@@ -400,6 +412,7 @@ func run(logger *slog.Logger) error {
 		Shares:       shareAPI,
 		Family:       familyAPI,
 		Montage:      montageAPI,
+		Workspace:    workspaceAPI,
 		PlanGrants:   planGrants(broker),
 		Modules:      moduleRegistry,
 		Media:        mediaapi.New(mediaService, logger),
@@ -432,7 +445,7 @@ func run(logger *slog.Logger) error {
 	// Deleted accounts are removed once their 30 days are over
 	// (docs/specs/account-enable-and-delete.md).
 	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeMontage,
-		musicService, mediaService, transferService)
+		removeWorkspace, musicService, mediaService, transferService)
 	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A
 	// snapshot that stopping interrupts is deleted again before the catalog

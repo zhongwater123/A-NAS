@@ -48,6 +48,7 @@
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 - [家庭待办](family-todos.md)（implemented）
 - [剪辑中心](montage-center.md)（首版 implemented；二次编辑见 ADR 0039）
+- [共享工作区](shared-workspace.md)（draft；第一步：共享页面与 agent 修改）
 
 状态只表示规格的实现阶段。哪些功能已部署到 Experimental NAS、哪些实机验收未完成，统一记录在[当前状态](../status/CURRENT.md)，规格中不再重复。
 
