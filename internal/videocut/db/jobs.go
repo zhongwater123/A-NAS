@@ -210,25 +210,30 @@ func (tx *Tx) RunningJob(ctx context.Context, jobID string) (attempts int, cance
 	return attempts, cancelled, saving, err
 }
 
-// JobSettlement is how a job's step left it, as settling records it. The
-// times are as kept (sqlitedb.FormatTime); Missing and FinishedAt are nil
-// for NULL.
+// JobSettlement is how a job's step left it, as settling records it:
+// Missing is the videos found missing, encoded, and FinishedAt when the job
+// ended; each nil for none.
 type JobSettlement struct {
 	State, WaitReason string
 	Attempts          int
 	ErrorClass, Error string
-	Missing           any
+	Missing           *string
 	SaveStarted       bool
-	NotBefore         string
-	FinishedAt        any
-	UpdatedAt         string
+	NotBefore         time.Time
+	FinishedAt        *time.Time
+	UpdatedAt         time.Time
 }
 
 // SettleJob records how jobID's step left it, its lease released.
 func (tx *Tx) SettleJob(ctx context.Context, jobID string, s JobSettlement) error {
+	var finished any
+	if s.FinishedAt != nil {
+		finished = sqlitedb.FormatTime(*s.FinishedAt)
+	}
 	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
 			missing_json = ?, save_started = ?, lease_until = NULL, not_before = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-		s.State, s.WaitReason, s.Attempts, s.ErrorClass, s.Error, s.Missing, s.SaveStarted, s.NotBefore, s.FinishedAt, s.UpdatedAt, jobID)
+		s.State, s.WaitReason, s.Attempts, s.ErrorClass, s.Error, s.Missing, s.SaveStarted, sqlitedb.FormatTime(s.NotBefore), finished,
+		sqlitedb.FormatTime(s.UpdatedAt), jobID)
 	return err
 }
 

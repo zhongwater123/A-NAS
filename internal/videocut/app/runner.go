@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
@@ -294,10 +293,10 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 			return readErr
 		}
 		now := s.now()
-		at := sqlitedb.FormatTime(now)
 		state, reason, class, message := JobQueued, "", "", ""
-		var finished, missing any
-		next := at
+		var finished *time.Time
+		var missing *string
+		next := now
 		var wait *stepWait
 		var needs *stepNeeds
 		var bad *domain.StepFailed
@@ -307,40 +306,40 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 		}
 		switch {
 		case cancelled || errors.Is(err, errCancelled):
-			state, finished = JobCancelled, at
+			state, finished = JobCancelled, &now
 		case stopping && refused == nil:
 			// The service is stopping. Resume this step immediately on startup.
 		case saving:
 			// The photo library may already have committed. Replay the same
 			// version key until its outcome is known, retaining the rendered film.
-			state, reason, message, next = JobWaiting, WaitPhotos, err.Error(), sqlitedb.FormatTime(now.Add(waitPoll))
+			state, reason, message, next = JobWaiting, WaitPhotos, err.Error(), now.Add(waitPoll)
 		case errors.As(err, &wait):
 			// The detail says more for the project page, such as why VNAS has
 			// not taken the plan.
-			state, reason, message, next = JobWaiting, wait.reason, wait.detail, sqlitedb.FormatTime(now.Add(wait.delay))
+			state, reason, message, next = JobWaiting, wait.reason, wait.detail, now.Add(wait.delay)
 			if len(wait.missing) != 0 {
 				encoded, _ := json.Marshal(wait.missing)
-				missing = string(encoded)
+				missing = new(string(encoded))
 			}
 		case errors.As(err, &needs):
 			state, reason, class, message = JobNeedsInput, needs.reason, "input", cmp.Or(needs.said, needs.Error())
 			if len(needs.missing) != 0 {
 				encoded, _ := json.Marshal(needs.missing)
-				missing = string(encoded)
+				missing = new(string(encoded))
 			}
 		case errors.As(err, &bad):
-			state, reason, class, message, finished = JobFailed, bad.Reason, "invalid", bad.Error(), at
+			state, reason, class, message, finished = JobFailed, bad.Reason, "invalid", bad.Error(), &now
 		default:
 			attempts++
 			class, message = "retryable", err.Error()
 			if attempts >= jobMaxAttempts {
-				state, finished = JobFailed, at
+				state, finished = JobFailed, &now
 			} else {
-				next = sqlitedb.FormatTime(now.Add(jobRetryDelay * time.Duration(attempts)))
+				next = now.Add(jobRetryDelay * time.Duration(attempts))
 			}
 		}
 		return tx.SettleJob(ctx, job.id, db.JobSettlement{State: state, WaitReason: reason, Attempts: attempts, ErrorClass: class, Error: message,
-			Missing: missing, SaveStarted: saving, NotBefore: next, FinishedAt: finished, UpdatedAt: at})
+			Missing: missing, SaveStarted: saving, NotBefore: next, FinishedAt: finished, UpdatedAt: now})
 	})
 	if dbErr != nil {
 		s.logger.ErrorContext(ctx, "recording a VideoCut job's step failed", "job", job.id, "error", dbErr)
