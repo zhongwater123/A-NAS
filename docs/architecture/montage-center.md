@@ -129,7 +129,7 @@ anas-photos
   - 容量不足只拒绝写入，不让整个服务不可用（[不变量 12](OVERVIEW.md#不变量)）：渲染写 `tmp/` 前用 `capacity.Admits` 按预计大小检查，存回时相册照常检查；不够时任务进入 `needs_input(storage_full)`，腾出空间后重试。已有项目与成片照常可看。
 - **剪辑计算 Worker**：`anas-montage-compute.socket` 加 `anas-montage-compute.service`。
   - 单个常驻实例，逐个处理连接，免得每个连接都重新导入 NumPy。
-  - DynamicUser，没有网络，看不到数据卷，用设备上已有的 AI 运行环境 `/usr/lib/a-nas/ai/runtime` 运行 `python -m anas_montage.worker`。
+  - DynamicUser，没有网络，看不到数据卷，用设备上已有的 AI 运行环境 `/usr/lib/a-nas/ai/runtime` 运行 `python -m anas_videocut.worker`。
   - 套接字 `SocketGroup=a-nas-photos`、`0660`，相册与剪辑中心都能连。
   - 放在 `anas.slice`（后台工作，`CPUWeight=10`）之下，`MemoryMax=1G`。画质的帧分块交来（见“卡片与画质”），内存不随卡片长度增长。
 - **配乐分析 Worker**：allin1 依赖 PyTorch 等，放不进计算 Worker 用的 AI 运行环境，所以另起一个。同样 DynamicUser、没有网络、看不到数据卷、放在 `anas.slice` 之下，只有剪辑中心能连。运行环境、内存上限与交付在 M8b 定（见“配乐”）。
@@ -141,7 +141,7 @@ anas-photos
 | 区域 | 要改的地方 |
 |---|---|
 | 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-montage`（否则连不上 0750 的 `/run/a-nas-montage`） |
-| 包脚本 | preinst 检查 UID 31003 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_montage`（含 `domain/`） |
+| 包脚本 | preinst 检查 UID 31003 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `ops/`、`algo/`、`prompts/`） |
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `montage service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
 | anas-api | `cmd/anas-api/montage.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
@@ -346,7 +346,7 @@ montage/
 
 ## 剪辑计算 Worker
 
-第八版的领域层只用标准库和 NumPy，没有输入输出。它原样放到 `ai/anas_montage/domain/`（来源提交 `19f2d6db`），外面加一个 Worker 入口。
+第八版的领域层只用标准库和 NumPy，没有输入输出。它原样放到 `ai/anas_videocut/algo/`（来源提交 `19f2d6db`），外面加一个 Worker 入口。
 
 | 操作 | 调用方 | 输入 | 输出 | 来自第八版 |
 |---|---|---|---|---|
@@ -518,7 +518,7 @@ montage/
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次对话的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_montage/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 后台对话里没有人回答审批，规划发起方对审批请求一律答拒绝。提示词仍要求不把描述写进记忆。
 
@@ -771,7 +771,7 @@ montage/
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `montageapi.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
 - brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。卡片号按视频在任务里的先后编号（`v{n}-{序号}`），重剪任务移除了视频、或视频重新分析过时，卡片重新编号，`base` 里的旧编号会指向别的画面。所以建任务时同时记下 `base` 用到的每张卡片在视频里的位置（`settings_json` 的 `recut.cards`：视频、起止与各节拍的时刻），到出 brief 时按这一次的目录对齐：同一个视频里同一位置的卡片还在，就换成它现在的编号；不在了（视频已移除，或重新切过、重新描述过），就从大纲各场的 `cards` 与各画面的 `beats` 里去掉，一场或一个画面一张都不剩时去掉这一项，模板写明这时照它的 `query`、`shows` 与 `link` 从这一次的卡片里重新挑，其余照 `base` 保留（[`recut.go`](../../internal/montage/recut.go) 的 `alignBase`）。重剪要等素材分析做完才出 brief，所以正在分析的素材也按做完后的卡片对齐。
-- 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_montage_worker.py`](../../ai/tests/test_montage_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
+- 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_videocut_worker.py`](../../ai/tests/test_videocut_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
 - 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/montage/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/montage/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`

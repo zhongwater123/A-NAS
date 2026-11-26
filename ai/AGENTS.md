@@ -1,6 +1,6 @@
 # AI Worker 与评估（ai/）
 
-相册 AI Worker（`anas_ai`）、剪辑计算与配乐分析 Worker（`anas_montage`、`anas_montage_music`）、评估脚本（`eval/`）与 Python 锁文件；`assistant/` 与 `assistant-spike/` 见 [assistant/AGENTS.md](assistant/AGENTS.md)。根目录的 [AGENTS.md](../AGENTS.md) 仍然适用。权威说明：[AI 开发与评估](../docs/development/ai-development.md)、[相册本地 AI](../docs/architecture/photo-ai.md)。
+相册 AI Worker（`anas_ai`）、剪辑计算与配乐分析 Worker（`anas_videocut`、`anas_montage_music`）、评估脚本（`eval/`）与 Python 锁文件；`assistant/` 与 `assistant-spike/` 见 [assistant/AGENTS.md](assistant/AGENTS.md)。根目录的 [AGENTS.md](../AGENTS.md) 仍然适用。权威说明：[AI 开发与评估](../docs/development/ai-development.md)、[相册本地 AI](../docs/architecture/photo-ai.md)。
 
 - **Worker 只算不存：** 没有网络、看不到数据卷，只读调用方传来的描述符；结果由 Go 一侧核对后提交，不写原图、权限或用户元数据（[不变量](../docs/architecture/OVERVIEW.md#不变量) 7、11，[ADR 0016](../docs/adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)）。
 - **模型由清单固定：** `deploy/models/<名称>.json` 固定文件的 SHA-256、许可与实测的 `memoryBytes`；文件在私有的 A-NAS-assets Release 中，用 `scripts/fetch-models.sh` 拉取与 `--publish` 上传。只收代码与权重都允许商用与再分发的模型（[决定](../docs/decisions/2026-10-10-model-license-rule.md)）。新的模型角色同时改 `scripts/lib/content.sh` 的 `ai_roles`、`anas-ai.service` 与 `make ops-check` 的角色表。

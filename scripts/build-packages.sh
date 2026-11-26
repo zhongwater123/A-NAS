@@ -116,7 +116,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_videocut/ops" "$lib/ai/anas_videocut/algo" "$lib/ai/anas_videocut/prompts" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -139,9 +139,13 @@ install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 # runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
 install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
-# The montage center's compute Worker runs in the same runtime (ADR 0038).
-install -m 0644 "$repo"/ai/anas_montage/*.py "$lib/ai/anas_montage/"
-install -m 0644 "$repo"/ai/anas_montage/domain/*.py "$lib/ai/anas_montage/domain/"
+# The montage center's compute Worker runs in the same runtime (ADR 0038):
+# worker.py, its operations (ops/), the pure computation (algo/) and the
+# planning templates (prompts/).
+install -m 0644 "$repo"/ai/anas_videocut/*.py "$lib/ai/anas_videocut/"
+install -m 0644 "$repo"/ai/anas_videocut/ops/*.py "$lib/ai/anas_videocut/ops/"
+install -m 0644 "$repo"/ai/anas_videocut/algo/*.py "$lib/ai/anas_videocut/algo/"
+install -m 0644 "$repo"/ai/anas_videocut/prompts/*.md "$lib/ai/anas_videocut/prompts/"
 for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
@@ -169,7 +173,7 @@ install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.
 # the planner fills go beside it.
 install -d "$lib/assistant/managed-plan" "$lib/assistant/montage-prompts"
 derive_plan_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
-install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
+install -m 0644 "$repo"/ai/anas_videocut/prompts/*.md "$lib/assistant/montage-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
 cp -r "$assistant/skills" "$lib/assistant/skills"

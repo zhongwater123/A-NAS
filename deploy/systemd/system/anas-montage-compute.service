@@ -7,13 +7,13 @@ After=anas-montage-compute.socket
 [Service]
 Type=simple
 # Cuts cards, measures their quality and fills the music's slots with the
-# prototype's pure computation (ai/anas_montage). Everything it reads comes
+# prototype's pure computation (ai/anas_videocut). Everything it reads comes
 # in the request, so it has no network and no data volume.
 User=a-nas-montage-compute
 DynamicUser=true
 Environment=PYTHONPATH=/usr/lib/a-nas/ai
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_montage.worker
+ExecStart=/usr/lib/a-nas/ai/runtime/bin/python -m anas_videocut.worker
 UMask=0077
 Restart=on-failure
 RestartSec=2s

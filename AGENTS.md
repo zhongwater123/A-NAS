@@ -32,7 +32,7 @@
 - [deploy/AGENTS.md](deploy/AGENTS.md)：软件包、systemd 单元与设备镜像。
 - [internal/hostops/AGENTS.md](internal/hostops/AGENTS.md)：Host Agent 的 root 一侧，适用于 `.golangci.yml` 中 `host-agent` 规则列出的全部包。
 - [internal/files/AGENTS.md](internal/files/AGENTS.md)：文件服务与文件代理的客户端。[internal/appstore/AGENTS.md](internal/appstore/AGENTS.md)：应用中心与容器代理。
-- [internal/photos/AGENTS.md](internal/photos/AGENTS.md)：相册。[internal/montage/AGENTS.md](internal/montage/AGENTS.md)：剪辑中心（含 `ai/anas_montage`）。
+- [internal/photos/AGENTS.md](internal/photos/AGENTS.md)：相册。[internal/montage/AGENTS.md](internal/montage/AGENTS.md)：剪辑中心（含 `ai/anas_videocut`）。
 - [ai/AGENTS.md](ai/AGENTS.md)：Python 一侧的 AI Worker、评估与依赖锁。[ai/assistant/AGENTS.md](ai/assistant/AGENTS.md)：AI 助手 VNAS。
 
 ## 文档路由

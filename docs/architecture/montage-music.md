@@ -35,7 +35,7 @@
 
 ## 选段
 
-`music` 是剪辑计算 Worker 的一个操作（[`ai/anas_montage/music_ops.py`](../../ai/anas_montage/music_ops.py)），输入 allin1 的结构、响度曲线、目标 90 秒与起点：
+`music` 是剪辑计算 Worker 的一个操作（[`ai/anas_videocut/ops/music.py`](../../ai/anas_videocut/ops/music.py)），输入 allin1 的结构、响度曲线、目标 90 秒与起点：
 
 - **默认选段**：原样调用第八版的 `domain.music.from_structure`。黄金比对：用第八版的 10 个 allin1 结构文件，选段与小节槽和第八版逐个相同，见“验证”。
 - **没找到副歌**：`from_structure` 找不到副歌时，把两小节以上、平均响度最高的段落当作副歌再选，回答 `chorus: false`，配乐页提示“没找到副歌，请试听确认”。
@@ -83,9 +83,9 @@
 
 ## 验证
 
-**选段的黄金比对**（开发机 C，[`ai/eval/montage_music_golden.py`](../../ai/eval/montage_music_golden.py)）：第八版的 10 个 allin1 结构文件，经剪辑服务发出的 JSON 与 float32 响度交给 `op_music`，选段与小节槽和第八版的 `Allin1.music` 逐个相同（10/10）；第八版那次运行留下的 5 个 `music-*.json` 也逐个相同。
+**选段的黄金比对**（开发机 C，[`ai/eval/videocut_music_golden.py`](../../ai/eval/videocut_music_golden.py)）：第八版的 10 个 allin1 结构文件，经剪辑服务发出的 JSON 与 float32 响度交给 `op_music`，选段与小节槽和第八版的 `Allin1.music` 逐个相同（10/10）；第八版那次运行留下的 5 个 `music-*.json` 也逐个相同。
 
-**allin1 与开发机结构文件的对照**（[`ai/eval/montage_music_allin1.py`](../../ai/eval/montage_music_allin1.py)，每首起一个 Worker，经套接字与两条管道交歌，与剪辑服务相同）。本票定的误差范围：
+**allin1 与开发机结构文件的对照**（[`ai/eval/videocut_music_allin1.py`](../../ai/eval/videocut_music_allin1.py)，每首起一个 Worker，经套接字与两条管道交歌，与剪辑服务相同）。本票定的误差范围：
 
 | 项 | 要求 | 理由 |
 |---|---|---|
@@ -158,12 +158,12 @@
   - 选歌、副本与回收、试听、起点：[`internal/montageapi/song.go`](../../internal/montageapi/song.go)、[`internal/montage/songs.go`](../../internal/montage/songs.go)
   - 分析、等待与失败：[`internal/montage/analysis.go`](../../internal/montage/analysis.go)、[`internal/montage/workers.go`](../../internal/montage/workers.go)
   - 任务取选段：[`internal/montage/jobmusic.go`](../../internal/montage/jobmusic.go)
-  - 选段：[`ai/anas_montage/music_ops.py`](../../ai/anas_montage/music_ops.py)、[`ai/anas_montage/domain/music.py`](../../ai/anas_montage/domain/music.py)、[`internal/montagecompute/music.go`](../../internal/montagecompute/music.go)
+  - 选段：[`ai/anas_videocut/ops/music.py`](../../ai/anas_videocut/ops/music.py)、[`ai/anas_videocut/algo/music.py`](../../ai/anas_videocut/algo/music.py)、[`internal/montagecompute/music.go`](../../internal/montagecompute/music.go)
   - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-montage-music.service)
   - 运行环境与打包：[`scripts/build-montage-music-runtime.sh`](../../scripts/build-montage-music-runtime.sh)、[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)、[`scripts/build-packages.sh`](../../scripts/build-packages.sh)
   - 仓库与软件包不含歌曲的检查：[`scripts/check-no-songs.sh`](../../scripts/check-no-songs.sh)
 - 测试：
   - Go：[`internal/montage/songs_test.go`](../../internal/montage/songs_test.go)、[`internal/montage/jobmusic_test.go`](../../internal/montage/jobmusic_test.go)、[`internal/montage/workers_test.go`](../../internal/montage/workers_test.go)、[`internal/montageapi/song_test.go`](../../internal/montageapi/song_test.go)、[`internal/httpapi/montage_song_test.go`](../../internal/httpapi/montage_song_test.go)、[`internal/montagecompute/music_test.go`](../../internal/montagecompute/music_test.go)
-  - Python：[`ai/tests/test_montage_music_ops.py`](../../ai/tests/test_montage_music_ops.py)、[`ai/tests/test_montage_music_worker.py`](../../ai/tests/test_montage_music_worker.py)
-  - 对照：[`ai/eval/montage_music_golden.py`](../../ai/eval/montage_music_golden.py)、[`ai/eval/montage_music_allin1.py`](../../ai/eval/montage_music_allin1.py)
+  - Python：[`ai/tests/test_videocut_music_ops.py`](../../ai/tests/test_videocut_music_ops.py)、[`ai/tests/test_videocut_music_worker.py`](../../ai/tests/test_videocut_music_worker.py)
+  - 对照：[`ai/eval/videocut_music_golden.py`](../../ai/eval/videocut_music_golden.py)、[`ai/eval/videocut_music_allin1.py`](../../ai/eval/videocut_music_allin1.py)
   - 系统测试的选歌一节：[`scripts/system-test.sh`](../../scripts/system-test.sh)
