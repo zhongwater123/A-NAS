@@ -179,4 +179,4 @@
 - 规格与方案：[剪辑中心规格](../specs/montage-center.md)、[剪辑中心技术设计](../architecture/montage-center.md)、[向量索引](../architecture/vector-index.md)
 - 决定记录：[二次编辑起草时选的两项默认做法](../decisions/2026-11-19-montage-edit-defaults.md)
 - ADR：[0038](0038-keep-montage-media-in-the-photo-library.md)、[0028](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
-- 代码：[`internal/montage/render.go`](../../internal/videocut/app/render.go)、[`internal/montage/steps.go`](../../internal/videocut/app/steps.go)、[`ai/anas_videocut/algo/fill.py`](../../ai/anas_videocut/algo/fill.py)、[`web/src/montage/ProjectView.tsx`](../../web/src/videocut/screens/ProjectView.tsx)、[`internal/photos/search.go`](../../internal/photos/search.go)
+- 代码：[`internal/videocut/app/render.go`](../../internal/videocut/app/render.go)、[`internal/videocut/app/steps.go`](../../internal/videocut/app/steps.go)、[`ai/anas_videocut/algo/fill.py`](../../ai/anas_videocut/algo/fill.py)、[`web/src/videocut/screens/ProjectView.tsx`](../../web/src/videocut/screens/ProjectView.tsx)、[`internal/photos/search.go`](../../internal/photos/search.go)
