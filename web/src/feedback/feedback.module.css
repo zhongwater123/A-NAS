@@ -1184,29 +1184,28 @@
   }
 }
 
-/* On a narrow screen the rail is a bar along the bottom; the panel fills the space above it.
-   Windows fill the screen there too, so the button would sit on top of their
-   content: it shows on the home screen only. */
-@media (max-width: 620px), (max-height: 520px) {
-  :global(main):has(:global([data-window-id]:not([hidden]))) .fb-fab {
-    display: none;
-  }
-  .fb-panel {
-    top: 8px;
-    right: 8px;
-    bottom: 74px;
-    left: 8px;
-    width: auto;
-    border-radius: 20px;
-  }
-  .fb-lightbox {
-    padding: 64px 12px;
-  }
-  .fb-lightbox-step {
-    top: auto;
-    bottom: 10px;
-    transform: none;
-  }
+/* In the desktop's phone layout (data-phone on its <main>) the rail is a bar
+   along the bottom; the panel fills the space above it. Windows fill the
+   screen there too, so the button would sit on top of their content: it
+   shows only while no window does (data-window-shown). */
+:global(main[data-phone][data-window-shown]) .fb-fab {
+  display: none;
+}
+:global(main[data-phone]) .fb-panel {
+  top: 8px;
+  right: 8px;
+  bottom: 74px;
+  left: 8px;
+  width: auto;
+  border-radius: 20px;
+}
+:global(main[data-phone]) .fb-lightbox {
+  padding: 64px 12px;
+}
+:global(main[data-phone]) .fb-lightbox-step {
+  top: auto;
+  bottom: 10px;
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

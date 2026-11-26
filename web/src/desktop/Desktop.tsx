@@ -31,6 +31,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
+import { usePhoneLayout } from "../ui/usePhoneLayout";
 import { useWebSearch } from "../websearch/status";
 import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
@@ -141,6 +142,7 @@ export function Desktop({
     },
     [onUserChange],
   );
+  const phone = usePhoneLayout();
   const [windows, dispatch] = useReducer(windowReducer, undefined, () =>
     windowIDs.map((id) => closedWindow(id, apps[id].bounds)),
   );
@@ -308,6 +310,10 @@ export function Desktop({
       {/* oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions */}
       <main
         className={styles.desktopShell}
+        // The phone layout and whether a window covers the desktop, for the
+        // styles of the shell and of what floats over it (feedback).
+        data-phone={phone ? "" : undefined}
+        data-window-shown={windows.some((window) => window.open && !window.minimized) ? "" : undefined}
         style={wallpaperBackground(wallpaper)}
         onPointerDownCapture={pressDesktop}
         onPointerCancelCapture={() => {

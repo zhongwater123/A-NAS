@@ -7,7 +7,7 @@ import { type PageBox, stepAside, withinArea } from "./stepAside";
 /** The companion's hit area in its default place on a 1366×820 page: 90×107 at the bottom right. */
 const hit: PageBox = { left: 1177, top: 627, right: 1267, bottom: 734 };
 const page = { width: 1366, height: 820 };
-const area = floatingArea(page);
+const area = floatingArea(page, false);
 const box = ({ x, y, width, height }: { x: number; y: number; width: number; height: number }): PageBox => ({
   left: x,
   top: y,
@@ -86,10 +86,11 @@ describe("where the companion steps aside to", () => {
     expect(stepAside(hit, window, area)).toEqual({ x: 1366 - 8 - 90, y: 820 - 8 - 107 });
   });
 
-  it("finds the gap beside a window on a narrow page, above the rail along its bottom", () => {
-    // On a 400×800 page a window spans 8 to 104 short of the right edge (desktop.module.css).
-    const narrow = floatingArea({ width: 400, height: 800 });
+  it("finds the gap beside a window in the phone layout, above the rail along its bottom", () => {
+    const narrow = floatingArea({ width: 400, height: 800 }, true);
     expect(narrow.bottom).toBe(800 - 75);
+    // A phone on its side has the rail along the bottom too, however wide it is.
+    expect(floatingArea({ width: 915, height: 340 }, true)).toEqual({ left: 8, top: 8, right: 907, bottom: 340 - 75 });
     const window = { left: 8, top: 8, right: 296, bottom: 725 };
     const to = stepAside({ left: 200, top: 600, right: 290, bottom: 707 }, window, narrow);
     expect(to).toEqual({ x: 400 - 8 - 90, y: 725 - 107 });
