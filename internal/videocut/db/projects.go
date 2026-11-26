@@ -189,20 +189,7 @@ func (d *DB) ProjectGrantAndJobAssets(ctx context.Context, projectID, jobID stri
 
 // ProjectOwners are the members who have projects.
 func (d *DB) ProjectOwners(ctx context.Context) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT DISTINCT owner_user_id FROM projects")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var owners []string
-	for rows.Next() {
-		var owner string
-		if err := rows.Scan(&owner); err != nil {
-			return nil, err
-		}
-		owners = append(owners, owner)
-	}
-	return owners, rows.Err()
+	return column[string](ctx, d.db, "SELECT DISTINCT owner_user_id FROM projects")
 }
 
 // SetProjectGrant records grantID as projectID's grant.

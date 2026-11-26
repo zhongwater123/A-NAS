@@ -3,7 +3,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -83,25 +82,9 @@ func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string,
 // the members with a job that keeps their marker (keepsMarker, with
 // waitVNAS).
 func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSince time.Time) (map[string]bool, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
+	return set(column[string](ctx, d.db, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
 		WHERE `+keepsMarker(waitVNAS)+` AND g.registered_at >= ?`,
-		sqlitedb.FormatTime(registeredSince))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	wanted := map[string]bool{}
-	for rows.Next() {
-		var username string
-		if err := rows.Scan(&username); err != nil {
-			return nil, err
-		}
-		wanted[username] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return wanted, nil
+		sqlitedb.FormatTime(registeredSince)))
 }
 
 // ClaimableJob is owner's earliest job a round may be claimed for
@@ -404,17 +387,16 @@ func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Tim
 	return state, err
 }
 
-// Requeue puts owner's jobID back in the queue, due at notBefore and
-// changed at updated, when it is in one of states and not being
+// Requeue puts owner's jobID back in the queue, due and changed at at,
+// when it is in one of states and not being
 // cancelled; false when it is not (or that is unknown).
-func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, notBefore, updated time.Time, states ...string) (bool, error) {
-	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
-	args := []any{sqlitedb.FormatTime(notBefore), sqlitedb.FormatTime(updated), jobID, owner}
+func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, at time.Time, states ...string) (bool, error) {
+	args := []any{sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID, owner}
 	for _, state := range states {
 		args = append(args, state)
 	}
 	result, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', attempts = 0, not_before = ?, updated_at = ?, finished_at = NULL,
-		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+marks+")", args...)
+		wait_reason = '', error_class = '', error = '', missing_json = NULL, plan_wanted = 0 WHERE id = ? AND owner_user_id = ? AND cancel_requested = 0 AND state IN (`+sqlitedb.Placeholders(len(states))+")", args...)
 	if err != nil {
 		return false, err
 	}
@@ -464,27 +446,10 @@ func (d *DB) Notices(ctx context.Context, owner, waitVNAS string, since time.Tim
 
 // ProjectJobIDs are the jobs of projectID.
 func (tx *Tx) ProjectJobIDs(ctx context.Context, projectID string) ([]string, error) {
-	return jobIDs(ctx, tx.tx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
+	return column[string](ctx, tx.tx, "SELECT id FROM jobs WHERE project_id = ?", projectID)
 }
 
 // OwnerJobIDs are the jobs of owner.
 func (tx *Tx) OwnerJobIDs(ctx context.Context, owner string) ([]string, error) {
-	return jobIDs(ctx, tx.tx, "SELECT id FROM jobs WHERE owner_user_id = ?", owner)
-}
-
-func jobIDs(ctx context.Context, q queryer, query, id string) ([]string, error) {
-	rows, err := q.QueryContext(ctx, query, id)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+	return column[string](ctx, tx.tx, "SELECT id FROM jobs WHERE owner_user_id = ?", owner)
 }

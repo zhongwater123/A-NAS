@@ -358,7 +358,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 // queue. It no longer wants a round: a round is claimed only for a job that
 // came to planning and waits there (awaitPlan).
 func (s *Store) resume(ctx context.Context, tx *db.Tx, owner, jobID string, states ...string) error {
-	requeued, err := tx.Requeue(ctx, owner, jobID, s.now(), s.now(), states...)
+	requeued, err := tx.Requeue(ctx, owner, jobID, s.now(), states...)
 	if err != nil {
 		return err
 	}

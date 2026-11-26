@@ -25,39 +25,13 @@ func (d *DB) HeldAssets(ctx context.Context, projectID string, ids []string) (ma
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	rows, err := d.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? AND asset_id IN ("+
-		sqlitedb.Placeholders(len(ids))+")", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	held := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		held[id] = true
-	}
-	return held, rows.Err()
+	return set(column[string](ctx, d.db, "SELECT asset_id FROM project_assets WHERE project_id = ? AND asset_id IN ("+
+		sqlitedb.Placeholders(len(ids))+")", args...))
 }
 
 // ProjectAssetIDs are projectID's videos in the order they were added.
 func (d *DB) ProjectAssetIDs(ctx context.Context, projectID string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT asset_id FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var all []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		all = append(all, id)
-	}
-	return all, rows.Err()
+	return column[string](ctx, d.db, "SELECT asset_id FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
 }
 
 // ProjectAssetRow is a video a project holds: the content it was added

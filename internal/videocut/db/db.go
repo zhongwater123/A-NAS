@@ -60,6 +60,37 @@ type queryer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// column is the values of the one column query selects, in the order it
+// gives them.
+func column[T any](ctx context.Context, q queryer, query string, args ...any) ([]T, error) {
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var values []T
+	for rows.Next() {
+		var value T
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+// set is the values of column as a set.
+func set[T comparable](values []T, err error) (map[T]bool, error) {
+	if err != nil {
+		return nil, err
+	}
+	present := make(map[T]bool, len(values))
+	for _, value := range values {
+		present[value] = true
+	}
+	return present, nil
+}
+
 // Update runs apply in one transaction and commits it when apply returns
 // nil; otherwise nothing apply wrote stays.
 func (d *DB) Update(ctx context.Context, apply func(*Tx) error) error {

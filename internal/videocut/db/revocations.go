@@ -35,18 +35,5 @@ func (d *DB) DeleteRevocation(ctx context.Context, grantID string) error {
 // DueRevocations lists the grants whose revocation is due at now, the
 // longest due first.
 func (d *DB) DueRevocations(ctx context.Context, now time.Time) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT grant_id FROM revocations WHERE next_try <= ? ORDER BY next_try", sqlitedb.FormatTime(now))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var due []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		due = append(due, id)
-	}
-	return due, rows.Err()
+	return column[string](ctx, d.db, "SELECT grant_id FROM revocations WHERE next_try <= ? ORDER BY next_try", sqlitedb.FormatTime(now))
 }

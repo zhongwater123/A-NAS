@@ -138,20 +138,7 @@ func (tx *Tx) AddVersion(ctx context.Context, id, projectID string, number int, 
 
 // SavedPlans are jobID's 方案 whose films are saved.
 func (d *DB) SavedPlans(ctx context.Context, jobID string) (map[int]bool, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	saved := map[int]bool{}
-	for rows.Next() {
-		var plan int
-		if err := rows.Scan(&plan); err != nil {
-			return nil, err
-		}
-		saved[plan] = true
-	}
-	return saved, rows.Err()
+	return set(column[int](ctx, d.db, "SELECT plan FROM versions WHERE job_id = ?", jobID))
 }
 
 // NextUnsavedPlan is the 方案 after jobID's saved ones: one more than

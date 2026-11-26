@@ -56,23 +56,7 @@ func (d *DB) JobAssets(ctx context.Context, jobID string) ([]JobAsset, error) {
 
 // JobAssetIDs are jobID's videos, by asset id.
 func (d *DB) JobAssetIDs(ctx context.Context, jobID string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT asset_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var assets []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		assets = append(assets, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return assets, nil
+	return column[string](ctx, d.db, "SELECT asset_id FROM job_assets WHERE job_id = ? ORDER BY asset_id", jobID)
 }
 
 // JobAssetObjects is the content jobID took of each of its videos.
