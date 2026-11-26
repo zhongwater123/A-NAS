@@ -34,7 +34,7 @@ const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
-const MontagePanel = lazyCode(() => import("../montage/MontagePanel").then((module) => module.MontagePanel));
+const VideoCutPanel = lazyCode(() => import("../videocut/VideoCutPanel").then((module) => module.VideoCutPanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
@@ -366,7 +366,7 @@ const definitions = {
       keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
       visible: ({ montage }) => montage,
     },
-    render: ({ session }) => <MontagePanel userId={session.user.id} />,
+    render: ({ session }) => <VideoCutPanel userId={session.user.id} />,
   },
   workspace: {
     title: "共享工作区",

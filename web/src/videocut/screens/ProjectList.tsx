@@ -1,14 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronRight, Clapperboard, Plus } from "lucide-react";
 
-import { thumbnailURL } from "../photos/api";
-import { Spinner } from "../ui/workspace";
-import { Failed } from "./Failed";
+import { thumbnailURL } from "../../photos/api";
+import { Spinner } from "../../ui/workspace";
+import { projectQuery, projectsQuery, songQuery } from "../app/queries";
+import { useShown } from "../app/shown";
+import { Failed } from "../ui/Failed";
 import { HeroReel } from "./HeroReel";
-import styles from "./montage.module.css";
 import { Films, Go } from "./ProjectView";
-import { projectQuery, projectsQuery, songQuery } from "./queries";
-import { useShown } from "./shown";
+import styles from "./videocut.module.css";
 
 const day = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" });
 

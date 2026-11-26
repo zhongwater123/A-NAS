@@ -2,16 +2,16 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UploadItem } from "../photos/uploads";
-import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
-import { sizedScrollers } from "../test/layout";
-import { apiError, http, server } from "../test/server";
-import { MontagePanel } from "./MontagePanel";
+import type { UploadItem } from "../../photos/uploads";
+import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../../test/handlers/photos";
+import { sizedScrollers } from "../../test/layout";
+import { apiError, http, server } from "../../test/server";
+import { VideoCutPanel } from "../VideoCutPanel";
 
 // The photo library's upload queue, as each test leaves it: what it holds
 // and what was handed to it.
 const queue = vi.hoisted(() => ({ items: [] as unknown[], added: [] as string[][] }));
-vi.mock("../photos/uploads", () => ({
+vi.mock("../../photos/uploads", () => ({
   useUploads: () => ({
     items: queue.items,
     add: (files: File[]) => queue.added.push(files.map((file) => file.name)),
@@ -53,7 +53,7 @@ function serve(seen: Seen, options: Parameters<typeof photosHandlers>[0] = {}) {
 }
 
 async function openNew() {
-  render(<MontagePanel userId="user:alice" />);
+  render(<VideoCutPanel userId="user:alice" />);
   await userEvent.click(await screen.findByRole("button", { name: "新建项目" }));
   return screen.findByRole("region", { name: "新建剪辑项目" });
 }
@@ -88,13 +88,13 @@ describe("剪辑中心：新建项目", () => {
   it("waits for the uploads still on their way, and leaves out a MOV that completed a Live Photo", async () => {
     serve({});
     queue.items = [upload("a.mov", "done", { assetId: "photo:a" }), upload("b.mov", "uploading", { progress: 0.4 })];
-    const { rerender } = render(<MontagePanel userId="user:alice" />);
+    const { rerender } = render(<VideoCutPanel userId="user:alice" />);
     await userEvent.click(await screen.findByRole("button", { name: "新建项目" }));
     await screen.findByRole("region", { name: "新建剪辑项目" });
     expect(screen.queryByRole("button", { name: /新建项目（/ })).not.toBeInTheDocument();
     // The second became no video of its own: it completed a Live Photo.
     queue.items = [upload("a.mov", "done", { assetId: "photo:a" }), upload("b.mov", "done")];
-    rerender(<MontagePanel userId="user:alice" />);
+    rerender(<VideoCutPanel userId="user:alice" />);
     expect(await screen.findByRole("button", { name: "新建项目（1 段）" })).toBeInTheDocument();
     expect(screen.getByText("1 个 MOV 补进了图库里的实况照片，没有加入项目")).toBeInTheDocument();
   });

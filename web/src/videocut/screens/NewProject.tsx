@@ -2,15 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Images, Upload, Video } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
-import { listPhotoLibraries, type PhotoAsset, type PhotoLibrary } from "../photos/api";
-import { type Caller, libraryName, ownLibrary } from "../photos/model";
-import { PhotoPicker } from "../photos/PhotoPicker";
-import { isVideoFile } from "../photos/uploadGroups";
-import { type UploadItem, useUploads } from "../photos/uploads";
-import { Spinner } from "../ui/workspace";
-import { addAssets, createProject } from "./api";
-import styles from "./montage.module.css";
+import { errorText } from "../../api/errorMessages";
+import { listPhotoLibraries, type PhotoAsset, type PhotoLibrary } from "../../photos/api";
+import { type Caller, libraryName, ownLibrary } from "../../photos/model";
+import { PhotoPicker } from "../../photos/PhotoPicker";
+import { isVideoFile } from "../../photos/uploadGroups";
+import { type UploadItem, useUploads } from "../../photos/uploads";
+import { Spinner } from "../../ui/workspace";
+import { addAssets, createProject } from "../api/client";
+import styles from "./videocut.module.css";
 
 const states: Record<UploadItem["state"], string> = {
   waiting: "排队中",

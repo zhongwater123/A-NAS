@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export { useWindowShown } from "../ui/useWindowShown";
+export { useWindowShown } from "../../ui/useWindowShown";
 
 // Whether the 剪辑中心 window can be seen (ui/useWindowShown): what polls
 // reads this and stops while the window is minimized.

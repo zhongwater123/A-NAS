@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { asset } from "../test/handlers/photos";
 import { apiError, http, server } from "../test/server";
-import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api";
-import { MontagePanel } from "./MontagePanel";
-import { excerptAudio } from "./SongPage";
+import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api/client";
+import { excerptAudio } from "./screens/SongPage";
+import { VideoCutPanel } from "./VideoCutPanel";
 
 const steps = [
   "analysis",
@@ -175,7 +175,7 @@ function serve(
 }
 
 async function openProject() {
-  render(<MontagePanel userId="user:alice" />);
+  render(<VideoCutPanel userId="user:alice" />);
   // The window opens on the member's projects; the arrow opens one.
   await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
   return screen.findByRole("main", { name: "2026-08-02 至 08-04" });
@@ -428,7 +428,7 @@ describe("剪辑中心", () => {
       () => failed,
       fresh(),
     );
-    const first = render(<MontagePanel userId="user:alice" />);
+    const first = render(<VideoCutPanel userId="user:alice" />);
     await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
     const progress = await screen.findByRole("status", { name: "生成进度" });
     expect(within(progress).getByText("没有剪成")).toBeInTheDocument();
@@ -482,7 +482,7 @@ describe("剪辑中心", () => {
     frame.setAttribute(WINDOW_ID, "montage");
     document.body.append(frame);
     try {
-      render(<MontagePanel userId="user:alice" />, { container: frame });
+      render(<VideoCutPanel userId="user:alice" />, { container: frame });
       await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
       await waitFor(() => expect(seen.polled).toBeGreaterThan(0), { timeout: 4000 });
       frame.hidden = true;
@@ -713,7 +713,7 @@ describe("剪辑中心", () => {
           : response(200).json(project()),
       ),
     );
-    render(<MontagePanel userId="user:alice" />);
+    render(<VideoCutPanel userId="user:alice" />);
     await userEvent.click(await screen.findByRole("button", { name: "打开 2026-08-02 至 08-04" }));
     const failed = await screen.findByRole("alert", {}, { timeout: 4000 });
     down = false;
@@ -750,7 +750,7 @@ describe("剪辑中心", () => {
         return response(200).json({ mode: "direct", duration: 30 });
       }),
     );
-    const first = render(<MontagePanel userId="user:alice" />);
+    const first = render(<VideoCutPanel userId="user:alice" />);
     await screen.findByRole("button", { name: "选中 2026-08-02 至 08-04" });
     // No film of the device's: no player at all.
     await waitFor(() => expect(first.container.querySelector("video")).toBeNull());
@@ -768,7 +768,7 @@ describe("剪辑中心", () => {
         });
       }),
     );
-    const second = render(<MontagePanel userId="user:alice" />);
+    const second = render(<VideoCutPanel userId="user:alice" />);
     await waitFor(() => expect(second.container.querySelector('video[src^="/api/v1/montage/hero"]')).not.toBeNull());
     expect(asked).toBe("bytes=0-0");
     expect(second.container.querySelectorAll("video")).toHaveLength(1);
@@ -784,7 +784,7 @@ describe("剪辑中心", () => {
     );
     // Plain LAN HTTP has no crypto.randomUUID: the request key does not need it.
     vi.stubGlobal("crypto", { getRandomValues: crypto.getRandomValues.bind(crypto) });
-    render(<MontagePanel userId="user:alice" />);
+    render(<VideoCutPanel userId="user:alice" />);
     // The newest project is selected; a click unselects it, another selects it again.
     const row = await screen.findByRole("button", { name: "选中 2026-08-02 至 08-04" });
     expect(row).toHaveAttribute("aria-pressed", "true");

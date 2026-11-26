@@ -2,7 +2,7 @@
 // 204 while ANAS_MONTAGE_ENABLED is on and 404 while it is off. The Product
 // Service answers it alone, without asking the montage service. The desktop
 // imports this file eagerly, so it stays small.
-import { client } from "../api/client";
+import { client } from "../../api/client";
 
 export async function montageEnabled(signal?: AbortSignal): Promise<boolean> {
   const { response } = await client.GET("/api/v1/montage", { signal });

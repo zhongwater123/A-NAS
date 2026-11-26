@@ -1,5 +1,5 @@
-import { APIError } from "../api/client";
-import { getProject, getSong, listProjects, type MontageSong } from "./api";
+import { APIError } from "../../api/client";
+import { getProject, getSong, listProjects, type MontageSong } from "../api/client";
 
 // The queries the window's pages share: the projects, one project, and its
 // song (null before one is chosen).
