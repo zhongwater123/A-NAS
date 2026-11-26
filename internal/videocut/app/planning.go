@@ -17,7 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// Planning by the member's own VNAS (docs/architecture/montage-planning-session.md):
+// Planning by the member's own VNAS (docs/architecture/videocut-planning-session.md):
 // a job that comes to planning waits for VNAS and leaves a marker,
 // /run/a-nas-videocut/plans/<account>; root's planner claims a round here,
 // holds it as one conversation with the member's planning instance, and
@@ -76,7 +76,7 @@ const (
 	maxPlanRounds = 3
 	// After a round VNAS could not be reached for, the next waits 2, 4, 8
 	// minutes, at most unreachableWaitMost; after one tried, errorWait
-	// (docs/architecture/montage-planning-session.md, 重试).
+	// (docs/architecture/videocut-planning-session.md, 重试).
 	unreachableWaitFirst = 2 * time.Minute
 	unreachableWaitMost  = 15 * time.Minute
 	errorWait            = time.Minute
@@ -104,7 +104,7 @@ const (
 	RoundAbandoned = "abandoned"
 )
 
-// The details a job waiting for VNAS shows (docs/specs/montage-center.md):
+// The details a job waiting for VNAS shows (docs/specs/videocut-center.md):
 // what it waits for and, when it waits to try again, when that is.
 const (
 	DetailVNASOff   = "VNAS 没有开启"

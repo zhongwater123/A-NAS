@@ -44,7 +44,7 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 	if !selection.Chorus || selection.Unusable != "" || selection.Seconds < 30 || selection.Seconds > 150 || len(selection.Parts) == 0 {
 		t.Fatalf("selection = %+v", selection)
 	}
-	start := 21.0 // Equidistant downbeats snap to the earlier one, as in montage.nearest.
+	start := 21.0 // Equidistant downbeats snap to the earlier one, as in app.SongStart.
 	dragged, err := client.Music(ctx, videocutcompute.MusicRequest{Structure: structure, Loudness: loudness, Target: 90, Start: &start})
 	if err != nil || dragged.Excerpt != [2]float64{20, 110} || dragged.Seconds != 90 {
 		t.Fatalf("dragged = %+v, %v", dragged, err)

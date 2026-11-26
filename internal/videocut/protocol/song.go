@@ -37,7 +37,7 @@ type Tracks interface {
 }
 
 // CopySong serves PUT /projects/{id}/song in the Product Service
-// (docs/specs/montage-center.md, 配乐): it opens the track the member names
+// (docs/specs/videocut-center.md, 配乐): it opens the track the member names
 // through the File Broker as the member, the way the music library plays it,
 // and streams it to VideoCut, next, with what it knows of the
 // track. Another member's track is not_found, as a missing one.

@@ -1,4 +1,4 @@
-"""The layers of ai/anas_videocut (docs/architecture/montage-center.md, #639):
+"""The layers of ai/anas_videocut (docs/architecture/videocut-center.md, #639):
 algo/ is pure computation and imports only the standard library, NumPy and
 algo/ itself, so it behaves the same on the development machine and the NAS;
 ops/ composes algo/ into one operation and does not import worker.py, which

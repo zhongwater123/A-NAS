@@ -20,7 +20,7 @@ Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
 # Members' planning instances plan with VNAS through a socket systemd holds
 # (anas-videocut-assistant.socket), which root's planner also claims rounds on;
 # the planner reads who has a job to plan from the markers in
-# /run/a-nas-videocut/plans (docs/architecture/montage-planning-session.md).
+# /run/a-nas-videocut/plans (docs/architecture/videocut-planning-session.md).
 Sockets=anas-videocut-assistant.socket
 RuntimeDirectory=a-nas-videocut
 RuntimeDirectoryMode=0750

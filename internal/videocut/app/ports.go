@@ -19,7 +19,7 @@ import (
 
 // Markers are the planning markers: one per member whose job wants a round
 // of planning, which the planner's waker reads
-// (docs/architecture/montage-planning-session.md).
+// (docs/architecture/videocut-planning-session.md).
 type Markers interface {
 	// Leave leaves username's marker.
 	Leave(username string) error

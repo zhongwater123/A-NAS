@@ -1,6 +1,6 @@
 // Package domain holds VideoCut's data types, the rules of its
 // draft operations and the errors every layer shares. It does no input or
-// output and imports no other layer (docs/architecture/montage-center.md,
+// output and imports no other layer (docs/architecture/videocut-center.md,
 // 代码结构).
 package domain
 
@@ -19,7 +19,7 @@ var (
 	ErrNotEditable = errors.New("the version cannot be edited")
 	// ErrAnalysisChanged: the photo library analysed the version's videos
 	// again with another model since the version was cut. The version can
-	// only be played, or recut (docs/architecture/montage-center.md, 出片后的二次编辑:
+	// only be played, or recut (docs/architecture/videocut-center.md, 出片后的二次编辑:
 	// 修改稿).
 	ErrAnalysisChanged = errors.New("the videos were analysed again with another model")
 	// ErrSearchUnavailable: the photo library cannot search windows now.
@@ -58,7 +58,7 @@ var (
 	// again is the member's call (FixedPlanner).
 	ErrPlanInvalid = errors.New("the plan failed its checks")
 	// ErrPlanFailed: the planning was tried as many rounds as a job's is
-	// and none finished it; the job fails (docs/architecture/montage-planning-session.md, 重试).
+	// and none finished it; the job fails (docs/architecture/videocut-planning-session.md, 重试).
 	ErrPlanFailed = errors.New("the planning failed")
 )
 

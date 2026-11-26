@@ -133,13 +133,13 @@ func (h *productHandler) mounts() []apiroute.Route {
 	if h.VideoCut != nil {
 		mount(protocol.PathPrefix, apiroute.Session, withUser(h.VideoCut), protocol.ProductEndpoints())
 		// The requests that may lead to planning register a planning grant
-		// first (docs/architecture/montage-center.md, 规划授权).
+		// first (docs/architecture/videocut-center.md, 规划授权).
 		for _, endpoint := range protocol.PlanningRoutes {
 			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
 				Handler: protocol.RegisterPlan(h.PlanGrants, h.VideoCut, h.Logger)})
 		}
 		// Choosing a song copies it from the member's music library here
-		// first (docs/specs/montage-center.md, 配乐).
+		// first (docs/specs/videocut-center.md, 配乐).
 		var tracks protocol.Tracks
 		if h.Music != nil {
 			tracks = h.Music

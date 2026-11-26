@@ -1,4 +1,4 @@
-"""The compute Worker's music operation (docs/architecture/montage-center.md, 配乐).
+"""The compute Worker's music operation (docs/architecture/videocut-center.md, 配乐).
 
 VideoCut asks for a song's excerpt once allin1 has found its
 structure, and again when the member drags its start. The answer is the
@@ -33,7 +33,7 @@ from ..algo import music
 
 # The eighth version's RMS curve: a value every HOP samples at RATE.
 HOP, RATE = 512, 22050
-# docs/specs/montage-center.md, 配乐: when a song cannot be used.
+# docs/specs/videocut-center.md, 配乐: when a song cannot be used.
 MIN_BARS = 16
 EXCERPT = (30.0, 150.0)
 LONGEST_SLOT = 12.0

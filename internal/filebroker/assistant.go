@@ -81,10 +81,10 @@ func (c *Client) RunAssistantTask(ctx context.Context, task string) error {
 }
 
 // RegisterAssistantPlan registers a planning grant for the member signed in
-// on the context's session (docs/architecture/montage-center.md, 规划授权):
+// on the context's session (docs/architecture/videocut-center.md, 规划授权):
 // for seven days, root's planner may hand up to five rounds of the montage
 // center's planning to their planning instance
-// (docs/architecture/montage-planning-session.md). It answers wire.PlanRegistered, or why there is no
+// (docs/architecture/videocut-planning-session.md). It answers wire.PlanRegistered, or why there is no
 // VNAS to plan with; an error is a failure to register, worth trying later.
 func (c *Client) RegisterAssistantPlan(ctx context.Context) (string, error) {
 	response, file, err := c.call(ctx, wire.Request{Op: wire.OpAssistantPlan})

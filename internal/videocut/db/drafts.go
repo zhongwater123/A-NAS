@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of drafts and their revisions (#596; docs/
-// architecture/montage-center.md, 出片后的二次编辑).
+// architecture/videocut-center.md, 出片后的二次编辑).
 
 // DraftID is the id of owner's draft of versionID; sql.ErrNoRows when
 // there is none.

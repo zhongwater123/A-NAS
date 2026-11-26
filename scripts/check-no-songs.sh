@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that neither the repository nor the packages built into PACKAGES
-# hold any music (docs/specs/montage-center.md, 配乐): the songs VideoCut
+# hold any music (docs/specs/videocut-center.md, 配乐): the songs VideoCut
 # is tested with are commercial recordings that stay on the
 # development machine and on the Experimental NAS. file(1) identifies media
 # containers by content; ffprobe distinguishes songs (possibly with cover

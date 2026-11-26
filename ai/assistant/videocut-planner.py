@@ -1,4 +1,4 @@
-"""Hands VideoCut's planning to members' VNAS (docs/architecture/montage-planning-session.md).
+"""Hands VideoCut's planning to members' VNAS (docs/architecture/videocut-planning-session.md).
 
 anas-videocut-planner.service runs this as root with the Hermes runtime's Python, which has websockets. Every
 INTERVAL seconds it gives one member with a job waiting for a plan a round, one round on the whole device at a time:

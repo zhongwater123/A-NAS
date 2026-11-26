@@ -10,7 +10,7 @@ import (
 )
 
 // The reads and writes of projects: each member's projects, their grant,
-// settings, song and chosen film (docs/architecture/montage-center.md).
+// settings, song and chosen film (docs/architecture/videocut-center.md).
 
 // ProjectRow is a project as kept.
 type ProjectRow struct {

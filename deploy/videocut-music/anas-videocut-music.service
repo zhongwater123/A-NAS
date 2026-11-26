@@ -7,7 +7,7 @@ After=anas-videocut-music.socket
 [Service]
 Type=simple
 # Finds a song's beats, downbeats and sections with allin1 for VideoCut
-# (docs/architecture/montage-music.md). The song arrives as two
+# (docs/architecture/videocut-music.md). The song arrives as two
 # streams of samples the VideoCut service decodes with the media worker; the
 # Worker has no network and no data volume, so a song cannot leave the device
 # through it. Its runtime and models are content packages of their own,
@@ -49,7 +49,7 @@ SystemCallArchitectures=native
 # Background work under anas.slice, which gives way to everything else on the
 # device. An 8-minute song, the longest VideoCut takes (the user,
 # 2026-11-18), peaked at 4,593 MiB in a Debian 13 runtime like the NAS's; the
-# limit leaves a fifth more (docs/architecture/montage-music.md, 用时与内存).
+# limit leaves a fifth more (docs/architecture/videocut-music.md, 用时与内存).
 # A song that needs more ends this Worker, not the device's other services.
 Slice=anas.slice
 MemoryMax=5632M

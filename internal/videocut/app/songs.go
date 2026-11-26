@@ -24,7 +24,7 @@ import (
 )
 
 // A member picks a song for a project from the music library while the
-// session is there (docs/specs/montage-center.md, 配乐): the Product Service
+// session is there (docs/specs/videocut-center.md, 配乐): the Product Service
 // opens the file as the member, the way the music library plays it, and
 // streams it here. VideoCut keeps its own copy, named by its
 // content, so that the member may change or delete the original afterwards;
@@ -33,7 +33,7 @@ import (
 // Worker's music operation picks the excerpt and its slots from them
 // (MusicComputer).
 
-// Limits of a song (docs/specs/montage-center.md, 本稿补充的默认规则).
+// Limits of a song (docs/specs/videocut-center.md, 本稿补充的默认规则).
 const (
 	MaxSongBytes   = 100 << 20
 	MinSongSeconds = 30.0
@@ -60,7 +60,7 @@ const (
 	SongUnusable  = "unusable"
 )
 
-// Why a song cannot be used (docs/specs/montage-center.md, 配乐). The
+// Why a song cannot be used (docs/specs/videocut-center.md, 配乐). The
 // compute Worker's music operation reports the last three.
 const (
 	// UnusableUndecodable: FFmpeg cannot decode it, or allin1 refuses the

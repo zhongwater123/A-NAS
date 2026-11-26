@@ -1,7 +1,7 @@
 """Golden comparison of the compute Worker's music operation with the eighth version (development machine only).
 
 The ten test songs and the eighth version's allin1 structure files stay out
-of the repository (docs/architecture/montage-center.md, 配乐). Point
+of the repository (docs/architecture/videocut-center.md, 配乐). Point
 ANAS_VIDEOCUT_SAMPLES at the folder that holds 剪辑对比/ (on development
 machine C, ~/A-NAS-datasets) and ANAS_VIDEOCUT_SONGS at the songs (~/Music/QQ音乐),
 and run, with NumPy and FFmpeg:

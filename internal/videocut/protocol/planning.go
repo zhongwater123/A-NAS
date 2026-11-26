@@ -13,7 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
-// A planning grant (docs/architecture/montage-center.md, 规划授权): the
+// A planning grant (docs/architecture/videocut-center.md, 规划授权): the
 // requests that may lead to planning register one for the member, behind
 // their session, before the Product Service forwards them; VideoCut
 // is told by AssistantHeader whether VNAS can plan.

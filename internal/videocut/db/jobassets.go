@@ -4,7 +4,7 @@ import "context"
 
 // The reads and writes of job_assets: the videos a job makes its films
 // from, each with the content it had when the job took it
-// (docs/architecture/montage-center.md).
+// (docs/architecture/videocut-center.md).
 
 // JobAsset is one of a job's videos and the content the job took.
 type JobAsset struct{ AssetID, ObjectID string }

@@ -1,10 +1,10 @@
 # 剪辑中心首版实施方案
 
-状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](montage-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来）
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](videocut-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来）
 更新时间：2026-11-26
 
 相关文档：
-- 产品行为与验收以[剪辑中心规格](../specs/montage-center.md)为准；
+- 产品行为与验收以[剪辑中心规格](../specs/videocut-center.md)为准；
 - 服务身份、项目授权与数据归属见 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；出片后的二次编辑见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)；
 - 用户定下的事见[决定记录](../decisions/2026-11-17-montage-center-first-version.md)，本方案补充的默认做法见[另一份决定记录](../decisions/2026-11-17-montage-center-default-rules.md)；
 - 需求来源 [#514](https://github.com/zhongwater123/A-NAS/issues/514)。
@@ -72,7 +72,7 @@ anas-api ──转发 /api/v1/videocut──▶ anas-videocut：项目、规划�
      │
      ▼
 Hermes 规划进程（成员的 VNAS，同一个沙箱与主目录，只有剪辑、记忆、技能工具）
-  ⑥ 经剪辑的助手套接字调 montage MCP 工具，回到 anas-videocut：读目录、交大纲、交镜头
+  ⑥ 经剪辑的助手套接字调 videocut MCP 工具，回到 anas-videocut：读目录、交大纲、交镜头
 anas-photos
   ├─ 剪辑分析（只为请求过的视频）：窗口向量 → 卡片 → 画质 → 描述
   │    用 FFmpeg Worker、剪辑计算 Worker、AI Worker，受相册的 AI 准入约束
@@ -90,7 +90,7 @@ anas-photos
   5. 填槽与校验；
   6. 渲染；
   7. 存回相册。
-- **规划**：任务走到规划时，NAS 在后台发起，成员不用开着桌面。root 的规划发起方核对成员点“开始”时登记的规划授权，在成员的规划进程里开一次对话（[规划会话](montage-planning-session.md)）。VNAS 调 montage MCP 工具读卡片目录，交回两步规划；剪辑中心按 Schema 和剪辑规则校验后才收下。
+- **规划**：任务走到规划时，NAS 在后台发起，成员不用开着桌面。root 的规划发起方核对成员点“开始”时登记的规划授权，在成员的规划进程里开一次对话（[规划会话](videocut-planning-session.md)）。VNAS 调 videocut MCP 工具读卡片目录，交回两步规划；剪辑中心按 Schema 和剪辑规则校验后才收下。
 - **成片**：渲染结果经授权存进成员的个人图库，播放、下载都是相册里的普通视频。剪辑中心只记下“哪个版本对应哪个相册资产”。
 
 **主要的失败行为**
@@ -184,7 +184,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
   - 资源：`MemoryMax=512M`、`CPUWeight=20`、`IOWeight=20`。重计算都在 Worker 和相册里，服务本身只管状态。
 - **入口**：anas-api 用 `mount("/api/v1/videocut", apiroute.Session, ...)` 把请求转到 `/run/a-nas-videocut/videocut.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-videocut-sessions/videocut.sock`，确认来人是谁。
 - **开关**：环境变量 `ANAS_VIDEOCUT_ENABLED`，M10 之前默认关闭。关闭时产品服务不挂载 `/api/v1/videocut`，桌面不显示入口。网页入口只是外观，隐藏它挡不住接口，所以开关放在服务端；先例是 `ANAS_PHOTO_ASSISTANT_LOOKUP`。
-- **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-videocut`，每 15 分钟修复一次漂移。
+- **存储**：Host Agent 建 `videocut/` 子卷，权限 0700，属主 `a-nas-videocut`，每 15 分钟修复一次漂移。
   - 数据卷离线或只读时，整个服务回答 503 `videocut_unavailable`，不在系统盘建替代目录。
   - 容量不足只拒绝写入，不让整个服务不可用（[不变量 12](OVERVIEW.md#不变量)）：渲染写 `tmp/` 前用 `capacity.Admits` 按预计大小检查，存回时相册照常检查；不够时任务进入 `needs_input(storage_full)`，腾出空间后重试。已有项目与成片照常可看。
 - **剪辑计算 Worker**：`anas-videocut-compute.socket` 加 `anas-videocut-compute.service`。
@@ -238,7 +238,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 子卷里的文件：
 ```text
-montage/
+videocut/
   videocut.db
   songs/<sha256>/audio      （成员选歌时复制的一份，见“配乐”）
   tmp/<job-id>/             （渲染中间文件与待存回的成片，按任务分目录）
@@ -529,7 +529,7 @@ montage/
 **待议：商业版权**：用户要求把 allin1 的商业版权记为待议点。各组成的许可与要议的问题见[决定记录](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)；要点是 madmom 的模型文件为 CC BY-NC-SA 4.0，以及 allin1 与 Demucs 权重的训练数据。待议期间 allin1 只在开发机与实验 NAS 上运行；M10 打开开关之前要有结论。结论是不能随产品分发时，退回配乐探针测过的做法（[配乐研究](https://github.com/zhongwater123/A-NAS/pull/546)）：节拍与重拍用 beat_this（MIT，ONNX），过了门槛；副歌用按小节的色度自相似，只找对 9 首中的 4 首，按研究文档“副歌没过之后”的做法补。
 
 **试听与拖动起点**：#514 要求音乐分析出错要能看到、能处理。
-- 配乐页显示选中的段落，可以试听；不对就拖动起点，吸附到最近的重拍，终点按目标时长重算（[规格的默认规则](../specs/montage-center.md#本稿补充的默认规则)）。
+- 配乐页显示选中的段落，可以试听；不对就拖动起点，吸附到最近的重拍，终点按目标时长重算（[规格的默认规则](../specs/videocut-center.md#本稿补充的默认规则)）。
 - 试听：浏览器能直接播的格式按 Range 送出副本；ALAC、APE、WMA 一类浏览器播不了的，照音乐功能的做法，经 FFmpeg Worker 的 `audio` 解码成 FLAC 流送出（音乐功能的 `Transcode` 标记）。
 - 起点记在 `projects.song_start`，任务开始时进快照。
 - 没找到副歌不算不可用：按响度选段，并提示“没找到副歌，请试听确认”。
@@ -546,14 +546,14 @@ montage/
 
 ## 规划
 
-规划由成员自己的 VNAS 在后台做：root 的规划发起方把一轮交给成员的规划进程，作为一次对话，模型调 montage MCP 工具读数据、交答案。交接的机制（规划进程、规划发起方、轮数、重试、学习）只在[剪辑中心的规划会话](montage-planning-session.md)里写；本节写剪辑中心这一侧：工具、规则、授权的登记、去重与用量。
+规划由成员自己的 VNAS 在后台做：root 的规划发起方把一轮交给成员的规划进程，作为一次对话，模型调 videocut MCP 工具读数据、交答案。交接的机制（规划进程、规划发起方、轮数、重试、学习）只在[剪辑中心的规划会话](videocut-planning-session.md)里写；本节写剪辑中心这一侧：工具、规则、授权的登记、去重与用量。
 
 最初按定时任务单元跑一轮（唤醒服务、回合脚本、领取回执、`hermes cron tick`）实施，2026-11-19 的实机验收里卡在“等待 VNAS”（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)），用户 2026-11-20 [决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)改为对话，[#608](https://github.com/zhongwater123/A-NAS/pull/608) 实现。
 
 ### MCP 服务器
 
 - `ai/assistant/anas_videocut_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/videocut-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
-- 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `montage,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
+- 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `videocut,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
 - **云端看不到画面**：规划进程里没有看图、看视频、读文件、终端、相册与桌面的工具，工具只给文字与结构化数据（用户 2026-11-20 决定 3）。
 - 套接字：systemd 的 `anas-videocut-assistant.socket` 持有宿主机上的 `/run/a-nas-videocut-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-videocut/videocut.sock`。
 - 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号，只回答这位成员自己的任务。UID 0 的对端（规划发起方）用 `X-A-NAS-Account` 指明成员。
@@ -641,7 +641,7 @@ montage/
 不引入 River，它的 SQLite 驱动官方仍标为实验性；也不引入 Temporal 一类外部服务。
 
 **状态**：`queued` → `running`，之后进入下面之一：
-- `done`、`failed`、`cancelled`；规划试了 3 轮都没有完成的任务 `failed`，原因 `plan_failed`，成员点“重新规划”接着规划（见“规划”与[规划会话的重试](montage-planning-session.md#4-重试)）；
+- `done`、`failed`、`cancelled`；规划试了 3 轮都没有完成的任务 `failed`，原因 `plan_failed`，成员点“重新规划”接着规划（见“规划”与[规划会话的重试](videocut-planning-session.md#4-重试)）；
 - `waiting`，原因 `analysis`（相册分析未完成，或本地模型不可用）、`asset_trashed`、`vnas`；
 - `needs_input`，原因：
 
@@ -674,7 +674,7 @@ montage/
 | 存回 | `versionKey` = 任务 ID 加渲染步骤的 `input_key`。重渲染的输出不必逐字节相同，存回也不会重复 |
 
 **两个方案**：分析、目录、歌曲三步共用；之后每个方案各有规划两步、填槽、渲染、存回五步，方案一的步骤名照旧，方案二的加 `-2`（`pick-2` … `save-2`）。步骤表由 `steps()` 一处定义，步骤名与进度都从它得出。
-- 方案数记在任务上（`jobs.plans`），开始时取 `montage.Options.Plans`（产品默认 2，最多 2）；升级前开始的任务是 1。
+- 方案数记在任务上（`jobs.plans`），开始时取 `app.Options.Plans`（产品默认 2，最多 2）；升级前开始的任务是 1。
 - 方案二的规划键见“规划”的 `planKey`；渲染键另加方案号，所以和方案一的时间线相同也各存一条。
 - 方案一存回后任务接着做方案二，最后一个方案存回后任务才结束。每个方案的成片存回后就从任务目录删掉，已存的方案不再渲染。
 - 存回栅栏（`jobs.save_started`）每个方案各用一次：不是最后一个方案时，版本记下就放开，任务继续；重启后重放的是第一个还没有版本的方案。
@@ -764,7 +764,7 @@ montage/
 
 ## 网页
 
-- **登记**：在 `web/src/desktop/apps.tsx` 登记 `montage`，标题“剪辑中心”。服务端开关打开后显示入口，不随 VNAS 是否可用而隐藏（#514：VNAS 不可用时上传、浏览和播放仍要能用）。
+- **登记**：在 `web/src/desktop/apps.tsx` 登记 `videocut`，标题“剪辑中心”。服务端开关打开后显示入口，不随 VNAS 是否可用而隐藏（#514：VNAS 不可用时上传、浏览和播放仍要能用）。
 - **加载**：窗口代码按窗口懒加载，`VideoCutNotices` 在桌面外壳里懒加载，都不计入首屏 JS 预算。
 - **页面**：照第八版原型（[`ai/montage_v8/web/index.html`](https://github.com/zhongwater123/A-NAS/blob/feat/video-montage-v5/ai/montage_v8/web/index.html)，在 #454 的分支上，只作参考、不合入 main）的样子，文字按“只写事实和操作”从简。
   - 主页就能剪：标题区的背景先问设备有没有背景片（`/hero`），有就播它，没有就轮流播成员自己的三段视频（播放决策经 TanStack Query 按视频缓存）。下面像原型的文件夹那样列出项目，点一下选中、再点取消，箭头打开；选中项目的配乐、剪辑要求、开始剪辑、进度和两个方案都在主页。
@@ -772,7 +772,7 @@ montage/
   - 两条成片并排，都等成员点播放，不自动播放（相册 `VideoPlayer` 的 `autoPlay` 传 `false`）；更早的版本也能播放。方案一存进相册后马上显示，不等方案二。
   - 失败的任务只显示服务写给成员看的原因，其余诊断信息不上页面，只写“没有剪成”。
   - 项目页列出它的视频，可以追加；选视频用相册的 `PhotoPicker`，只列视频，可选本人或共享图库。配乐与剪辑要求各是一页，返回打开它的地方。
-  - **背景片**：`/hero` 把设备上的同一个文件给每一位登录成员看，不只是放它的人；2026-11-19 用户决定保留，作为整台设备的主页背景。没有放背景片时，才轮播成员自己的视频。片子不进仓库与软件包，放法见[演示手册](../runbooks/demo-montage-center.md)。
+  - **背景片**：`/hero` 把设备上的同一个文件给每一位登录成员看，不只是放它的人；2026-11-19 用户决定保留，作为整台设备的主页背景。没有放背景片时，才轮播成员自己的视频。片子不进仓库与软件包，放法见[演示手册](../runbooks/demo-videocut-center.md)。
 - **上传**：复用相册的上传队列 `web/src/photos/uploads.tsx`（并行 2 个、接入传输中心、可重试、处理实况照片），目标是本人的个人图库，按 `LibraryPicker` 的规则找出个人图库。
   - 队列跑完后列出成功与失败，失败的可以重试；只用成功的资产建项目。
   - 单独上传的 MOV 如果补进了图库里在等它的实况照片，上传接口不返回新资产，所以它不进项目（页面行为见规格）。
@@ -884,7 +884,7 @@ montage/
 | M7（[#557](https://github.com/zhongwater123/A-NAS/issues/557)） | AI Worker 的 `describe_frames` 与多描述符的收取；相册的 `montage-describe/v1`、过滤敏感号码、准入与挂断 | M4、M6 | 跨语言测试；相册现有的准入测试全部通过 |
 | M8a（[#558](https://github.com/zhongwater123/A-NAS/issues/558)） | 持久任务、步骤缓存、校验、重入式 `fill`、渲染、`saveFilm`（含相册导入事务里的钩子） | M3、M6、M7 | 开发时可先用替身的相册分析做调度与渲染 |
 | M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)） | 配乐：anas-api 经文件代理复制、配乐分析 Worker 与 allin1 的运行环境、权重的交付、`music`、试听与起点 | M4、M6 | allin1 的运行环境、权重摘要与开发机结构文件的对照测试同一个 PR |
-| M9（[#560](https://github.com/zhongwater123/A-NAS/issues/560)） | montage MCP 服务器、助手套接字与定时任务单元的挂载、规划授权（文件代理的 `assistant_plan`、anas-api 对四条请求的登记与挂载层去掉同名头）、唤醒服务的规划部分（按 `ActiveState` 判断运行、`StateDirectory` 记计数、单独的运行目录放记号、按成员退避）、`run-requests.sh take` 一并移走它、回合脚本的清理、领取与模型检查、桌面提示。动工前按转正后的布局重写“规划”一节的接线 | M8a、P1、AI 助手 V1 转正 | MCP 服务器、managed-config、定时任务单元单独的成员配置、单元挂载、规划授权、唤醒服务与 Host Agent 按 UID 查询同一个 PR；系统测试覆盖“没有授权就不启动”；把 `create_job`、删除任务与删除运行的会话加进研究文档“以后怎么升级”的核对清单 |
+| M9（[#560](https://github.com/zhongwater123/A-NAS/issues/560)） | videocut MCP 服务器、助手套接字与定时任务单元的挂载、规划授权（文件代理的 `assistant_plan`、anas-api 对四条请求的登记与挂载层去掉同名头）、唤醒服务的规划部分（按 `ActiveState` 判断运行、`StateDirectory` 记计数、单独的运行目录放记号、按成员退避）、`run-requests.sh take` 一并移走它、回合脚本的清理、领取与模型检查、桌面提示。动工前按转正后的布局重写“规划”一节的接线 | M8a、P1、AI 助手 V1 转正 | MCP 服务器、managed-config、定时任务单元单独的成员配置、单元挂载、规划授权、唤醒服务与 Host Agent 按 UID 查询同一个 PR；系统测试覆盖“没有授权就不启动”；把 `create_job`、删除任务与删除运行的会话加进研究文档“以后怎么升级”的核对清单 |
 | M10（[#561](https://github.com/zhongwater123/A-NAS/issues/561)） | 网页全流程，打开开关；本方案的状态、`CURRENT.md` | M8a、M8b、M9、AI 助手 V1 转正 | — |
 | 实机验收的修复（[#605](https://github.com/zhongwater123/A-NAS/pull/605)、[#607](https://github.com/zhongwater123/A-NAS/pull/607)） | 剪辑分析不再被相册的前台门控挡住、主页不再播放成员的视频、轮次编号的格式；接缝上的六处缺陷（答案上限写进 Schema、选段的帧、规划时限按最后一次调用算等），见[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md) | M10 | — |
 | 规划会话（[#608](https://github.com/zhongwater123/A-NAS/pull/608)） | 规划进程、规划发起方、按原因重试；去掉 M9 的回合脚本、唤醒服务的规划部分与 `managed-cron` | 用户 2026-11-20 的[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md) | 系统测试带真实运行环境走一遍规划 |
@@ -929,7 +929,7 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 
 ## 验证
 
-验收标准与证据层见[规格](../specs/montage-center.md#验收证据)。检查命令：
+验收标准与证据层见[规格](../specs/videocut-center.md#验收证据)。检查命令：
 - 文档：`make docs-check`；
 - 代码：`make check`、`make race-test`（任务调度是并发代码）、`scripts/system-test.sh`；
 - 改了契约要运行 `make api`。
@@ -960,8 +960,8 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
 - **ADR**：
   - 本方案的 [0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；
   - 相关的 [0001](../adr/0001-use-go-for-product-services.md)、[0006](../adr/0006-use-a-managed-photo-library.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
-- **架构**：[规划会话](montage-planning-session.md)、[配乐](montage-music.md)、[总览](OVERVIEW.md)、[家庭中心](family-center.md)、[相册 AI](photo-ai.md)、[OCR 方案](photo-ocr.md)、[向量索引](vector-index.md)。
-- **规格**：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)。
+- **架构**：[规划会话](videocut-planning-session.md)、[配乐](videocut-music.md)、[总览](OVERVIEW.md)、[家庭中心](family-center.md)、[相册 AI](photo-ai.md)、[OCR 方案](photo-ocr.md)、[向量索引](vector-index.md)。
+- **规格**：[剪辑中心](../specs/videocut-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)。
 - **代码**：
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；

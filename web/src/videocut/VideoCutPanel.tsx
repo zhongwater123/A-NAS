@@ -9,7 +9,7 @@ import { ProjectView } from "./screens/ProjectView";
 import { SongPage } from "./screens/SongPage";
 import styles from "./screens/videocut.module.css";
 
-// VideoCutPanel is the 剪辑中心 window (docs/specs/montage-center.md), laid
+// VideoCutPanel is the 剪辑中心 window (docs/specs/videocut-center.md), laid
 // out as the 第八版 prototype's pages: the home page, where a project is
 // selected and its film started; a new project from an upload or from the
 // photo library; a project opened with its videos; and the song and the

@@ -15,7 +15,7 @@ import (
 )
 
 // A job makes the films of a project to choose from, 方案一 and 方案二
-// (docs/architecture/montage-center.md, 持久任务): analysis, catalog and
+// (docs/architecture/videocut-center.md, 持久任务): analysis, catalog and
 // song once, then for each 方案 planning, filling and checking the timeline,
 // rendering and saving, each step's result stored before the next so that a
 // restart or a retry goes on from the first step not done. The
@@ -387,7 +387,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		return domain.Job{}, err
 	}
 	// An edit takes no video out: the member replaces the shots that use it
-	// and saves again (ADR 0039, decision 6; docs/architecture/montage-center.md,
+	// and saves again (ADR 0039, decision 6; docs/architecture/videocut-center.md,
 	// 出片后的二次编辑: 任务的种类). A recut
 	// plans anew as generating does, and goes on without them the same way.
 	if job.Kind == KindEdit || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {

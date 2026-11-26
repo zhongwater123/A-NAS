@@ -8,7 +8,7 @@ import (
 )
 
 // The reads and writes of revocations: the photo grants waiting to be
-// revoked (docs/architecture/montage-center.md).
+// revoked (docs/architecture/videocut-center.md).
 
 // QueueRevocation records that grantID is to be revoked, due at at;
 // nothing when it is queued already.

@@ -1,6 +1,6 @@
 [Unit]
 Description=Hands the A-NAS VideoCut's planning to members' VNAS
-Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/architecture/montage-planning-session.md
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/architecture/videocut-planning-session.md
 # For each member with a job waiting for a plan and a planning grant, it claims a round on
 # VideoCut's socket, holds the planning as one conversation with the member's
 # planning instance (anas-assistant-plan@.service, reached through its root-only socket) and

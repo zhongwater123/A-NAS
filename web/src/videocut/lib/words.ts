@@ -1,4 +1,4 @@
-// What the VideoCut window says about jobs (docs/specs/montage-center.md).
+// What the VideoCut window says about jobs (docs/specs/videocut-center.md).
 import type { VideoCutJob } from "../api/client";
 
 export const stepNames: Record<VideoCutJob["steps"][number]["name"], string> = {
@@ -113,7 +113,7 @@ export function stateText(job: VideoCutJob): string {
   }
 }
 
-// The first version cannot do these (docs/architecture/montage-center.md, 不支持的要求): the page says so
+// The first version cannot do these (docs/architecture/videocut-center.md, 不支持的要求): the page says so
 // under the request, without stopping the member.
 const unsupported: [RegExp, string][] = [
   [/竖屏|9[:：]16|方形/, "首版固定横屏 1920×1080"],

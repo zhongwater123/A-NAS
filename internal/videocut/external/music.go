@@ -1,7 +1,7 @@
 // Package external reaches the rest of the NAS for VideoCut: the
 // Workers, the photo library and the planner. It implements the interfaces
 // in internal/videocut/app/ports.go and never imports app; videocut.go
-// hands its values to app (docs/architecture/montage-center.md, 代码结构).
+// hands its values to app (docs/architecture/videocut-center.md, 代码结构).
 package external
 
 import (

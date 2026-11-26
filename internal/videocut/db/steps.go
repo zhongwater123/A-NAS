@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of steps: each job's steps, the input key each ran
-// with and what it kept (docs/architecture/montage-center.md, 每一步可重跑).
+// with and what it kept (docs/architecture/videocut-center.md, 每一步可重跑).
 
 // DoneCatalog is what jobID's catalog step kept when done; sql.ErrNoRows
 // when it is not done.

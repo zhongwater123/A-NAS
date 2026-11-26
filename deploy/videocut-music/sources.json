@@ -1,5 +1,5 @@
 {
-  "note": "Packages of the music runtime with no wheel for Debian 13's Python 3.13: scripts/build-videocut-music-runtime.sh checks each source against its SHA-256 and builds the wheel in the builder image (docs/architecture/montage-music.md, 运行环境).",
+  "note": "Packages of the music runtime with no wheel for Debian 13's Python 3.13: scripts/build-videocut-music-runtime.sh checks each source against its SHA-256 and builds the wheel in the builder image (docs/architecture/videocut-music.md, 运行环境).",
   "packages": [
     {
       "name": "natten",

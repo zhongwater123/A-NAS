@@ -1,7 +1,7 @@
 """The music analysis Worker against the eighth version's allin1 structure files (development machine and Experimental NAS).
 
 The test songs and the structure files stay out of the repository
-(docs/architecture/montage-music.md). For each structure-<song>.json under
+(docs/architecture/videocut-music.md). For each structure-<song>.json under
 --structures it decodes <song>.* under --songs with FFmpeg as the media
 worker does for VideoCut (stereo at 44.1 kHz and mono at 22050 Hz,
 float32), starts the Worker as its unit runs it, hands it the two streams

@@ -37,6 +37,6 @@
 
 ## 关联
 
-- 设计：[剪辑中心的规划会话](../architecture/montage-planning-session.md)
+- 设计：[剪辑中心的规划会话](../architecture/videocut-planning-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）的补充
-- 剪辑中心的[实施方案](../architecture/montage-center.md#规划)与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 5 已按这里改写
+- 剪辑中心的[实施方案](../architecture/videocut-center.md#规划)与 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 5 已按这里改写

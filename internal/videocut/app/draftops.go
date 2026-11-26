@@ -14,7 +14,7 @@ import (
 )
 
 // The rules of each step (ADR 0039, decision 2;
-// docs/architecture/montage-center.md, 出片后的二次编辑: 修改稿): the
+// docs/architecture/videocut-center.md, 出片后的二次编辑: 修改稿): the
 // unit is the music's slot, whose length and cuts stay; a beat is used once
 // in a film; the cards must be long enough.
 
@@ -264,7 +264,7 @@ type scoredBeat struct {
 }
 
 // searchBeats are the beats most like each of texts, best first: a beat
-// scores its best window (docs/architecture/montage-center.md, 候选).
+// scores its best window (docs/architecture/videocut-center.md, 候选).
 func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string) ([][]scoredBeat, error) {
 	if s.search == nil {
 		return nil, domain.ErrSearchUnavailable

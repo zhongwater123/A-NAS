@@ -318,7 +318,7 @@ _Avoid_：令牌、会话、共享
 _Avoid_：项目授权（那是读相册素材用的）、令牌
 
 **规划对话（Planning Conversation）**：
-剪辑任务走到规划时，NAS 凭规划授权在成员的规划进程里开的一次 VNAS 对话，标题“剪辑规划 · <项目名>”，留在成员的对话历史里。规划进程是成员沙箱里第二个 VNAS 进程，只有剪辑、记忆与技能的工具，与成员平时的 VNAS 共用记忆与技能（[规划会话](docs/architecture/montage-planning-session.md)）。一次规划对话叫一轮；没有交齐规划的一轮算“试过一轮”，系统 1 分钟后自动重来，同一个任务对同样的输入最多试 3 轮，仍没完成任务就失败（[决定记录](docs/decisions/2026-11-25-montage-planning-retries.md)）。
+剪辑任务走到规划时，NAS 凭规划授权在成员的规划进程里开的一次 VNAS 对话，标题“剪辑规划 · <项目名>”，留在成员的对话历史里。规划进程是成员沙箱里第二个 VNAS 进程，只有剪辑、记忆与技能的工具，与成员平时的 VNAS 共用记忆与技能（[规划会话](docs/architecture/videocut-planning-session.md)）。一次规划对话叫一轮；没有交齐规划的一轮算“试过一轮”，系统 1 分钟后自动重来，同一个任务对同样的输入最多试 3 轮，仍没完成任务就失败（[决定记录](docs/decisions/2026-11-25-montage-planning-retries.md)）。
 _Avoid_：规划回合、规划任务（2026-11-20 之前借定时任务时的叫法）
 
 **卡片（Card）**：

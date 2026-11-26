@@ -1,4 +1,4 @@
-"""What the member's VNAS reads to plan a film (docs/architecture/montage-center.md, 规划): the eighth version's two
+"""What the member's VNAS reads to plan a film (docs/architecture/videocut-center.md, 规划): the eighth version's two
 requests split into rules, data and the exact schema. The rules are the fixed template in prompts/; the data and the
 schema come back from the videocut tools' briefs, which call this through the compute Worker's plan_brief.
 

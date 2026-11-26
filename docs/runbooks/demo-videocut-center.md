@@ -6,7 +6,7 @@
 
 这是演示，不是发布：
 - 剪辑中心的产品默认值仍是关闭，只在这台设备上用 drop-in 打开；
-- allin1 的商业版权还没有结论，配乐分析只按[启用配乐分析](enable-montage-music.md)手动装在实验 NAS 上。
+- allin1 的商业版权还没有结论，配乐分析只按[启用配乐分析](enable-videocut-music.md)手动装在实验 NAS 上。
 
 成功结果：成员在剪辑中心点“开始剪辑”后关掉浏览器，任务走完，方案一、方案二两条成片出现在成员的个人图库，可以播放。
 
@@ -16,10 +16,10 @@
   - 开发机 B 能运行 `make release`，有存档密钥的口令（[部署 A-NAS 软件包](deploy-a-nas-packages.md)）；
   - 能以 `anas-dev` 登录 NAS，并有 NAS 上的 root。
 - **架构**：实验 NAS 是 x86_64，配乐分析的运行环境与 NATTEN、madmom 的轮子要在 x86_64 机器上编（开发机 B 的 WSL）。开发机 C（macOS arm64）编不了，也不签名。
-- **VNAS**：设备上已经填好 DeepSeek 密钥（设置 → VNAS），演示账号有 VNAS。没有密钥时，任务会停在“等待规划”，页面写明原因。规划是成员规划进程里的一次对话（[规划会话](../architecture/montage-planning-session.md)）：有密钥时 `anas-videocut-planner` 在运行，`a-nas-check` 核对它。
+- **VNAS**：设备上已经填好 DeepSeek 密钥（设置 → VNAS），演示账号有 VNAS。没有密钥时，任务会停在“等待规划”，页面写明原因。规划是成员规划进程里的一次对话（[规划会话](../architecture/videocut-planning-session.md)）：有密钥时 `anas-videocut-planner` 在运行，`a-nas-check` 核对它。
 - **相册分析**：卡片描述用相册 OCR 已部署的 Qwen3.5-4B，分析视频时与相册的其他 AI 工作排队。
 - **服务影响**：升级会重启 Host Agent、产品服务与相册等服务，见[部署 A-NAS 软件包](deploy-a-nas-packages.md)的“前提与风险”。
-- **内存**：配乐分析一首 8 分钟的歌峰值约 4.5 GiB，单元上限 5632 MiB（[配乐分析的用时与内存](../architecture/montage-music.md#用时与内存)）；分析时设备上别的大内存工作会变慢。
+- **内存**：配乐分析一首 8 分钟的歌峰值约 4.5 GiB，单元上限 5632 MiB（[配乐分析的用时与内存](../architecture/videocut-music.md#用时与内存)）；分析时设备上别的大内存工作会变慢。
 - **停止条件**：
   - `a-nas-check` 有 `FAIL`：按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的“回滚或恢复”退回；
   - `systemctl is-active anas-videocut` 不是 `active`；
@@ -35,7 +35,7 @@
    make check
    ```
    - 完成标准：`make check` 通过。记下 `git rev-parse --short HEAD`。
-2. **开发机 B：构建配乐分析的运行环境与权重**，按[启用配乐分析](enable-montage-music.md)的第 1–3 步，得到 11 个 `.deb`。
+2. **开发机 B：构建配乐分析的运行环境与权重**，按[启用配乐分析](enable-videocut-music.md)的第 1–3 步，得到 11 个 `.deb`。
 3. **开发机 B：发布并推送**，按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的第 1、2 步：
    ```bash
    make release REPO=/mnt/d/A-NAS-releases/apt CONTENT=/mnt/d/A-NAS-releases/content
@@ -44,7 +44,7 @@
    - 完成标准：拿到第 1 步提交对应的版本号、签名指纹与 keyring 的 SHA-256。
 4. **NAS：安装这一版**。管理员在“设置 → 系统更新”里点“检查更新”，再点“安装”；或按[部署手册](deploy-a-nas-packages.md)第 6 步用 apt。
    - 完成标准：`a-nas-check` 全部 `PASS`；`systemctl is-active anas-videocut anas-videocut-assistant.socket anas-videocut-compute.socket` 都是 `active`。
-5. **NAS：装配乐分析**，按[启用配乐分析](enable-montage-music.md)第 4 步，把第 2 步的 `.deb` 装上。
+5. **NAS：装配乐分析**，按[启用配乐分析](enable-videocut-music.md)第 4 步，把第 2 步的 `.deb` 装上。
    - 完成标准：`systemctl is-active anas-videocut-music.socket` 是 `active`。
 6. **NAS（root）：只在这台设备上打开剪辑中心**。
    ```bash
@@ -104,11 +104,11 @@
   ```
   项目与成片都留着。成片在相册里，与剪辑中心无关。
 - **删掉主页背景片**（放过的话）：`rm -r /srv/a-nas/data/videocut/hero`。主页不再有背景片。
-- **卸掉配乐分析**：按[启用配乐分析](enable-montage-music.md)的“回滚或恢复”。
+- **卸掉配乐分析**：按[启用配乐分析](enable-videocut-music.md)的“回滚或恢复”。
 - **退回上一版本**：“设置 → 系统更新 → 回到上一版本”，或按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的“回滚或恢复”。
 
 ## 关联
 
-- 剪辑中心的[规格](../specs/montage-center.md)、[实施方案](../architecture/montage-center.md)与[规划会话](../architecture/montage-planning-session.md)
-- [部署 A-NAS 软件包](deploy-a-nas-packages.md)、[启用配乐分析](enable-montage-music.md)、[启用 AI 助手](enable-ai-assistant.md)
+- 剪辑中心的[规格](../specs/videocut-center.md)、[实施方案](../architecture/videocut-center.md)与[规划会话](../architecture/videocut-planning-session.md)
+- [部署 A-NAS 软件包](deploy-a-nas-packages.md)、[启用配乐分析](enable-videocut-music.md)、[启用 AI 助手](enable-ai-assistant.md)
 - 代码：`internal/videocut/app`、`web/src/videocut`、`ai/assistant/videocut-planner.py`、`scripts/lib/assistant-units.sh`

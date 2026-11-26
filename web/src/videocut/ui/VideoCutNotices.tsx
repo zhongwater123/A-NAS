@@ -1,5 +1,5 @@
 // 剪辑中心 tells a member on the desktop how their films go
-// (docs/specs/montage-center.md, 桌面提示): a job waiting for VNAS to plan it
+// (docs/specs/videocut-center.md, 桌面提示): a job waiting for VNAS to plan it
 // and why, a round of VNAS planning it, a job needing them, a film just
 // saved into the photo library, or a job that failed and why; one whose
 // planning failed is planned again from the notice. The desktop only shows

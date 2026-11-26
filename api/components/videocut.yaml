@@ -176,7 +176,7 @@ schemas:
     additionalProperties: false
     required: [type]
     description: >-
-      One step of an edit (ADR 0039, decision 2; docs/architecture/montage-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to
+      One step of an edit (ADR 0039, decision 2; docs/architecture/videocut-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to
       where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or
       after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the
       beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset

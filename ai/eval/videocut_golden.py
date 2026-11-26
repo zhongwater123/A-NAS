@@ -1,7 +1,7 @@
 """Golden comparison of the VideoCut compute Worker with the eighth version (development machine only).
 
 The prototype's results come from real footage and stay out of the repository
-(docs/architecture/montage-center.md, 剪辑计算 Worker, 样本). Point
+(docs/architecture/videocut-center.md, 剪辑计算 Worker, 样本). Point
 ANAS_VIDEOCUT_SAMPLES at the folder that holds cache/ and 剪辑对比/ (on
 development machine C, ~/A-NAS-datasets) and run, in the AI runtime:
 

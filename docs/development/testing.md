@@ -177,7 +177,7 @@ docker run --rm --privileged -e CGO_ENABLED=1 \
 
 - 这类接缝的样例（请求、回答、编号与 token 的格式）只放一处，两边的测试都读它；或者一边的测试从另一边的实现读出格式，例如 [`planner_ids_test.go`](../../internal/videocut/app/planner_ids_test.go) 从规划发起方读出它认的编号，用剪辑中心真实生成的编号核对。
 - 能生成就生成：接缝两边有一边能导出 JSON Schema 时，另一边按它校验，不再手写一份。
-- 剪辑中心的领取、简报、答案、填槽请求与选段还没有共用的样例（[规划会话的“测试”](../architecture/montage-planning-session.md#测试)）。
+- 剪辑中心的领取、简报、答案、填槽请求与选段还没有共用的样例（[规划会话的“测试”](../architecture/videocut-planning-session.md#测试)）。
 
 ## 系统测试
 

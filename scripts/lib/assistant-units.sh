@@ -3,7 +3,7 @@
 # (ADR 0024), made from it so that they stay the same: a round of the member's
 # scheduled tasks and the weekly curator, each a oneshot, and the member's
 # planning instance for VideoCut with the socket that starts it
-# (docs/architecture/montage-planning-session.md). None of them has the
+# (docs/architecture/videocut-planning-session.md). None of them has the
 # companion's socket, which only a conversation's window answers (#412). The
 # planning instance alone binds VideoCut's socket, reads the policy
 # and the member settings that add its planning server (managed-plan,
@@ -27,7 +27,7 @@ derive_plan_policy() {
     return 1
   fi
   sed -e "/^mcp_servers:\$/r $server" \
-    -e '/^skills:$/a\  # Every planning is reviewed for what VNAS learned (docs/architecture/montage-planning-session.md).\n  creation_nudge_interval: 1' \
+    -e '/^skills:$/a\  # Every planning is reviewed for what VNAS learned (docs/architecture/videocut-planning-session.md).\n  creation_nudge_interval: 1' \
     "$policy" >"$out"
   chmod 0644 "$out"
 }

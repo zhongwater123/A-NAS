@@ -1,7 +1,7 @@
 """The compute Worker's music operation (ai/anas_videocut/ops/music.py): the
 eighth version's excerpt and slots, the loudest section when no chorus is
 found, a start the member dragged, and the four reasons a song cannot be used
-(docs/specs/montage-center.md, 配乐).
+(docs/specs/videocut-center.md, 配乐).
 
 NumPy is in the AI runtime only: make ai-test skips these, and the runtime's
 image runs them (docs/development/ai-development.md)."""

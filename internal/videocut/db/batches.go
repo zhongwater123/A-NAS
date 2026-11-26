@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of batches: the requests that bring videos to a
-// project (docs/architecture/montage-center.md).
+// project (docs/architecture/videocut-center.md).
 
 // BatchRow is a request that brings videos to a project: kind create makes
 // the project, kind add adds to it.

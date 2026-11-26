@@ -5,12 +5,12 @@
 
 ## 目的
 
-在 Experimental NAS 上装上剪辑中心的配乐分析（[配乐分析设计](../architecture/montage-music.md)）：allin1 在单独的运行环境里分析成员选的歌。allin1 的商业版权待议，待议期间它不随任何 release 发布，只按本手册手动装在实验 NAS 上。
+在 Experimental NAS 上装上剪辑中心的配乐分析（[配乐分析设计](../architecture/videocut-music.md)）：allin1 在单独的运行环境里分析成员选的歌。allin1 的商业版权待议，待议期间它不随任何 release 发布，只按本手册手动装在实验 NAS 上。
 
 成功后：
 
 - `anas-videocut-music.socket` 在监听，剪辑服务选歌后几分钟内，这首歌从 `analyzing` 变成 `ready` 或写明原因的 `unusable`；
-- 一首 4 分钟的歌的用时与 Worker 峰值内存记进[配乐分析设计](../architecture/montage-music.md#用时与内存)。
+- 一首 4 分钟的歌的用时与 Worker 峰值内存记进[配乐分析设计](../architecture/videocut-music.md#用时与内存)。
 
 ## 前提与风险
 
@@ -20,7 +20,7 @@
   - 用户已同意在实验 NAS 上装 allin1（2026-11-18 决定：待议期间只在开发机与实验 NAS 上运行）。
   - 实验 NAS 已装与本手册同一提交的 `a-nas`（[部署 A-NAS 软件包](deploy-a-nas-packages.md)），剪辑中心的开关在实验 NAS 上已打开。
   - 一台 x86_64 的构建机（Windows 开发机的 WSL），有 Docker、jq、`ai/requirements-dev.txt` 固定版本的 uv：NATTEN 要按 NAS 的处理器编译，arm64 的开发机 C 编出的运行环境不能用。
-- **资源**：运行环境压缩包约 300 MB，解开约 860 MB；权重约 95 MB。Worker 只在分析时运行，峰值内存见[用时与内存](../architecture/montage-music.md#用时与内存)，单元上限 `MemoryMax`。
+- **资源**：运行环境压缩包约 300 MB，解开约 860 MB；权重约 95 MB。Worker 只在分析时运行，峰值内存见[用时与内存](../architecture/videocut-music.md#用时与内存)，单元上限 `MemoryMax`。
 - **风险**：分析期间 Worker 占满它能用的核，放在 `anas.slice` 下，前台操作优先；内存超过上限时只结束 Worker，这首歌 5 分钟后再试，连续失败 3 次后记为不可用（`analysis_failed`）。
 - **停止条件**（出现任一项立即停止）：
   - 构建报告下载与 `deploy/videocut-music/sources.json` 或锁文件的哈希不符、`pip check` 不通过，或 `madmom's model files are in the runtime`；
@@ -80,7 +80,7 @@
    systemctl show anas-videocut-music -p MemoryPeak
    ```
 
-   - 完成标准：配乐页显示选段；把用时、各步用时与 `MemoryPeak` 记进设计文档的[用时与内存](../architecture/montage-music.md#用时与内存)。
+   - 完成标准：配乐页显示选段；把用时、各步用时与 `MemoryPeak` 记进设计文档的[用时与内存](../architecture/videocut-music.md#用时与内存)。
 
 ## 验证
 
@@ -107,7 +107,7 @@
 
 ## 关联
 
-- 设计：[剪辑中心的配乐](../architecture/montage-music.md)
-- 规格：[剪辑中心规格的“配乐”](../specs/montage-center.md#配乐)
+- 设计：[剪辑中心的配乐](../architecture/videocut-music.md)
+- 规格：[剪辑中心规格的“配乐”](../specs/videocut-center.md#配乐)
 - ADR：[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（运行环境与模型的交付做法）、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
 - 需求：[#559](https://github.com/zhongwater123/A-NAS/issues/559)

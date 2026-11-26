@@ -117,7 +117,7 @@ func TestMemberSettings(t *testing.T) {
 		t.Fatalf("config-plan.yaml %q, %v", plan, err)
 	}
 	// With one, they add its servers, VideoCut's planning server: only the planning
-	// instance binds them (docs/architecture/montage-planning-session.md). The settings the
+	// instance binds them (docs/architecture/videocut-planning-session.md). The settings the
 	// scheduled tasks once had for it go.
 	if err := os.MkdirAll(filepath.Join(library, "managed-plan"), 0o755); err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
 
 // The policy of a member's planning instance is the assistant's policy with VideoCut's
 // planning server and a review after every planning, and nothing else changed
-// (docs/architecture/montage-planning-session.md). The package makes it by splicing text
+// (docs/architecture/videocut-planning-session.md). The package makes it by splicing text
 // (scripts/lib/assistant-units.sh), which no check of the text shows to be the YAML it should
 // be: here the package's own function makes it from the files the package ships, and it is read
 // as the Host Agent reads it.

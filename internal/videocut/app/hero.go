@@ -13,7 +13,7 @@ import (
 // device may put one under the store's root, hero/hero.mp4 with
 // hero/hero.jpg as its poster. It is the device's own footage, never part
 // of the software (the repository is public); without it the page plays
-// the member's videos (docs/architecture/montage-center.md, 网页).
+// the member's videos (docs/architecture/videocut-center.md, 网页).
 const heroDir = "hero"
 
 // Hero files by what the page asks for.

@@ -16,7 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 )
 
-// A planning grant (docs/architecture/montage-center.md, 规划授权): while
+// A planning grant (docs/architecture/videocut-center.md, 规划授权): while
 // the member is signed in and does something the montage center may plan
 // for, the Product Service asks the broker, behind the member's session,
 // to let their VNAS plan in their absence. The broker records when, and how

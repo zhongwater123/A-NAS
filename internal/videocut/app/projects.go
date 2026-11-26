@@ -18,11 +18,11 @@ import (
 )
 
 // A project holds only the videos a member handed to VideoCut
-// (docs/specs/montage-center.md): each batch adds its own, fixed to their
+// (docs/specs/videocut-center.md): each batch adds its own, fixed to their
 // content objects. The photo library keeps the videos and lets VideoCut
 // reach them through the project's grant (ADR 0038 decision 3).
 
-// Limits of a request (docs/specs/montage-center.md, 本稿补充的默认规则).
+// Limits of a request (docs/specs/videocut-center.md, 本稿补充的默认规则).
 // IDs and request keys are printable ASCII, as the photo library's IDs are,
 // so that the largest request the contract allows fits the API's body limit.
 const (
@@ -288,7 +288,7 @@ func (s *Store) heldAssets(ctx context.Context, projectID string, ids []string) 
 }
 
 // defaultName names a new project by its videos' dates, as "2026-08-02 至
-// 08-04" (docs/specs/montage-center.md).
+// 08-04" (docs/specs/videocut-center.md).
 func defaultName(earliest, latest *time.Time, now time.Time) string {
 	if earliest == nil {
 		return now.Local().Format("2006-01-02") + " 的剪辑"

@@ -17,7 +17,7 @@ import (
 )
 
 // Editing a film after it was made (#596, ADR 0039;
-// docs/architecture/montage-center.md, 出片后的二次编辑). A member edits a version slot by slot in a draft kept
+// docs/architecture/videocut-center.md, 出片后的二次编辑). A member edits a version slot by slot in a draft kept
 // here: each step is checked against the rules, written as a revision, and
 // can be undone. Nothing here calls a model.
 
@@ -462,7 +462,7 @@ func (s *Store) VersionOutline(ctx context.Context, owner, versionID string) (do
 }
 
 // unmet is what the version's plan said the videos do not have
-// (docs/specs/montage-center.md, 成片存进相册): the outline's and the
+// (docs/specs/videocut-center.md, 成片存进相册): the outline's and the
 // shots', each once, in order. An answer that is not a list of texts
 // says nothing.
 func (src *editSource) unmet() []string {

@@ -9,8 +9,8 @@ Replaces: a-nas-montage-music
 Conflicts: a-nas-montage-music
 Description: VideoCut's music analysis for A-NAS
  allin1 finds a song's beats, downbeats and sections for VideoCut
- (docs/architecture/montage-music.md): its Worker, units and the links to
+ (docs/architecture/videocut-music.md): its Worker, units and the links to
  its runtime and models, which are content packages of their own. While
  allin1's commercial licence is pending it is installed by hand on the
  development machine and the Experimental NAS only, and no release depends
- on it (docs/runbooks/enable-montage-music.md).
+ on it (docs/runbooks/enable-videocut-music.md).

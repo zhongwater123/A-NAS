@@ -24,7 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// Each step first works out its input key (docs/architecture/montage-
+// Each step first works out its input key (docs/architecture/videocut-
 // center.md, 步骤与输入摘要): a step of the job already done with the same
 // key is not done again, and every key includes the keys upstream, so a
 // change upstream redoes what follows. The keys come only from the job's
@@ -123,7 +123,7 @@ func planKey(pickKey string, plan int) string {
 	return digest(pickKey, fmt.Sprintf("plan %d", plan))
 }
 
-// steps are a job's steps, in order (docs/architecture/montage-center.md,
+// steps are a job's steps, in order (docs/architecture/videocut-center.md,
 // 两个方案): analysis, catalog and song, which every 方案 shares, then each
 // 方案's own two steps of planning, fill, render and save, for as many 方案
 // as the job started with. The first 方案 saved, the job goes on with the
@@ -205,7 +205,7 @@ func (s *Store) stepNames(kind string, plans int) []string {
 // is settled: the film is in the member's library whatever became of the
 // job's videos since, so its steps are neither done again nor made stale by
 // a new input, and the job makes only the 方案 not saved yet
-// (docs/specs/montage-center.md, 素材进回收站或被删除: 已存进相册的成片不受影响).
+// (docs/specs/videocut-center.md, 素材进回收站或被删除: 已存进相册的成片不受影响).
 func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	run := &jobRun{claimed: job, keys: map[string]string{}}
 	// An interrupted save may already have committed in the photo library.
@@ -916,7 +916,7 @@ func (run *jobRun) assetOf(video string) (analysedVideo, bool) {
 }
 
 // latestTakenAt is when the latest of the job's videos was taken, the
-// film's own capture time (docs/specs/montage-center.md).
+// film's own capture time (docs/specs/videocut-center.md).
 func (run *jobRun) latestTakenAt() *time.Time {
 	var latest *time.Time
 	for _, v := range run.analysis.Videos {

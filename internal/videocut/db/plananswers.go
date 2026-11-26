@@ -9,7 +9,7 @@ import (
 
 // The reads and writes of plan_answers: the planning model's answers, the
 // first good one for a step's input key (docs/architecture/
-// montage-planning-session.md).
+// videocut-planning-session.md).
 
 // KeepPlanAnswer keeps answer, handed back in roundID at at, for jobID's
 // step and input key; false when one is kept for them already, which

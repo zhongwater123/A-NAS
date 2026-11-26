@@ -3,7 +3,7 @@ package db
 import "context"
 
 // The reads and writes of plan_briefs: what the planning model is told
-// for a step's input key (docs/architecture/montage-planning-session.md).
+// for a step's input key (docs/architecture/videocut-planning-session.md).
 
 // PlanBrief is the brief kept for jobID's step and input key, encoded;
 // sql.ErrNoRows when none is.

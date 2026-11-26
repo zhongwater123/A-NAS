@@ -7,7 +7,7 @@
 
 成员把一次旅行或活动拍的一批视频交给剪辑中心，选一首歌、写一句要求，就能得到一条跟着音乐剪好的成片。成片存进本人的个人图库，像其他视频一样播放、下载。
 
-剪辑中心是桌面上与家庭中心、影视中心并列的应用（[#514](https://github.com/zhongwater123/A-NAS/issues/514)）。实现方式见[技术设计](../architecture/montage-center.md)。
+剪辑中心是桌面上与家庭中心、影视中心并列的应用（[#514](https://github.com/zhongwater123/A-NAS/issues/514)）。实现方式见[技术设计](../architecture/videocut-center.md)。
 
 ## 已确认（2026-11-17）
 
@@ -369,9 +369,9 @@
 
 ## 关联
 
-- 设计：[剪辑中心技术设计](../architecture/montage-center.md)、[规划会话](../architecture/montage-planning-session.md)、[配乐](../architecture/montage-music.md)；ADR：[0038](../adr/0038-keep-montage-media-in-the-photo-library.md)、[0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（二次编辑）
+- 设计：[剪辑中心技术设计](../architecture/videocut-center.md)、[规划会话](../architecture/videocut-planning-session.md)、[配乐](../architecture/videocut-music.md)；ADR：[0038](../adr/0038-keep-montage-media-in-the-photo-library.md)、[0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（二次编辑）
 - 决定：[首版的数据归属与做法](../decisions/2026-11-17-montage-center-first-version.md)、[补充的默认做法](../decisions/2026-11-17-montage-center-default-rules.md)、[规划交给 VNAS 的方式](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
 - 调查：[剪辑任务在实验 NAS 上停在“等待分析”与“等待 VNAS”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)
-- 运行手册：[在实验 NAS 上演示剪辑中心](../runbooks/demo-montage-center.md)
+- 运行手册：[在实验 NAS 上演示剪辑中心](../runbooks/demo-videocut-center.md)
 - 相关规格：[相册视频](photo-video.md)、[AI 助手](ai-assistant.md)、[家庭中心](family-center.md)
 - 需求：[#514](https://github.com/zhongwater123/A-NAS/issues/514)

@@ -1,5 +1,5 @@
 """Root's planner hands a planning round to the member's planning instance as one conversation
-(ai/assistant/videocut-planner.py, docs/architecture/montage-planning-session.md).
+(ai/assistant/videocut-planner.py, docs/architecture/videocut-planning-session.md).
 
 VideoCut's socket, the planning instance's login and the model's gateway are stand-ins on Unix sockets; the
 instance's JSON-RPC is a scripted connection in place of the runtime's websockets.

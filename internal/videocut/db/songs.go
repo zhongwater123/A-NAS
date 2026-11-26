@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of songs: each member's row for a song's content,
-// and how its analysis stands (docs/architecture/montage-center.md).
+// and how its analysis stands (docs/architecture/videocut-center.md).
 
 // unusedSongs holds for a song row nothing needs. A copy is needed by the
 // current project, by the settings captured by an unfinished job, even

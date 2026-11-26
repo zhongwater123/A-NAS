@@ -17,7 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// What the videocut tools do (docs/architecture/montage-center.md, MCP 服务器):
+// What the videocut tools do (docs/architecture/videocut-center.md, MCP 服务器):
 // the briefs give a step's data and exact schema, the submissions check an
 // answer against them and keep the first good one. Every call names the
 // job and the round's token, and answers only the member whose round it is.
@@ -28,7 +28,7 @@ const (
 	StepShots   = "shots"
 )
 
-// Limits of an answer's text (docs/architecture/montage-center.md, 校验).
+// Limits of an answer's text (docs/architecture/videocut-center.md, 校验).
 // The prompt (plan-v2.md) says the same: 120 characters a field, 1,500 in
 // all of an outline, card and beat names not counted. Bytes undercounted
 // Chinese threefold: 2 KiB was about 680 characters, less than an outline of

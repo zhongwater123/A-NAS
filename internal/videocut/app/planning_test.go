@@ -19,7 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 )
 
-// Planning by the member's VNAS (docs/specs/montage-center.md, 规划（VNAS）):
+// Planning by the member's VNAS (docs/specs/videocut-center.md, 规划（VNAS）):
 // the job waits, leaves a marker, a round is claimed, started and ended,
 // and the two answers come back through the tools.
 
@@ -216,7 +216,7 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 // A round VNAS could not be reached for (its planning instance did not
 // start, the model's gateway did not answer) is tried again after 2, 4 and
 // 8 minutes, then every 15, and the page says when
-// (docs/architecture/montage-planning-session.md, 重试).
+// (docs/architecture/videocut-planning-session.md, 重试).
 func TestARoundVNASCouldNotBeReachedForIsTriedAgainLaterEachTime(t *testing.T) {
 	ctx := context.Background()
 	env := newPlanEnv(t)
@@ -963,7 +963,7 @@ func (e *jobEnv) outlineBrief(t *testing.T, claim domain.Claim) (int, int) {
 	return data.Plan, len(data.Earlier)
 }
 
-// One round plans both 方案 (docs/architecture/montage-center.md, 一轮规划两个
+// One round plans both 方案 (docs/architecture/videocut-center.md, 一轮规划两个
 // 方案): the first's shots taken, the model is told to go on with the next,
 // whose outline brief carries the first outline to differ from. Each 方案's
 // answers are kept under its own input keys, and the job takes them as it

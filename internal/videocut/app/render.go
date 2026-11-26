@@ -262,7 +262,7 @@ func finite(values ...float64) bool {
 }
 
 // validateTimeline checks the filled timeline before anything is rendered
-// (docs/architecture/montage-center.md, 校验): a timeline that fails is the
+// (docs/architecture/videocut-center.md, 校验): a timeline that fails is the
 // job's failure, never a film.
 func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	if len(answer.Short) > 0 {

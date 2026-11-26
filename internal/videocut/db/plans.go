@@ -9,7 +9,7 @@ import (
 
 // The reads and writes of plans: each 方案's plan for a step, taken for a
 // catalog, until the catalog or the step's input changes and voids it
-// (docs/architecture/montage-center.md).
+// (docs/architecture/videocut-center.md).
 
 // AcceptedPlan is the latest plan, not voided, taken for jobID's plan-th
 // 方案 and step with catalogKey, encoded; sql.ErrNoRows when there is none.

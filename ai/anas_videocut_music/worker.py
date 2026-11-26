@@ -1,4 +1,4 @@
-"""VideoCut's music analysis Worker (docs/architecture/montage-center.md, 配乐).
+"""VideoCut's music analysis Worker (docs/architecture/videocut-center.md, 配乐).
 
 It runs allin1's harmonix-all on one song at a time and answers the song's
 tempo, beats, downbeats and labelled sections, as the eighth version's

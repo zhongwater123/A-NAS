@@ -18,11 +18,11 @@
 # pins.
 #
 # With --videocut-music it also builds the content of VideoCut's
-# music analysis (docs/architecture/montage-music.md): allin1's and Demucs'
+# music analysis (docs/architecture/videocut-music.md): allin1's and Demucs'
 # models, and its runtime from
 #   videocut-music-runtimes/<id>.tar.gz  scripts/build-videocut-music-runtime.sh's tarball
 # No release depends on them while allin1's licence is pending; the
-# Experimental NAS installs them by hand (docs/runbooks/enable-montage-music.md).
+# Experimental NAS installs them by hand (docs/runbooks/enable-videocut-music.md).
 #
 # With --aesthetic-scorer-only, build just the scoring model for internal evaluation.
 # Default releases omit its weights while redistribution is pending.

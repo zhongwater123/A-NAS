@@ -62,7 +62,7 @@ type Config struct {
 	// where members' planning instances and root's planner reach VideoCut
 	// when systemd does not hold it; PlanMarkers is the directory of
 	// planning markers the planner reads
-	// (docs/architecture/montage-planning-session.md).
+	// (docs/architecture/videocut-planning-session.md).
 	Accounts        protocol.AccountResolver
 	AssistantSocket string
 	PlanMarkers     string

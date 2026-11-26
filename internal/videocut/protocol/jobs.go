@@ -7,7 +7,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
-// The job routes (docs/architecture/montage-center.md, 接口): generating
+// The job routes (docs/architecture/videocut-center.md, 接口): generating
 // answers 202 with the job, polled with GET /jobs/{id}.
 
 type generateRequest struct {

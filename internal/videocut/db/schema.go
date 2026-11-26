@@ -69,7 +69,7 @@ DROP TABLE batches;
 DROP TABLE projects;
 `},
 		// 2: the songs members chose, with their analysis, and each
-		// project's song and the excerpt's start (docs/specs/montage-center.md,
+		// project's song and the excerpt's start (docs/specs/videocut-center.md,
 		// 配乐). A song row is a member's; its copy, songs/<sha256>/audio,
 		// is shared by content.
 		{Up: `
@@ -104,7 +104,7 @@ DROP TABLE songs;
 `},
 		// 3: jobs, the videos they started with, each step's input key and
 		// result, the plans and the planning rounds (M9), and the versions
-		// saved into the photo library (docs/architecture/montage-center.md,
+		// saved into the photo library (docs/architecture/videocut-center.md,
 		// 持久任务).
 		{Up: `
 CREATE TABLE jobs (
@@ -195,7 +195,7 @@ DROP TABLE job_assets;
 DROP TABLE jobs;
 `},
 		{Up: "ALTER TABLE jobs ADD COLUMN save_started INTEGER NOT NULL DEFAULT 0", Down: "ALTER TABLE jobs DROP COLUMN save_started"},
-		// 5: planning by the member's VNAS (docs/architecture/montage-center.md,
+		// 5: planning by the member's VNAS (docs/architecture/videocut-center.md,
 		// 规划). plan_grants: when each member last registered a planning
 		// grant, and under which name the waker knows them. jobs: which want
 		// a round and since when, and their epoch, which replanning raises.
@@ -252,7 +252,7 @@ ALTER TABLE jobs DROP COLUMN plan_wanted;
 DROP TABLE plan_grants;
 `},
 		// 6: a job makes two films to choose from, as the prototype's 方案
-		// (docs/specs/montage-center.md, 两个方案): each plan the job took
+		// (docs/specs/videocut-center.md, 两个方案): each plan the job took
 		// and each version says which of the job's 方案 it is, and a job how
 		// many it makes: one for the jobs from before this step, which go on
 		// as they started. The answers and briefs of step 5 need nothing: a
@@ -304,7 +304,7 @@ ALTER TABLE jobs DROP COLUMN plans;
 ALTER TABLE projects DROP COLUMN song_track;
 `},
 		// 7: planning is a conversation of the member's planning instance
-		// (docs/architecture/montage-planning-session.md): why a round
+		// (docs/architecture/videocut-planning-session.md): why a round
 		// stopped short of the model's planning, which says when the job
 		// asks again (retryWait).
 		{Up: "ALTER TABLE rounds ADD COLUMN failure TEXT NOT NULL DEFAULT ''", Down: "ALTER TABLE rounds DROP COLUMN failure"},

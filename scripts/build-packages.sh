@@ -17,7 +17,7 @@
 #   the assistant's trial is part of a-nas now, and a device that had the trial
 #   updates to this package before apt removes it (ADR 0034).
 # - a-nas-videocut-music, with --videocut-music only: VideoCut's music
-#   analysis (docs/architecture/montage-music.md) at the version of a-nas,
+#   analysis (docs/architecture/videocut-music.md) at the version of a-nas,
 #   which it depends on with its runtime's and models' content packages.
 #   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
@@ -169,7 +169,7 @@ install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
 # The planning instance's policy adds VideoCut's planning server,
 # which no other unit starts, and reviews every planning
-# (docs/architecture/montage-planning-session.md); the fixed prompt templates
+# (docs/architecture/videocut-planning-session.md); the fixed prompt templates
 # the planner fills go beside it.
 install -d "$lib/assistant/managed-plan" "$lib/assistant/videocut-prompts"
 derive_plan_policy "$assistant/managed-config.yaml" "$assistant/videocut-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
@@ -243,7 +243,7 @@ control a-nas-assistant-trial '' >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
 build "$root"
 
-# VideoCut's music analysis (docs/architecture/montage-music.md):
+# VideoCut's music analysis (docs/architecture/videocut-music.md):
 # the Worker's code, its units, each model's manifest and links to the
 # content packages of its models and runtime.
 if "$videocut_music"; then

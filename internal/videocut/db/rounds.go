@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of rounds: the planning rounds the member's VNAS
-// claims, starts and ends (docs/architecture/montage-planning-session.md).
+// claims, starts and ends (docs/architecture/videocut-planning-session.md).
 
 // endRound ends rounds: one only claimed never reached the model and is
 // abandoned, one started is over. Its arguments are the time and the

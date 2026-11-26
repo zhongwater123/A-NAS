@@ -13,7 +13,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 )
 
-// A planning grant (docs/architecture/montage-center.md, 规划授权) is the
+// A planning grant (docs/architecture/videocut-center.md, 规划授权) is the
 // member's own, left behind their live session, for the waker alone.
 func TestAPlanningGrantIsTheSignedInMembersAndRootsAlone(t *testing.T) {
 	plans := filepath.Join(t.TempDir(), "assistant", "plans")

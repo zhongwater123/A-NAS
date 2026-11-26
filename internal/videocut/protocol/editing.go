@@ -11,7 +11,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// Editing a film after it was made (#596; docs/architecture/montage-center.md,
+// Editing a film after it was made (#596; docs/architecture/videocut-center.md,
 // 出片后的二次编辑): confirming a version, its draft and the steps of the
 // edit, candidates for a shot, the shot lists and thumbnails.
 

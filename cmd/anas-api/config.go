@@ -504,7 +504,7 @@ type videoCutServiceConfig struct {
 	// AssistantSocket is where members' planning instances and root's
 	// planner reach VideoCut when systemd does not hold the
 	// socket (development); PlanMarkers is where the planner finds who has
-	// a job to plan (docs/architecture/montage-planning-session.md).
+	// a job to plan (docs/architecture/videocut-planning-session.md).
 	AssistantSocket string `env:"ANAS_VIDEOCUT_ASSISTANT_SOCKET"`
 	PlanMarkers     string `env:"ANAS_VIDEOCUT_PLAN_MARKERS" envDefault:"/run/a-nas-videocut/plans"`
 }

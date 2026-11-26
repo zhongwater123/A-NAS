@@ -15,7 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// The scheduler (docs/architecture/montage-center.md, 持久任务): one
+// The scheduler (docs/architecture/videocut-center.md, 持久任务): one
 // goroutine runs one step of one job at a time. A job claimed holds a lease
 // of five minutes, renewed every 30 seconds; the service is the only one,
 // so at start every running job goes back to the queue at once and goes on
@@ -48,7 +48,7 @@ type stepWait struct {
 
 func (w *stepWait) Error() string { return "waiting: " + w.reason }
 
-// stepNeeds: the member must act (docs/specs/montage-center.md); missing
+// stepNeeds: the member must act (docs/specs/videocut-center.md); missing
 // names the videos concerned.
 type stepNeeds struct {
 	reason  string

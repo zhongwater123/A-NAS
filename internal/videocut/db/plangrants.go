@@ -8,7 +8,7 @@ import (
 )
 
 // The reads and writes of the planning grants' registrations (规划授权;
-// docs/architecture/montage-planning-session.md).
+// docs/architecture/videocut-planning-session.md).
 
 // RegisterPlanGrant records that owner, signed in as username, has a
 // planning grant registered at at, replacing the registration before.

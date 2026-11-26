@@ -41,7 +41,7 @@ check "without a key the model gateway is not running" \
   test "$(systemctl is-active anas-assistant-gateway.service || true)" != active
 check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar "$api/api/v1/assistant-key")" = 403
 # The requests that may lead to planning in VideoCut register a planning grant for
-# the member behind them first (docs/architecture/montage-center.md, 规划授权): the File Broker
+# the member behind them first (docs/architecture/videocut-center.md, 规划授权): the File Broker
 # writes it into the Host Agent's own state, for root's planner alone. Here the job asked for does
 # not exist, so VideoCut answers 404 once the Product Service has passed the request
 # on; without VNAS it passes it on with no grant.
@@ -148,7 +148,7 @@ for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.servi
 done
 check "without the bind, the sandbox's path is the empty mount point" \
   test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
-# VideoCut's socket (docs/architecture/montage-planning-session.md) is the reverse:
+# VideoCut's socket (docs/architecture/videocut-planning-session.md) is the reverse:
 # only a member's planning instance binds it, a second `hermes serve` in her sandbox with the
 # policy and settings that add the videocut server and its tools pinned to videocut, memory and
 # skills; her ordinary instance, scheduled tasks and curator have none of it. Outside a bind
@@ -619,7 +619,7 @@ if "$real_runtime"; then
   echo "INFO assistant run now: $(journalctl -u anas-assistant-cron@alice.service -o cat --no-pager | grep 'queued to run now' | tail -n 1 || true)"
   check "she deletes the task" \
     test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
-  # --- VideoCut's planning (docs/architecture/montage-planning-session.md): a job of
+  # --- VideoCut's planning (docs/architecture/videocut-planning-session.md): a job of
   # hers comes to its planning step; root's planner claims a round for her and hands it to her
   # planning instance as a conversation; the scripted model plays VNAS and plans both 方案 with
   # the four videocut tools, one of its calls taking longer than two minutes; the job goes on

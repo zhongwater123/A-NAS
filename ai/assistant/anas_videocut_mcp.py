@@ -1,4 +1,4 @@
-"""VideoCut's planning tools for a member's VNAS (docs/architecture/montage-planning-session.md).
+"""VideoCut's planning tools for a member's VNAS (docs/architecture/videocut-planning-session.md).
 
 A stdio server inside the member's planning instance (anas-assistant-plan@.service). Each call goes to VideoCut's
  assistant socket, which knows the member by the caller's UID and answers only for their jobs; every call

@@ -83,4 +83,4 @@ git diff --numstat "$base"...HEAD | M="$montage" G="$generated" awk -F'\t' '$3 !
 
 - [AGENTS.md](../../AGENTS.md)：本分支上“剪辑中心分支”一节。
 - [CONTRIBUTING.md](../../CONTRIBUTING.md)：提交、PR 与评审的通用流程。
-- [剪辑中心技术设计](../architecture/montage-center.md)：剪辑中心与相册、AI Worker 的分工，说明为什么预处理会改到公共代码。
+- [剪辑中心技术设计](../architecture/videocut-center.md)：剪辑中心与相册、AI Worker 的分工，说明为什么预处理会改到公共代码。

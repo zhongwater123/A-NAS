@@ -23,7 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
-// VideoCut's assistant socket (docs/architecture/montage-planning-session.md):
+// VideoCut's assistant socket (docs/architecture/videocut-planning-session.md):
 // systemd holds it as anas-videocut-assistant.socket, named "assistant", open
 // to every UID in a directory only root enters; it is bound only into
 // members' planning instances. The peer's UID, which the kernel reports, is

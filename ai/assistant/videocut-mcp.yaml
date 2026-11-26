@@ -1,4 +1,4 @@
-  # VideoCut's planning tools (docs/architecture/montage-planning-session.md):
+  # VideoCut's planning tools (docs/architecture/videocut-planning-session.md):
   # only in the policy of a member's planning instance, which gives the model these
   # tools with memory and skills and nothing else (HERMES_TUI_TOOLSETS). trust: full,
   # for no one is there to approve a call: root's planner refuses every approval the

@@ -9,7 +9,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
 
-// The reads and writes of jobs (docs/architecture/montage-center.md, 持久任务).
+// The reads and writes of jobs (docs/architecture/videocut-center.md, 持久任务).
 
 const (
 	// finishedStates are the states a job ends in, as SQL.
@@ -20,7 +20,7 @@ const (
 	dueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
 )
 
-// --- planning (docs/architecture/montage-planning-session.md) ---
+// --- planning (docs/architecture/videocut-planning-session.md) ---
 
 // wantsRound is what makes a job one a round may be claimed for: it came to
 // planning, waits there for VNAS (its wait reason waitVNAS), and asked for
@@ -163,7 +163,7 @@ func (tx *Tx) MakeWaitingJobDue(ctx context.Context, jobID string, at time.Time)
 	return err
 }
 
-// --- running (docs/architecture/montage-center.md, 持久任务) ---
+// --- running (docs/architecture/videocut-center.md, 持久任务) ---
 
 // CancelRequestedJobs cancels, at at, the jobs being cancelled that have
 // not ended.

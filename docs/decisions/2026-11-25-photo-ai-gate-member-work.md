@@ -52,7 +52,7 @@
 - 定义：[门控与三类工作](../architecture/photo-ai.md#门控与三类工作)
 - 调查：[剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)
 - ADR：[0038 决定 4](../adr/0038-keep-montage-media-in-the-photo-library.md)
-- 设计：[剪辑中心的调度](../architecture/montage-center.md)、[资源策略](../architecture/photo-objects.md#资源策略)
-- 规格：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)
+- 设计：[剪辑中心的调度](../architecture/videocut-center.md)、[资源策略](../architecture/photo-objects.md#资源策略)
+- 规格：[剪辑中心](../specs/videocut-center.md)、[相册视频](../specs/photo-video.md)
 - 代码：[`gate.go`](../../internal/photoservice/gate.go) 的 `OpenForMember` 与 `ContinueForMember`，[`montagewindows.go`](../../internal/photos/montagewindows.go) 的 `MemberGate`，[`airunner.go`](../../internal/photos/airunner.go) 的 `round`
 - 测试：`TestTheMontageAnalysisGoesOnWhileTheLibraryIsInUse`、`TestAMembersWorkIsNotHeldBackByUseOfTheLibrary`

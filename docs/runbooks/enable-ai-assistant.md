@@ -35,7 +35,7 @@
    systemctl list-units --no-legend 'anas-assistant-api@*.socket' 'anas-assistant-planapi@*.socket'
    ```
 
-   - 预期：凭据为 `600 root`；三个服务都是 `active`（`anas-videocut-planner` 把剪辑中心的规划交给成员的规划进程，[规划会话](../architecture/montage-planning-session.md)）；每个已启用的成员一个 `anas-assistant-api@<账号>.socket` 与一个 `anas-assistant-planapi@<账号>.socket`，停用的账号没有。
+   - 预期：凭据为 `600 root`；三个服务都是 `active`（`anas-videocut-planner` 把剪辑中心的规划交给成员的规划进程，[规划会话](../architecture/videocut-planning-session.md)）；每个已启用的成员一个 `anas-assistant-api@<账号>.socket` 与一个 `anas-assistant-planapi@<账号>.socket`，停用的账号没有。
 
 ## 从试用接管
 

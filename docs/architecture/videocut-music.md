@@ -3,7 +3,7 @@
 状态：M8b（[#559](https://github.com/zhongwater123/A-NAS/issues/559)）已实现选歌复制、配乐分析 Worker、`music` 选段、试听与起点；allin1 的商业版权待议，待议期间配乐分析只在开发机与实验 NAS 上运行，见“版权待议期间”
 更新时间：2026-11-19
 
-本文是[剪辑中心实施方案](montage-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](../specs/montage-center.md#配乐)为准。
+本文是[剪辑中心实施方案](videocut-center.md#配乐)“配乐”一节在 M8b 的落地：选歌怎样复制、allin1 在哪里跑、运行环境与权重怎样交付、内存与用时的实测。产品行为以[剪辑中心规格](../specs/videocut-center.md#配乐)为准。
 
 ## 数据流
 
@@ -22,7 +22,7 @@
    剪辑计算 Worker 的 music：第八版的选段与小节槽 → songs 行：ready 或 unusable（原因）
 ```
 
-- **复制**：`protocol.CopySong` 是 anas-api 对 `PUT /api/v1/videocut/projects/{id}/song` 的专门处理（[`internal/videocut/protocol/song.go`](../../internal/videocut/protocol/song.go)）。它调 `music.Service.OpenTrack`，与音乐播放相同，看不到的曲目（包括别人个人空间里的）回答 404；音乐库已知的大小与时长先挡掉超限的，不复制。文件在扫描之后被删回答 404，成员已无权打开回答 403，与音乐功能播放这首歌时相同。歌曲经 `X-A-NAS-Song` 头带上标题与能否直接播放（音乐功能的 `Transcode`）；标题先截到剪辑中心保存的 200 个字符（`montage.SongTitle`），再长的标签也放得进这个头。这个头只由 anas-api 设置：转发代理先去掉浏览器发来的所有 `X-A-NAS-` 头，再放上 anas-api 生成的这一个（[`serviceproxy.WithInternalHeader`](../../internal/serviceproxy/serviceproxy.go)）。
+- **复制**：`protocol.CopySong` 是 anas-api 对 `PUT /api/v1/videocut/projects/{id}/song` 的专门处理（[`internal/videocut/protocol/song.go`](../../internal/videocut/protocol/song.go)）。它调 `music.Service.OpenTrack`，与音乐播放相同，看不到的曲目（包括别人个人空间里的）回答 404；音乐库已知的大小与时长先挡掉超限的，不复制。文件在扫描之后被删回答 404，成员已无权打开回答 403，与音乐功能播放这首歌时相同。歌曲经 `X-A-NAS-Song` 头带上标题与能否直接播放（音乐功能的 `Transcode`）；标题先截到剪辑中心保存的 200 个字符（`app.SongTitle`），再长的标签也放得进这个头。这个头只由 anas-api 设置：转发代理先去掉浏览器发来的所有 `X-A-NAS-` 头，再放上 anas-api 生成的这一个（[`serviceproxy.WithInternalHeader`](../../internal/serviceproxy/serviceproxy.go)）。
 - **收下**：剪辑服务边收边算 SHA-256，超过 100 MiB 回答 413；再请 FFmpeg Worker probe，没有音频或时长不在 30 秒到 8 分钟回答 422（上限见“用时与内存”）（[`internal/videocut/app/songs.go`](../../internal/videocut/app/songs.go)）。副本按内容存成 `songs/<sha256>/audio`，几位成员选同一首共用一份。
 - **表**：`videocut.db` 第 2 步加 `songs`（每位成员一行：摘要、标题、时长、状态、不可用的原因、等待的原因、分析结果与响度）与 `projects.song_id`、`song_start`、`song_selection`，带 Down（[`internal/videocut/app/store.go`](../../internal/videocut/app/store.go)）。`song_selection` 是成员拖动起点后那一段的选段，连同计算 Worker 的领域代码读的那份数据：读项目不用再算，任务也直接用成员看到的这一段，不再找计算 Worker。
 - **回收**：删除项目、换歌、删除账号后，删掉没有项目再用的 `songs` 行，再删掉没有行引用的副本目录；存储打开时对一次账，清掉没收完的 `songs/.incoming/`，再开始分析（`Store.StartWorkers`）。进行中的任务开始时记下的那首歌也算引用：项目换了歌，原来的副本留到这个任务结束或取消（`unusedSongs`，[`internal/videocut/app/songs.go`](../../internal/videocut/app/songs.go)）。
@@ -39,7 +39,7 @@
 
 - **默认选段**：原样调用第八版的 `domain.music.from_structure`。黄金比对：用第八版的 10 个 allin1 结构文件，选段与小节槽和第八版逐个相同，见“验证”。
 - **没找到副歌**：`from_structure` 找不到副歌时，把两小节以上、平均响度最高的段落当作副歌再选，回答 `chorus: false`，配乐页提示“没找到副歌，请试听确认”。
-- **拖动起点**：剪辑服务先把起点吸附到最近的重拍（`montage.nearest`），`music` 用第八版同一份段落整理与切槽（`domain.music` 的 `sections` 与 `parts`，默认选段也调用它们），从起点切到目标时长附近的重拍，没那么长就到音乐结束。成片从新起点开始，时长等于选段。
+- **拖动起点**：剪辑服务先把起点吸附到最近的重拍（`app.SongStart`），`music` 用第八版同一份段落整理与切槽（`domain.music` 的 `sections` 与 `parts`，默认选段也调用它们），从起点切到目标时长附近的重拍，没那么长就到音乐结束。成片从新起点开始，时长等于选段。
 - **拖回默认起点**：起点落在默认起点所在的重拍上时，项目不再记起点，回到默认选段。默认选段在段落边界结束，从同一个起点按固定时长切出来的那一段和它不一样。默认起点保留两位小数，重拍保留三位，所以两者按重拍比较，任务判断“是不是默认选段”用同一条规则。
 - **不可用**：有效小节少于 16 个（`few_bars`）；选段不在 30–150 秒（`no_excerpt`）；最长的槽超过 12 秒（`long_slot`，`segment` 的上限）；解码失败或 allin1 拒收（`undecodable`）；分析失败 3 次，或计算 Worker 读不了 allin1 给的结构（`analysis_failed`）。
 - **登记**：`worker.py` 的 `OPS` 里有 `"music": music_ops.op_music`，测试经 Worker 的正常入口调用它。Go 侧的调用在 [`internal/videocutcompute/music.go`](../../internal/videocutcompute/music.go)。
@@ -77,7 +77,7 @@
 
 许可的核对与要议的问题见[决定记录](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)。
 
-- allin1、Demucs 的权重与这个运行环境都不进任何 release，只在开发机与实验 NAS 上按[启用手册](../runbooks/enable-montage-music.md)手动装；
+- allin1、Demucs 的权重与这个运行环境都不进任何 release，只在开发机与实验 NAS 上按[启用手册](../runbooks/enable-videocut-music.md)手动装；
 - 没装时剪辑中心照常运行，选的歌停在 `analyzing`，写明在等配乐分析；
 - 结论是不能随产品分发时，按实施方案退回 beat_this 与色度自相似，`music` 的输入格式不变。
 
@@ -112,7 +112,7 @@
 
 ## 用时与内存
 
-每首歌起一个 Worker，从启动、核对权重、读入两条流到回答为止计时，峰值内存是这个进程的最大常驻内存（模型在内）。实验 NAS 的 x86 处理器还没测，按[启用手册](../runbooks/enable-montage-music.md)第 5 步补。
+每首歌起一个 Worker，从启动、核对权重、读入两条流到回答为止计时，峰值内存是这个进程的最大常驻内存（模型在内）。实验 NAS 的 x86 处理器还没测，按[启用手册](../runbooks/enable-videocut-music.md)第 5 步补。
 
 | 歌 | 时长（秒） | 开发机 C：用时（秒） | 开发机 C：峰值（MiB） | 虚拟机：用时（秒） | 虚拟机：峰值（MiB） |
 |---|---|---|---|---|---|
@@ -143,17 +143,17 @@
 
 **最长 8 分钟（2026-11-18，用户决定）**：按 229 到 457 秒之间每秒约 7 MiB 外推，规格原来允许的 15 分钟要约 7.3 GiB，接近 8 GB 的全部预算。可选的做法有三种：降低能分析的最长时长；在结果不变的前提下继续省内存；放宽这个 Worker 的内存上限。用户选了第一种，最长 8 分钟。
 
-- 剪辑服务收歌的上限、`song_length` 的提示、`music` 与 Worker 能接受的长度都改为 8 分钟（`montage.MaxSongSeconds`）。
+- 剪辑服务收歌的上限、`song_length` 的提示、`music` 与 Worker 能接受的长度都改为 8 分钟（`app.MaxSongSeconds`）。
 - 单元的 `MemoryMax=5632M`：8 分钟的歌实测峰值 4593 MiB，多留约五分之一。
 - 两份模型清单的 `memoryBytes` 记这次实测：allin1 记整个 Worker 的峰值，htdemucs 记分离完的高水位。
 - 分离与谱两步改成少留几份整首大小的数据（`separate`、谱前先放掉浮点音轨），见“配乐分析 Worker”。用 `--check-separation` 核对过分离结果与 Demucs 原写法逐位相同；STAY 的结构与改动前逐个相同。
 
 ## 关联
 
-- 规格与方案：[剪辑中心规格的“配乐”](../specs/montage-center.md#配乐)、[实施方案的“配乐”](montage-center.md#配乐)、[决定记录“allin1 的商业版权”](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)
+- 规格与方案：[剪辑中心规格的“配乐”](../specs/videocut-center.md#配乐)、[实施方案的“配乐”](videocut-center.md#配乐)、[决定记录“allin1 的商业版权”](../decisions/2026-11-17-montage-center-first-version.md#allin1-的商业版权)
 - 需求：[#559](https://github.com/zhongwater123/A-NAS/issues/559)（M8b 配乐），父 issue [#514](https://github.com/zhongwater123/A-NAS/issues/514)
 - ADR：[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（运行环境与模型的交付做法）
-- 手册：[在实验 NAS 上启用配乐分析](../runbooks/enable-montage-music.md)
+- 手册：[在实验 NAS 上启用配乐分析](../runbooks/enable-videocut-music.md)
 - 代码：
   - 选歌、副本与回收、试听、起点：[`internal/videocut/protocol/song.go`](../../internal/videocut/protocol/song.go)、[`internal/videocut/app/songs.go`](../../internal/videocut/app/songs.go)
   - 分析、等待与失败：[`internal/videocut/app/analysis.go`](../../internal/videocut/app/analysis.go)、[`internal/videocut/external/music.go`](../../internal/videocut/external/music.go)

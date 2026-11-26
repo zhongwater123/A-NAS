@@ -22,7 +22,7 @@ const states: Record<UploadItem["state"], string> = {
 // NewProject makes a project of videos the member uploads now, through the
 // photo library's upload queue into their private library, or picks from a
 // library they can see, their own or the shared one
-// (docs/specs/montage-center.md, 上传一批视频新建项目、从相册选视频). With
+// (docs/specs/videocut-center.md, 上传一批视频新建项目、从相册选视频). With
 // into, the videos join that project instead. Only videos that uploaded go
 // in: the failed may be retried or left out. It is laid out as the
 // prototype's footage panel: a drop zone, or the photo library.

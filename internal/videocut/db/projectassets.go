@@ -9,7 +9,7 @@ import (
 
 // The reads and writes of project_assets: the videos a project holds,
 // each with the content it was added with (docs/architecture/
-// montage-center.md).
+// videocut-center.md).
 
 // AddProjectAsset records that batchID added assetID, as objectID, to
 // projectID at at; nothing when the project holds it already.

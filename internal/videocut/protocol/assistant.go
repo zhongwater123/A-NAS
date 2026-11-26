@@ -15,7 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// VideoCut's assistant socket (docs/architecture/montage-planning-session.md):
+// VideoCut's assistant socket (docs/architecture/videocut-planning-session.md):
 // bound only into each member's planning instance, where the VideoCut MCP
 // server reaches it, and reached outside the sandboxes by root's planner,
 // which claims and reports the rounds. The VideoCut service knows the member

@@ -9,7 +9,7 @@ import (
 )
 
 // The reads and writes of versions: the films saved, each with what it was
-// cut from (docs/architecture/montage-center.md).
+// cut from (docs/architecture/videocut-center.md).
 
 // PlanStepSQL is the name a 方案's step has (app's planStep) as SQL, for
 // a step's plain name and the column that holds the 方案

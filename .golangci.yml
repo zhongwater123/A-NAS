@@ -194,7 +194,7 @@ linters:
               desc: the update service runs as root in anas-update.service; use internal/systemupdate
             - pkg: "github.com/landlock-lsm/go-landlock"
               desc: the root broker confines its workers
-        # VideoCut's layers (docs/architecture/montage-center.md,
+        # VideoCut's layers (docs/architecture/videocut-center.md,
         # 代码结构; #639): only the inner layers are held. domain uses the
         # standard library and the contract packages; db adds the basic
         # libraries; app adds the FFmpeg Worker's types and, file by file,

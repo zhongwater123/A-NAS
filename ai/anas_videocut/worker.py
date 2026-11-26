@@ -1,4 +1,4 @@
-"""VideoCut's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
+"""VideoCut's compute Worker (docs/architecture/videocut-center.md, 剪辑计算 Worker).
 
 It runs the prototype's pure computation (algo/) for the photo service,
 which cuts cards and measures their quality, and for VideoCut,
