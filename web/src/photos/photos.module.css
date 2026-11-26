@@ -808,21 +808,20 @@
 .ph-check:hover {
   background: rgba(255, 255, 255, 0.35);
 }
-/* No hover on a touch screen: the circle shows only while choosing, and an
-   unseen one does not catch taps meant for the photo. It is bigger to hit. */
-@media (hover: none) {
-  .ph-tile:not(.selecting) .ph-check {
-    pointer-events: none;
-  }
-  .ph-tile:hover:not(.selecting) .ph-check {
-    opacity: 0;
-  }
-  .ph-check {
-    top: 4px;
-    left: 4px;
-    width: 28px;
-    height: 28px;
-  }
+/* A touch screen (lib/touch.ts) has no hover: the circle shows only while
+   choosing, and an unseen one does not catch taps meant for the photo. It is
+   bigger to hit. */
+:global(:root[data-touch]) .ph-tile:not(.selecting) .ph-check {
+  pointer-events: none;
+}
+:global(:root[data-touch]) .ph-tile:hover:not(.selecting) .ph-check {
+  opacity: 0;
+}
+:global(:root[data-touch]) .ph-check {
+  top: 4px;
+  left: 4px;
+  width: 28px;
+  height: 28px;
 }
 .ph-tile.selected .ph-check {
   border-color: #fff;

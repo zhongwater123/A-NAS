@@ -626,7 +626,7 @@ describe("PhotosPanel selection", () => {
   });
 
   it("selects with a long press on a phone, then with taps, and leaves the right button to a mouse", async () => {
-    const uninstall = installTouchInput(window, { longPress: false });
+    const uninstall = installTouchInput();
     try {
       serve({ timelines: mine(photos) });
       const user = userEvent.setup();

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { installTouchInput } from "../lib/touch";
+import { coarsePointer, installTouchInput } from "../lib/touch";
 import { SharesProvider } from "../shares/SharesProvider";
 import {
   downloads,
@@ -398,8 +398,8 @@ describe("file manager", () => {
   });
 
   it("opens a file on a tap on a touch screen, and a long press selects it for more", async () => {
-    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)" }));
-    const uninstall = installTouchInput(window, { longPress: false });
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === coarsePointer }));
+    const uninstall = installTouchInput();
     try {
       const entries = [
         entry("beach.jpg", { id: "file:beach", spaceId: ownSpace.id }),
