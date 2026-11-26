@@ -135,7 +135,7 @@ internal/videocut/
 internal/videocutcompute/   计算工人的客户端与消息类型
 ```
 
-- 2026-11-26 [#670](https://github.com/zhongwater123/A-NAS/issues/670) 搬完家，[#665](https://github.com/zhongwater123/A-NAS/issues/665) 从 `app/` 拆出 `domain/`、`db/`、`external/`：`app` 不再写 SQL，`db.DB`、`db.Tx` 不把 `*sql.DB`、`*sql.Tx` 交出去（测试另有 `SQLForTests`）。修改稿操作的规则（`editSource` 一组）还在 `app`。
+- 2026-11-26 [#670](https://github.com/zhongwater123/A-NAS/issues/670) 搬完家，[#665](https://github.com/zhongwater123/A-NAS/issues/665) 从 `app/` 拆出 `domain/`、`db/`、`external/`：`app` 不再写 SQL，`db.DB`、`db.Tx` 不把 `*sql.DB`、`*sql.Tx` 交出去（测试另有 `SQLForTests`）。`domain` 已有修改稿的状态与节拍的名字（`draftops.go`）、成片的帧与逐槽核对（`timeline.go`）、选段的计算（`excerpt.go`）；修改稿 9 种操作的规则（`editSource` 一组）、`validateTimeline` 与歌曲行上的 `excerptStart` 还在 `app`：前两者读的 `analysedVideo` 带 `photos.Window`，等这个值类型挪进 `photosapi` 再挪；`excerptStart` 按 `app` 的歌曲状态回答。
 - `protocol` → `app` → `domain`、`db`；`external` 实现 `app` 定义的接口（谁用接口谁定义，测 `app` 时直接放替身）；`db`、`external` 不引用 `app`、`protocol`；`domain` 不引用其他层；只有 `videocut.go` 认识各层的具体实现，`app` 对外部能力的接口检查（如计算工人的客户端是 `app.Compute`）也放在那里，因为 `external` 不能引用 `app`。`ports.go` 签名里出现的类型都放在 `domain` 或协议类型包里。
 - 事务跨 `app`/`db`：`app` 在 `db.Update` 的回调里按业务顺序调 `db.Tx` 的方法、做判断，自己不写 SQL；修改稿“读修订号、核对、写一步、加修订号”仍由 `app` 主导。`db` 不抽成接口，测试用临时 SQLite。
 - 错误到 HTTP 状态码的对应只在 `protocol` 写一处。
