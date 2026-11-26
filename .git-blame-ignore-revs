@@ -1,5 +1,12 @@
-# Commits that only reformat code. GitHub's blame skips them; locally run
+# Commits that only reformat or move code. GitHub's blame skips them; locally run
 #   git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 # style(web): format the Web UI with Biome
 eeabfc204be5ba3995c2202bb27b682746fa2155
+
+# refactor(videocut): move the Go packages into internal/videocut (#670)
+6d29e1657126e5196b74f20c42995c3f51c06105
+# refactor(videocut): move web/src/montage into web/src/videocut (#666)
+70c4f48281f90d4e14b97f84c0d24953a71347e1
+# refactor(videocut): move ai/anas_montage to ai/anas_videocut (#667)
+712559eb1a4a2117e8f90247b577dbe692704da3
