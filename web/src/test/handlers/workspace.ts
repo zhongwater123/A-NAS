@@ -5,8 +5,10 @@ import type {
   AgentToken,
   WorkspaceMemberAccount,
   WorkspacePage,
+  WorkspacePresence,
   WorkspaceSelection,
   WorkspaceVersion,
+  WorkspaceViewing,
 } from "../../api.generated";
 import { apiError, http } from "../server";
 
@@ -35,28 +37,35 @@ export function workspacePage(id: string, title: string, versions: WorkspaceVers
     createdAt: versions[0]?.savedAt ?? new Date().toISOString(),
     latest: newest[0],
     versions: newest,
+    presence: nobody(),
   };
 }
 
-const summaryOf = ({ id, title, createdBy, createdAt, latest }: WorkspacePage) => ({
+// nobody is a page's presence when no one has it open.
+export const nobody = (): WorkspacePresence => ({ viewers: [], agents: [] });
+
+const summaryOf = ({ id, title, createdBy, createdAt, latest, presence }: WorkspacePage) => ({
   id,
   title,
   createdBy,
   createdAt,
   latest,
+  presence,
 });
 
 export interface WorkspaceStore {
   pages: WorkspacePage[];
   selection?: WorkspaceSelection;
-  viewing?: { pageId: string; version: number };
+  // viewing is what this tab said it shows; reports counts what it said.
+  viewing?: WorkspaceViewing;
+  reports: WorkspaceViewing[];
   members: WorkspaceMemberAccount[];
   tokens: AgentToken[];
   uploads: { name: string | null; base?: number; body: string }[];
 }
 
 export function workspaceStore(pages: WorkspacePage[] = []): WorkspaceStore {
-  return { pages, members: [], tokens: [], uploads: [] };
+  return { pages, members: [], tokens: [], uploads: [], reports: [] };
 }
 
 // addVersion saves a version as the service would, for a test to bring in
@@ -66,7 +75,9 @@ export function addVersion(store: WorkspaceStore, pageId: string, saved: Omit<Pa
   if (!page) throw new Error(`no page ${pageId}`);
   const next = version(page.latest.version + 1, saved);
   const updated = workspacePage(page.id, page.title, [next, ...page.versions]);
-  store.pages = store.pages.map((item) => (item.id === pageId ? { ...updated, createdBy: page.createdBy } : item));
+  store.pages = store.pages.map((item) =>
+    item.id === pageId ? { ...updated, createdBy: page.createdBy, presence: page.presence } : item,
+  );
   return next;
 }
 
@@ -109,10 +120,11 @@ export function workspaceHandlers(store: WorkspaceStore) {
     }),
     http.put("/api/v1/workspace/viewing", async ({ request, response }) => {
       store.viewing = await request.json();
+      store.reports.push(store.viewing);
       return response(204).empty();
     }),
-    http.delete("/api/v1/workspace/viewing/{pageId}", ({ params, response }) => {
-      if (store.viewing?.pageId === params.pageId) store.viewing = undefined;
+    http.delete("/api/v1/workspace/viewing/{tab}", ({ params, response }) => {
+      if (store.viewing?.tab === params.tab) store.viewing = undefined;
       return response(204).empty();
     }),
     http.put("/api/v1/workspace/selection", async ({ request, response }) => {

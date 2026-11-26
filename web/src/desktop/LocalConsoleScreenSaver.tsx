@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { onLocalConsoleActive } from "../lib/localConsole";
 import { readLocalDisplay } from "./api";
-import styles from "./desktop.module.css";
+import styles from "./localConsoleScreenSaver.module.css";
 
 export const localConsoleScreenSaverIdleMs = 180_000;
 export const localConsoleScreenSaverManifest = "/local-console/screensavers";
@@ -38,9 +39,7 @@ export function onLocalConsoleDismissed(listener: () => void): () => void {
   };
 }
 
-export function isLocalConsole(search = window.location.search): boolean {
-  return new URLSearchParams(search).get("local-console") === "1";
-}
+export { isLocalConsole } from "../lib/localConsole";
 
 export async function loadScreenSaverVideos(): Promise<string[]> {
   const response = await fetch(localConsoleScreenSaverManifest, { cache: "no-store" });
@@ -197,9 +196,15 @@ export function LocalConsoleScreenSaver({
 
     activityEvents.forEach((name) => window.addEventListener(name, activity, { capture: true, passive: false }));
     document.addEventListener("visibilitychange", visibilityChanged);
+    // Use the page reports where its window cannot see, inside a frame. A
+    // cover hides the frame, so only input takes a cover away.
+    const offActive = onLocalConsoleActive(() => {
+      if (phaseRef.current === "awake") schedule();
+    });
     schedule();
     return () => {
       clearTimers();
+      offActive();
       activityEvents.forEach((name) => window.removeEventListener(name, activity, { capture: true }));
       document.removeEventListener("visibilitychange", visibilityChanged);
       setPhase("awake");

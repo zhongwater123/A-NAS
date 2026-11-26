@@ -155,7 +155,7 @@ paths:
   /api/v1/workspace/pages/{pageId}/versions/{version}/view: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1view" }
   /api/v1/workspace/pages/{pageId}/versions/{version}/file: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1file" }
   /api/v1/workspace/viewing: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing" }
-  /api/v1/workspace/viewing/{pageId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing~1{pageId}" }
+  /api/v1/workspace/viewing/{tab}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing~1{tab}" }
   /api/v1/workspace/selection: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1selection" }
   /api/v1/workspace/admin/members: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1admin~1members" }
   /api/v1/workspace/admin/members/{accountId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1admin~1members~1{accountId}" }

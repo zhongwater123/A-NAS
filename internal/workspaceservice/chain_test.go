@@ -178,7 +178,7 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 
 	// The member picks the button: the frame reports its data-anas-at.
 	button := bytes.Index(source, []byte(`<button class="btn btn-primary">`))
-	member.call(t, http.MethodPut, "/api/v1/workspace/viewing", "application/json", []byte(`{"pageId":"`+page.ID+`","version":1}`))
+	member.call(t, http.MethodPut, "/api/v1/workspace/viewing", "application/json", []byte(`{"pageId":"`+page.ID+`","version":1,"tab":"tab-1","focused":true}`))
 	selection := `{"pageId":"` + page.ID + `","version":1,"at":` + strconv.Itoa(button) + `,"generated":false,"tag":"button","text":"发出分享","dom":"",` +
 		`"rect":{"x":10,"y":20,"w":120,"h":52},"style":{"padding":"14px 28px"},"rules":[".btn",".btn-primary"]}`
 	if status, body := member.call(t, http.MethodPut, "/api/v1/workspace/selection", "application/json", []byte(selection)); status != http.StatusNoContent {
@@ -207,6 +207,11 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 			t.Fatalf("the context lacks %s:\n%s", want, read)
 		}
 	}
+	// The owner sees whose agent is at work on the page before it saves.
+	status, body = owner.call(t, http.MethodGet, "/api/v1/workspace/pages", "", nil)
+	if status != http.StatusOK || !strings.Contains(string(body), `"agents":[{"member":{"id":"`+alice.ID+`","name":"alice"},"via":{"kind":"claude-code","name":"办公电脑"},"action":"read","version":1`) {
+		t.Fatalf("the list while the agent works: %d %s", status, body)
+	}
 	rule := ".btn { border: 0; border-radius: 10px; padding: 14px 28px; font-size: 16px; font-weight: 600; cursor: pointer; }"
 	edited, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "workspace_edit_page", Arguments: map[string]any{
 		"page": page.ID, "base_version": 1, "note": "把按钮改小",
@@ -233,6 +238,9 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 	if status != http.StatusOK || json.Unmarshal(body, &saved) != nil || saved.Latest.Version != 2 || saved.Latest.Note != "把按钮改小" ||
 		saved.Latest.Via.Kind != "claude-code" || saved.Latest.Via.Name != "办公电脑" || saved.Latest.SavedBy.Name != "alice" {
 		t.Fatalf("the page after the agent's edit: %d %s", status, body)
+	}
+	if !strings.Contains(string(body), `"agents":[]`) {
+		t.Fatalf("the agent that saved is still at work: %s", body)
 	}
 	status, file := member.call(t, http.MethodGet, "/api/v1/workspace/pages/"+page.ID+"/versions/2/file", "", nil)
 	if status != http.StatusOK || !bytes.Contains(file, []byte("padding: 8px 18px; font-size: 14px")) {
