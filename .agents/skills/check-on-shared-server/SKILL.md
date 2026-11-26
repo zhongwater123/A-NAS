@@ -22,39 +22,44 @@ description: 在共享开发服务器上运行 A-NAS 的完整门禁（make chec
 host=shared-dev
 rev=$(git rev-parse --short=12 HEAD)
 dir=anas-check/gate-$rev
-git archive --format=tar HEAD | ssh "$host" "rm -rf ~/$dir && mkdir -p ~/$dir && tar -C ~/$dir -xf -"
+git archive --format=tar HEAD | ssh "$host" "rm -rf ~/$dir && mkdir -p ~/$dir/src && tar -C ~/$dir/src -xf -"
 ssh "$host" "cat > ~/$dir/run.sh" <<'EOF'
-cd "$(dirname "$0")"
+#!/usr/bin/env bash
+cd "$(dirname "$0")/src" || exit
 . /etc/profile.d/anas-toolchain.sh
-bash scripts/fetch-qdrant.sh > fetch.log 2>&1
+bash scripts/fetch-qdrant.sh > ../fetch.log 2>&1
 ANAS_QDRANT_REQUIRED=1 ANAS_MONTAGE_PYTHON=python3 timeout 90m \
-  anas-gate -k check-steps PIP_AUDIT="timeout 600 pip-audit" > gate.log 2>&1
-echo $? > done
+  anas-gate -k check-steps PIP_AUDIT="timeout 600 pip-audit" > ../gate.log 2>&1
+echo "$?" > ../status
 EOF
 ssh "$host" "cd ~/$dir && { setsid nohup bash run.sh > /dev/null 2>&1 < /dev/null & echo \$! > pid; }"
 ```
 
+- 提交解到 `src/`，运行脚本、进程号、退出码与日志放在它外面：`ops-check` 对副本里所有 `.sh` 跑 shellcheck，放在里面的运行脚本会让门禁失败（2026-11-26）。
 - 写脚本与启动分成两次 SSH 调用：写在一起时，`cat > f && … &` 会把 `cat` 也放到后台，脚本传过去是空的。
 - 启动命令报 255（连接被重置）时，先看 `ssh "$host" "cat ~/$dir/pid"` 与进程还在不在，不要直接再启动一遍。
 
-**2. 等它结束（后台任务）。** 完成标记出现或进程消失就返回；只有断线（ssh 退出码 255）才重连再等：
+**2. 等它结束（后台任务）。** 退出码文件出现或进程消失就返回；只有断线（ssh 退出码 255）才重连再等：
 
 ```bash
 until ssh -o ServerAliveInterval=30 "$host" \
-  "cd ~/$dir; while [ ! -f done ] && kill -0 \"\$(cat pid)\" 2>/dev/null; do sleep 20; done; exit 0"; do sleep 30; done
+  "cd ~/$dir; while [ ! -f status ] && kill -0 \"\$(cat pid)\" 2>/dev/null; do sleep 20; done; exit 0"; do sleep 30; done
 ```
 
 不要用 `pgrep -f` 判断任务是否还在：远端的 `bash -c` 自己的命令行里就带着那个名字，循环永远不会结束。
 
+要中途停掉，杀整个进程组：`ssh "$host" "kill -- -\$(cat ~/$dir/pid)"`。`setsid` 让这个进程号同时是进程组号；只杀 `bash run.sh` 一个进程，make 与测试进程会成为孤儿留下来（2026-11-26 试过）。
+
 **3. 取结果并清理：**
 
 ```bash
-ssh "$host" "cd ~/$dir && echo exit=\$(cat done 2>/dev/null || echo cut-off) && tail -n 80 gate.log"
+ssh "$host" "cd ~/$dir && echo exit=\$(cat status 2>/dev/null || echo cut-off) && tail -n 80 gate.log"
 mkdir -p build && scp -q "$host:$dir/gate.log" "build/shared-gate-$rev.log"
 ssh "$host" "rm -rf ~/$dir; ps -u \"\$USER\" -o pid,ppid,etime,args | grep -v -e sshd: -e 'ps -u' -e 'grep -v'"
 ```
 
-- `exit=0` 是通过；`exit=124` 是 90 分钟超时；`cut-off` 是进程没写完成标记就没了。
+- `exit=0` 是通过；`exit=124` 是 90 分钟超时；`cut-off` 是进程没写退出码就没了。
+- 失败的是哪一步：在日志里找 `make[1]: ***` 开头的行。
 - 最后一行列出自己在服务器上的进程。PPID 为 1 的 `qdrant` 是被打断的测试留下的孤儿，会一直占着一个门禁槽位，杀掉它。
 
 ## 变体
