@@ -7,6 +7,7 @@ import type { AgentToken } from "../api.generated";
 import { session } from "../test/fixtures";
 import { agentTokenHandlers } from "../test/handlers/workspace";
 import { server } from "../test/server";
+import { agentTokenClient } from "../workspace/agentTokens";
 import { AgentTokens } from "./AgentTokens";
 
 const token = (id: string, name: string, lastUsedAt?: string): AgentToken => ({
@@ -19,15 +20,17 @@ const token = (id: string, name: string, lastUsedAt?: string): AgentToken => ({
 });
 
 let store: { tokens: AgentToken[] };
+const account = session({}, { csrfToken: "csrf" });
 beforeEach(() => {
-  setSession(session({}, { csrfToken: "csrf" }));
+  setSession(account);
+  agentTokenClient.clear();
   store = { tokens: [] };
   server.use(...agentTokenHandlers(store));
 });
 
 describe("已连接的 agent", () => {
   it("is not there for an account that connected none", async () => {
-    const { container } = render(<AgentTokens />);
+    const { container } = render(<AgentTokens account={account.user.id} />);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(container.textContent).toBe("");
   });
@@ -35,7 +38,7 @@ describe("已连接的 agent", () => {
   it("lists the agents and cuts one off", async () => {
     const user = userEvent.setup();
     store.tokens = [token("tok_1", "办公电脑", new Date().toISOString()), token("tok_2", "笔记本")];
-    render(<AgentTokens />);
+    render(<AgentTokens account={account.user.id} />);
     expect(await screen.findByText("Claude Code · 刚刚使用")).toBeTruthy();
     expect(screen.getByText("Claude Code · 还没用过")).toBeTruthy();
     await user.click(screen.getAllByRole("button", { name: "撤销" })[0]);

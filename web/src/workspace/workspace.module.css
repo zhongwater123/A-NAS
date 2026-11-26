@@ -24,6 +24,10 @@
   font-size: 13.5px;
   line-height: 1.5;
 }
+/* An account an administrator took out sees why, alone. */
+.ws-app.closed {
+  grid-template-columns: minmax(0, 1fr);
+}
 :where(.ws-app) :where(button, input) {
   font: inherit;
   color: inherit;

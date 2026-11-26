@@ -16,6 +16,7 @@ import {
   reportViewing,
   saveVersion,
   setSelection,
+  stopViewing,
   viewURL,
   type WorkspacePage,
   type WorkspaceVersion,
@@ -94,10 +95,18 @@ export function PageView({
   useEffect(() => {
     if (missing) onGone();
   }, [missing, onGone]);
+  // What the window shows is "this page" to the member's agent: said again
+  // every minute while it is open (the service forgets it after three
+  // quiet minutes) and taken back when it closes.
   const version = load?.version;
   useEffect(() => {
-    if (version) void reportViewing(pageId, version).catch(() => undefined);
+    if (!version) return;
+    const report = () => void reportViewing(pageId, version).catch(() => undefined);
+    report();
+    const again = setInterval(report, 60_000);
+    return () => clearInterval(again);
   }, [pageId, version]);
+  useEffect(() => () => void stopViewing(pageId).catch(() => undefined), [pageId]);
 
   if (!page || !load) {
     if (query.isError && !missing) return <Failed error={query.error} onRetry={() => void query.refetch()} />;
@@ -163,6 +172,9 @@ function Viewer({
   const [blocked, setBlocked] = useState<Blocked[]>([]);
   const [errors, setErrors] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
+  // armed is whether the frame was asked to pick: the page's own scripts can
+  // post "picked" too, and each one accepted costs the frame a picture.
+  const armed = useRef(false);
   const [selected, setSelected] = useState<Selected>();
   const capture = useRef<{ id: number; selection: Selected }>(undefined);
   const captures = useRef(0);
@@ -173,6 +185,14 @@ function Viewer({
     // The frame's origin is opaque: only "*" reaches it.
     frame.current?.contentWindow?.postMessage(message, "*");
   }, []);
+  const pick = useCallback(
+    (on: boolean) => {
+      armed.current = on;
+      setPicking(on);
+      post({ type: "anas:pick", on });
+    },
+    [post],
+  );
 
   // A new frame starts afresh.
   const [shownSrc, setShownSrc] = useState(src);
@@ -206,6 +226,8 @@ function Viewer({
       if (!message) return;
       switch (message.type) {
         case "anas:ready":
+          // A new frame, not picking.
+          armed.current = false;
           setReady(true);
           setBlocked((current) => merge(current, message.blocked));
           break;
@@ -218,11 +240,12 @@ function Viewer({
           );
           break;
         case "anas:picked": {
+          // One element each time the member asks to pick.
+          if (!armed.current) break;
+          pick(false);
           const { type: _, ...picked } = message;
           const selection: Selected = { picked, version: load.version, state: "saving" };
           setSelected(selection);
-          setPicking(false);
-          post({ type: "anas:pick", on: false });
           // A picture of the element and what is around it.
           const id = ++captures.current;
           capture.current = { id, selection };
@@ -244,13 +267,8 @@ function Viewer({
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [load.version, onScrolled, post, remember]);
+  }, [load.version, onScrolled, pick, post, remember]);
 
-  const togglePick = () => {
-    const on = !picking;
-    setPicking(on);
-    post({ type: "anas:pick", on });
-  };
   const unselect = () => {
     setSelected(undefined);
     capture.current = undefined;
@@ -335,7 +353,7 @@ function Viewer({
           className={`${styles.wsButton} ${picking ? styles.on : ""}`}
           aria-pressed={picking}
           disabled={!ready}
-          onClick={togglePick}
+          onClick={() => pick(!picking)}
         >
           <Crosshair size={15} aria-hidden="true" />
           选取

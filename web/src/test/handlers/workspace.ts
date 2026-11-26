@@ -111,6 +111,10 @@ export function workspaceHandlers(store: WorkspaceStore) {
       store.viewing = await request.json();
       return response(204).empty();
     }),
+    http.delete("/api/v1/workspace/viewing/{pageId}", ({ params, response }) => {
+      if (store.viewing?.pageId === params.pageId) store.viewing = undefined;
+      return response(204).empty();
+    }),
     http.put("/api/v1/workspace/selection", async ({ request, response }) => {
       store.selection = await request.json();
       return response(204).empty();
