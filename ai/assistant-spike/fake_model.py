@@ -11,7 +11,7 @@ test), logs every request (which tools Hermes offered), and answers deterministi
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
 
-A conversation whose prompt is the montage center's planning template (ai/anas_montage/prompts) is planned as
+A conversation whose prompt is the montage center's planning template (ai/anas_videocut/prompts) is planned as
 VNAS would, with the least that passes: it reads each brief, writes the smallest answer its schema allows and
 hands it in, through both steps of every 方案, until the tools say all are taken. With FAKE_MODEL_PLAN_SLEEP set,
 its first call waits that many seconds, a model call longer than any short timeout on the way. Hermes's background

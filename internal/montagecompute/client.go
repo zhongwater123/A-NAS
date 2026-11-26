@@ -1,7 +1,7 @@
 //go:build linux
 
 // Package montagecompute is the client of the montage center's compute
-// Worker (ai/anas_montage/worker.py, docs/architecture/photo-ai.md). The
+// Worker (ai/anas_videocut/worker.py, docs/architecture/photo-ai.md). The
 // photo service cuts cards and measures their quality
 // with it, the montage service lists the catalog, asks for plans and fills
 // the music's slots. One request and one answer per connection, framed as

@@ -792,7 +792,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 // more key frames than its reader holds from some of them, so a description
 // may have fewer beats than the card has key frames, and the nth beat is not
 // the nth key frame. The compute Worker's domain reads a card's times and
-// frames by the beat's number (ai/anas_montage/domain/fill.py). A
+// frames by the beat's number (ai/anas_videocut/algo/fill.py). A
 // description that does not place every beat cannot be cut from.
 func beatTimes(description json.RawMessage, times []float64) ([]float64, bool) {
 	var answer struct {

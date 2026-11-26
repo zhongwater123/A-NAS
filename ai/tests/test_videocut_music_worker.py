@@ -2,7 +2,7 @@
 the montage center decodes, answers the eighth version's loudness, and
 refuses what is not a song. allin1 itself runs only in the music runtime
 (scripts/build-montage-music-runtime.sh); here a stand-in answers for it, and
-ai/eval/montage_music_allin1.py compares the real one with the development
+ai/eval/videocut_music_allin1.py compares the real one with the development
 machine's structure files.
 
 NumPy is in the AI runtime only: make ai-test skips these, and the runtime's

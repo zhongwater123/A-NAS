@@ -47,7 +47,7 @@ func startWorker(t *testing.T, prelude string) montagecompute.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	program := "from anas_montage import worker\n" + prelude + "\nworker.main([])"
+	program := "from anas_videocut import worker\n" + prelude + "\nworker.main([])"
 	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-c", program)
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
@@ -63,7 +63,7 @@ func startWorker(t *testing.T, prelude string) montagecompute.Client {
 }
 
 // The montage service's calls (montage.Compute) against the Worker: the
-// case is ai/tests/test_montage_worker.py's tiny_case, one picture of two
+// case is ai/tests/test_videocut_worker.py's tiny_case, one picture of two
 // two-second slots from a card of two beats.
 func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	client := startWorker(t, "")

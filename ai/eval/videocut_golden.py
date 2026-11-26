@@ -5,7 +5,7 @@ The prototype's results come from real footage and stay out of the repository
 ANAS_MONTAGE_SAMPLES at the folder that holds cache/ and 剪辑对比/ (on
 development machine C, ~/A-NAS-datasets) and run, in the AI runtime:
 
-    python -m eval.montage_golden
+    python -m eval.videocut_golden
 
 For each group it runs the Worker's fill the way the montage center will,
 one missing clear span at a time from the prototype's held-<group>.json, and
@@ -25,8 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
-from anas_montage import worker
-from anas_montage.domain import (
+from anas_videocut import worker
+from anas_videocut.algo import (
     cards as cardrules,
     catalog as catalogrules,
     fill as fillrules,

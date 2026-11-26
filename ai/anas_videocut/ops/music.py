@@ -29,7 +29,7 @@ import math
 
 import numpy as np
 
-from .domain import music
+from ..algo import music
 
 # The eighth version's RMS curve: a value every HOP samples at RATE.
 HOP, RATE = 512, 22050

@@ -31,7 +31,7 @@ func song() (montage.Structure, []float32) {
 	return structure, loudness
 }
 
-// The music operation through the real Worker (ai/anas_montage/music_ops.py),
+// The music operation through the real Worker (ai/anas_videocut/ops/music.py),
 // as worker.py's OPS names it.
 func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 	client := startWorker(t, "")

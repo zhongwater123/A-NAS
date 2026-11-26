@@ -1,4 +1,4 @@
-"""The compute Worker's music operation (ai/anas_montage/music_ops.py): the
+"""The compute Worker's music operation (ai/anas_videocut/ops/music.py): the
 eighth version's excerpt and slots, the loudest section when no chorus is
 found, a start the member dragged, and the four reasons a song cannot be used
 (docs/specs/montage-center.md, 配乐).
@@ -20,8 +20,9 @@ RUNTIME = bool(importlib.util.find_spec("numpy") and importlib.util.find_spec("P
 if RUNTIME:
     import numpy as np
 
-    from anas_montage import music_ops, worker
-    from anas_montage.domain import music
+    from anas_videocut import worker
+    from anas_videocut.algo import music
+    from anas_videocut.ops import music as music_ops
 
 
 def song(bar=2.0, bars=100, layout=None):

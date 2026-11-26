@@ -69,7 +69,7 @@ func TestPersistentJobRetriesKilledComputeProcess(t *testing.T) {
 		worker := exec.CommandContext(ctx, python, "-c", `
 import os
 import signal
-from anas_montage import worker
+from anas_videocut import worker
 
 def terminate(request, arrays):
     os.kill(os.getpid(), signal.SIGKILL)

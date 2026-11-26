@@ -1,6 +1,6 @@
 """The montage center's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
 
-It runs the prototype's pure computation (domain/) for the photo service,
+It runs the prototype's pure computation (algo/) for the photo service,
 which cuts cards and measures their quality, and for the montage center,
 which lists the catalog, asks for plans and fills the music's slots. It has
 no network and no data volume: everything it reads comes in the request.
@@ -13,19 +13,19 @@ descriptors; the Worker checks only their lengths. Answers are JSON.
 Operations:
   cards         windows of one video: "windows" [{start, end}] in seconds,
                 arrays vectors (float32, n × d) and flat (uint8, n); answers
-                the cards with their keyframe times (domain.cards.plan_cards).
+                the cards with their keyframe times (algo.cards.plan_cards).
   quality_part  one part of a card's quality: "kind" shake (array frames,
                 uint8 m × 180 × 320) answers the moves between neighbours;
                 keyframe (array jpeg, the encoded keyframe) answers blocked
                 and light; sharp (array frame, uint8 h × w) answers points.
   quality       a card's quality from its parts: "moves", "blurs",
                 "blocked", "points"; answers blur, shake, blocked, points and
-                the reasons it cannot be used (domain.quality.reasons).
-  catalog       the cards that may be planned with (domain.catalog.usable).
+                the reasons it cannot be used (algo.quality.reasons).
+  catalog       the cards that may be planned with (algo.catalog.usable).
   clear         where nothing covers the lens around a keyframe: arrays key
                 (uint8 144 × 256), and before and after (uint8 k × 144 × 256)
                 every 0.5 s from lo to key and from key to hi.
-  fill          the timeline (domain.fill.fill). "known" holds the clear
+  fill          the timeline (algo.fill.fill). "known" holds the clear
                 spans found so far, keyed as the prototype caches them; one
                 still unknown answers "need" for the caller to measure
                 (clear) and call again. "pins" (#596) lists the film's slots
@@ -55,8 +55,7 @@ import numpy as np
 
 from anas_ai import protocol
 
-from . import brief, music_ops
-from .domain import (
+from .algo import (
     cards as cardrules,
     catalog as catalogrules,
     fill as fillrules,
@@ -64,9 +63,10 @@ from .domain import (
     plan as planrules,
     quality as qualityrules,
 )
-from .domain.options import Case, CutOptions
+from .algo.options import Case, CutOptions
+from .ops import brief, music as music_ops
 
-log = logging.getLogger("anas_montage")
+log = logging.getLogger("anas_videocut")
 
 SYSTEMD_FIRST_FD = 3
 # The most arrays one request passes.
