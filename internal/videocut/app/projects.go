@@ -138,6 +138,7 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (proje
 type queryer interface {
 	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
 	QueueRevocation(ctx context.Context, grantID string, at time.Time) error
+	RoundStanding(ctx context.Context, owner, jobID, token string) (db.RoundStanding, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)

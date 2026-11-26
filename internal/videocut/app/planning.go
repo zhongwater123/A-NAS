@@ -238,25 +238,19 @@ type pastRound struct {
 
 // pastRounds are the job's latest rounds for its epoch and inputs, the latest first.
 func (s *Store) pastRounds(ctx context.Context, jobID string, epoch int, pickKey string) ([]pastRound, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT state, failure, outcome, ended_at FROM rounds WHERE job_id = ? AND epoch = ? AND input_key = ?
-		ORDER BY claimed_at DESC, id DESC LIMIT 20`, jobID, epoch, pickKey)
+	kept, err := s.db.PastRounds(ctx, jobID, epoch, pickKey)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var rounds []pastRound
-	for rows.Next() {
-		var round pastRound
-		var ended sql.NullString
-		if err := rows.Scan(&round.state, &round.failure, &round.outcome, &ended); err != nil {
-			return nil, err
-		}
-		if at := scanTime(ended); at != nil {
+	for _, k := range kept {
+		round := pastRound{state: k.State, failure: k.Failure, outcome: k.Outcome}
+		if at := scanTime(k.Ended); at != nil {
 			round.ended = *at
 		}
 		rounds = append(rounds, round)
 	}
-	return rounds, rows.Err()
+	return rounds, nil
 }
 
 // unreachableWait is how long a job waits after its nth round in a row that
@@ -334,8 +328,7 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 	}
 	// A round that plans for other inputs, or an earlier epoch, is over:
 	// what it hands back is not kept, and it does not hold up a new one.
-	if _, err := s.db.ExecContext(ctx, endRound+` WHERE job_id = ? AND state IN ('claimed', 'started') AND (epoch <> ? OR input_key <> ?)`,
-		sqlitedb.FormatTime(s.now()), "the job's inputs changed", jobID, epoch, pickKey); err != nil {
+	if err := s.db.EndOtherRounds(ctx, jobID, epoch, pickKey, s.now(), "the job's inputs changed"); err != nil {
 		return err
 	}
 	unwanted := func(why error) error {
@@ -509,9 +502,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 			claim.Project = kept.ProjectName
 		}
 		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), templateOf(kept)
-		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
-			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, claim.RoundID, claim.JobID, owner, claim.AttemptToken, now, epoch, claim.Template, pickKey); err != nil {
+		if err := tx.AddRound(ctx, claim.RoundID, claim.JobID, owner, claim.AttemptToken, s.now(), epoch, claim.Template, pickKey); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", claim.JobID)
@@ -539,32 +530,12 @@ func excerptSeconds(stored string) int {
 	return (excerpt.Frames + FilmRate/2) / FilmRate
 }
 
-// round is a round as the operations on it read it.
-type round struct {
-	id, jobID, owner, token, state string
-}
-
-func (s *Store) round(ctx context.Context, q queryer, owner, roundID string) (round, error) {
-	var r round
-	err := q.QueryRowContext(ctx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
-		roundID, owner).Scan(&r.id, &r.jobID, &r.owner, &r.token, &r.state)
+func (s *Store) round(ctx context.Context, tx *db.Tx, owner, roundID string) (db.RoundRow, error) {
+	r, err := tx.Round(ctx, owner, roundID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return round{}, domain.ErrNotFound
+		return db.RoundRow{}, domain.ErrNotFound
 	}
 	return r, err
-}
-
-// endRound ends rounds: one only claimed never reached the model and is
-// abandoned, one started is over. Its arguments are the time and the
-// outcome; the rounds it ends follow.
-const endRound = `UPDATE rounds SET ended_at = ?, outcome = ?, state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END`
-
-// endRounds ends the job's rounds in progress, whatever they plan for. Their
-// conversations stay in the member's VNAS history; what they hand back from
-// now on is not kept.
-func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outcome string) error {
-	_, err := q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
-	return err
 }
 
 // newPlanEpoch starts the job's planning over: the rounds before it no
@@ -574,7 +545,7 @@ func (s *Store) newPlanEpoch(ctx context.Context, tx *db.Tx, jobID, why string) 
 	if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
 		return err
 	}
-	return endRounds(ctx, tx, jobID, s.now(), why)
+	return tx.EndRounds(ctx, jobID, s.now(), why)
 }
 
 // StartRound records that the round was handed to the member's planning
@@ -590,15 +561,13 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 			return err
 		}
 		var cancelled bool
-		if err := tx.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", r.jobID).Scan(&cancelled); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", r.JobID).Scan(&cancelled); err != nil {
 			return err
 		}
-		if r.state != RoundClaimed || cancelled {
+		if r.State != RoundClaimed || cancelled {
 			return domain.ErrRoundOver
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'started', run_ref = ?, started_at = ? WHERE id = ?",
-			runRef, sqlitedb.FormatTime(s.now()), roundID)
-		return err
+		return tx.StartRound(ctx, roundID, runRef, s.now())
 	})
 }
 
@@ -616,15 +585,13 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failur
 		if err != nil {
 			return err
 		}
-		if r.state != RoundClaimed {
+		if r.State != RoundClaimed {
 			return domain.ErrRoundOver
 		}
-		now := sqlitedb.FormatTime(s.now())
-		if _, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
-			now, now, truncate(reason, 500), failure, roundID); err != nil {
+		if err := tx.AbandonRound(ctx, roundID, s.now(), truncate(reason, 500), failure); err != nil {
 			return err
 		}
-		return s.dueNow(ctx, tx, r.jobID)
+		return s.dueNow(ctx, tx, r.JobID)
 	})
 	if err == nil {
 		s.wakeJobs()
@@ -650,22 +617,19 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result st
 		if err != nil {
 			return err
 		}
-		now := sqlitedb.FormatTime(s.now())
-		switch r.state {
+		now := s.now()
+		switch r.State {
 		case RoundClaimed:
-			_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",
-				now, now, truncate(outcome, 500), cmp.Or(failure, failureUnreachable), roundID)
+			err = tx.AbandonRound(ctx, roundID, now, truncate(outcome, 500), cmp.Or(failure, failureUnreachable))
 		case RoundStarted:
-			_, err = tx.ExecContext(ctx, `UPDATE rounds SET state = 'ended', ended_at = ?, reported_at = ?, outcome = ?,
-				failure = CASE WHEN called_at IS NULL THEN ? ELSE '' END WHERE id = ?`,
-				now, now, truncate(outcome, 500), failure, roundID)
+			err = tx.EndStartedRound(ctx, roundID, now, truncate(outcome, 500), failure)
 		default:
-			_, err = tx.ExecContext(ctx, "UPDATE rounds SET reported_at = COALESCE(reported_at, ?) WHERE id = ?", now, roundID)
+			err = tx.MarkRoundReported(ctx, roundID, now)
 		}
 		if err != nil {
 			return err
 		}
-		return s.dueNow(ctx, tx, r.jobID)
+		return s.dueNow(ctx, tx, r.JobID)
 	})
 	if err == nil {
 		s.wakeJobs()
@@ -680,7 +644,7 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result st
 // did not hand back is unknown).
 func (s *Store) SweepRounds(ctx context.Context) error {
 	now := s.now()
-	late := `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND (started_at <= ? OR called_at <= ?))`
+	late := db.LateRounds
 	bounds := []any{sqlitedb.FormatTime(now.Add(-claimTimeout)), sqlitedb.FormatTime(now.Add(-handoverTimeout)), sqlitedb.FormatTime(now.Add(-planTimeout))}
 	var swept int64
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
@@ -688,12 +652,9 @@ func (s *Store) SweepRounds(ctx context.Context) error {
 			append([]any{sqlitedb.FormatTime(now)}, bounds...)...); err != nil {
 			return err
 		}
-		ended, err := tx.ExecContext(ctx, endRound+" WHERE "+late, append([]any{sqlitedb.FormatTime(now), "out of time"}, bounds...)...)
-		if err != nil {
-			return err
-		}
-		swept, _ = ended.RowsAffected()
-		return nil
+		var err error
+		swept, err = tx.EndLateRounds(ctx, now, "out of time", now.Add(-claimTimeout), now.Add(-handoverTimeout), now.Add(-planTimeout))
+		return err
 	})
 	if err != nil {
 		return err

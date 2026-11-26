@@ -12,7 +12,6 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -83,14 +82,9 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 		return roundCall{}, nil, domain.ErrNotFound
 	}
 	call := roundCall{jobID: jobID}
-	var state string
-	var epoch, current int
-	var cancelled bool
-	var pickKey sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
-		(SELECT input_key FROM steps WHERE job_id = j.id AND name = 'pick')
-		FROM rounds r JOIN jobs j ON j.id = r.job_id WHERE r.job_id = ? AND r.owner_user_id = ? AND r.attempt_token = ?`,
-		jobID, owner, token).Scan(&call.roundID, &state, &epoch, &call.pickKey, &current, &cancelled, &call.plans, &pickKey)
+	r, err := q.RoundStanding(ctx, owner, jobID, token)
+	call.roundID, call.pickKey, call.plans = r.ID, r.InputKey, r.Plans
+	state, epoch, current, cancelled, pickKey := r.State, r.Epoch, r.JobEpoch, r.Cancelled, r.PickKey
 	if errors.Is(err, sql.ErrNoRows) {
 		return roundCall{}, nil, domain.ErrNotFound
 	}
@@ -119,7 +113,7 @@ func (s *Store) roundFor(ctx context.Context, owner, jobID, token string) (round
 	if err != nil || over != nil {
 		return call, over, err
 	}
-	_, err = s.db.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ?", sqlitedb.FormatTime(s.now()), call.roundID)
+	err = s.db.MarkRoundCalled(ctx, call.roundID, s.now())
 	return call, nil, err
 }
 
@@ -420,7 +414,7 @@ func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons 
 		if rejections < maxPlanRejections {
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, endRound+" WHERE id = ?", sqlitedb.FormatTime(s.now()), "答案连续 3 次不合格", call.roundID); err != nil {
+		if err := tx.EndRoundByID(ctx, call.roundID, s.now(), "答案连续 3 次不合格"); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0 WHERE id = ?", jobID); err != nil {

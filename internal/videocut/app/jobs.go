@@ -382,7 +382,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 	}
 	// The round in progress is over: its answers are told the job was
 	// cancelled. Its Hermes job is the next round's to remove.
-	if err := endRounds(ctx, s.db, jobID, s.now(), "cancelled"); err != nil {
+	if err := s.db.EndRounds(ctx, jobID, s.now(), "cancelled"); err != nil {
 		return domain.Job{}, err
 	}
 	if _, err := s.db.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID); err != nil {
