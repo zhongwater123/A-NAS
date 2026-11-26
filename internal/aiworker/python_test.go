@@ -177,7 +177,7 @@ func TestPythonWorkerSpeaksTheProtocol(t *testing.T) {
 			} `json:"beats"`
 			Summary string `json:"summary"`
 		}
-		if err != nil || model != "fake-reader-sha256" || template != "montage-card/v1" ||
+		if err != nil || model != "fake-reader-sha256" || template != "montage-card/v2" ||
 			json.Unmarshal(description, &answer) != nil || len(answer.Beats) != count ||
 			answer.Beats[count-1].Frames[0] != count || answer.Summary == "" {
 			t.Fatalf("DescribeFrames(%d frames) = %q, %q, %s, %v", count, model, template, description, err)

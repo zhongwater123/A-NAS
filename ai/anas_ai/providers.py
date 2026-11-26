@@ -795,8 +795,11 @@ def ocr_prompt(kind, schema):
 # 485 for each frame, which is its label and a visual token for every 32 × 32
 # pixels. Frames of other shapes are estimated from that and still to be
 # counted on the NAS; describe() logs the estimate beside the server's count.
-DESCRIBE_PROMPT_TOKENS = 620
-DESCRIBE_LABEL_TOKENS = 21
+# montage-card/v2 (#676) asks for beats of grouped frames: its text counted
+# 51 tokens more for 3 frames and 86 more for 20 (llama-server /tokenize,
+# Qwen3.5-4B), so 60 more for the prompts and 2 more for each label.
+DESCRIBE_PROMPT_TOKENS = 680
+DESCRIBE_LABEL_TOKENS = 23
 OCR_TOKEN_PIXELS = 32
 
 

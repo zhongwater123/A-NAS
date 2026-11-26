@@ -2,8 +2,10 @@
 
 The prompts, the genre and the schema are the prototype's, taken unchanged
 from commit 19f2d6db (ai/montage_v8/domain/prompts.py and describe.py) with
-one sentence added: not to copy the numbers the frames show. Their version is
-TEMPLATE; any change to them is another template, and so another analysis.
+one sentence added: not to copy the numbers the frames show, and since
+montage-card/v2 (#676) the beats are the caller's groups of key frames, not
+one a frame. Their version is TEMPLATE; any change to them is another
+template, and so another analysis.
 The caller sends frames, never a prompt.
 
 The reader's context holds the prompt and the answer. A card with more key
@@ -16,7 +18,7 @@ import json
 import re
 import sys
 
-TEMPLATE = "montage-card/v1"
+TEMPLATE = "montage-card/v2"
 # The genre is fixed: the analysis is shared across projects and members.
 GENRE = "TRAVEL"
 FEWEST_FRAMES, MOST_FRAMES = 3, 20
@@ -65,7 +67,7 @@ PROMPT = (
     "只按画面里看得见的东西判断：看得见车窗、车头、座椅是车里，在房间、餐厅、商店里隔着窗户拍是室内；看得见舷窗、窗框、玻璃反光或桨叶的影子是飞机或直升机里；"
     "看得见船舷、船头、甲板、栏杆或同船的人是船上；看得见岸、路、栈桥或站在地上的脚下是地面；"
     "只看到水面、山和天空，看不到这些的写看不出，不要猜；看不出时 summary 和 beats 也不要写在船上或航拍；\n"
-    "beats：见下面的分组说明；\n"
+    "beats：见下面的节拍说明；\n"
     "{process}"
     "summary：写完 {before} 再写，按 beats 一句话概括这一段，不超过 {chars} 字，beats 里的关键人物和物件要写到；\n"
     # 2026-11-16: with camera asked first, the 4B copied it into scene (地面, 车里) for 51 of 品杰's 116 cards
@@ -77,17 +79,19 @@ PROMPT = (
 PROCESS = ("process：写完 beats 再写，按 beats 的先后，用短语写这一段里依次发生的事，"
            "短语个数不超过节拍数，每个短语不超过 10 个字，连着几个节拍是同一件事就合成一个短语；\n")
 
-# One beat a key frame. 2026-11-10 (景别调研): the five shot sizes defined, and shot_size and what read from
-# that one frame alone, not with a person seen in another frame.
+# 2026-11-10 (景别调研): the five shot sizes defined. montage-card/v2 (#676): the caller groups alike key frames
+# into a beat, and what tells what happens across a beat's frames; tried on 120 cards and on 60 cards evened out
+# to three frames (~/A-NAS-datasets 节拍打标), where it wrote the moves a lone key frame could not show.
 GROUPED = (
-    "这些图是程序在画面变化处取的关键帧，共 {groups} 张，每张是一个节拍，按时间先后排列：{layout}。"
-    "beats 按图写，每张图正好一项，顺序和图一致。"
-    "shot_size 只看这一张图判断，看画面的主角是环境还是人或物：远景是环境是主角，人很小或没有人（大片风景、城市天际线）；"
+    "这些图是程序在画面变化处取的关键帧，共 {count} 张，已经按画面分成 {groups} 个节拍，按时间先后排列：{layout}。"
+    "beats 按节拍写，每个节拍正好一项，顺序和节拍一致。"
+    "shot_size 看这个节拍里画面的主角是环境还是人或物：远景是环境是主角，人很小或没有人（大片风景、城市天际线）；"
     "全景是人和环境都能看得到，人在环境里活动，背后的山、湖、街道仍占画面大部分；中景是人或物成了主角，环境退成背景；"
     "近景是人的上半身或一件物品占满大部分画面；特写是脸、手或物件的局部填满画面。"
-    "what 只写这一张图里看得见的主体和动作，不超过 30 字。")
+    "what 写这个节拍的几张图里连起来发生的事：看得见的主体和动作，不超过 30 字；这几张图里出现过的人和关键物件都要写到。"
+    "相邻两个节拍的 what 要写出它们的不同（动作、人物、地方或景别），不要写成一样的话。")
 
-# --- What montage-card/v1 adds. ---
+# --- What montage-card/v1 added to the prototype. ---
 
 # Decision 11 of docs/decisions/2026-11-17-montage-center-first-version.md:
 # the description reaches a member's assistant, so it does not copy numbers.
@@ -129,15 +133,15 @@ def request(offsets, groups, duration, process=True):
     profile = PROFILES[GENRE]
     count = max(groups)
     spans = [[k for k, g in enumerate(groups, 1) if g == n] for n in range(1, count + 1)]
-    layout = "；".join(f"第 {n} 组：第 {s[0]}–{s[-1]} 张" if len(s) > 1 else f"第 {n} 组：第 {s[0]} 张"
+    layout = "；".join(f"第 {n} 个节拍：第 {s[0]}–{s[-1]} 张" if len(s) > 1 else f"第 {n} 个节拍：第 {s[0]} 张"
                       for n, s in enumerate(spans, 1))
     text = CARD_PROMPT.format(count=len(offsets), duration=duration, process=PROCESS if process else "",
                               before="process" if process else "beats", chars=SUMMARY_CHARS, name=profile["name"],
                               focus=profile["focus"])
-    text += "\n" + GROUPED.format(groups=count, layout=layout)
+    text += "\n" + GROUPED.format(count=len(offsets), groups=count, layout=layout)
     content = [("text", text)]
     for k, seconds in enumerate(offsets, 1):
-        content += [("text", f"第 {k} 张（第 {groups[k - 1]} 组，第 {seconds:.0f} 秒）"), ("image", k - 1)]
+        content += [("text", f"第 {k} 张（第 {groups[k - 1]} 个节拍，第 {seconds:.0f} 秒）"), ("image", k - 1)]
     return content, schema(count, process), spans
 
 
