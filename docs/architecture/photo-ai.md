@@ -1,7 +1,7 @@
 # 相册本地 AI（M2）实施方案
 
 状态：步骤 1–7 已实现；步骤 7 按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 随系统内置安装（[#58](https://github.com/zhongwater123/A-NAS/pull/58)）；2026-10-10 起搜索改为纯向量排序与两段式结果（[#66](https://github.com/zhongwater123/A-NAS/issues/66)），AI 标签只在 AI 聚合中展示、不参与搜索。2026-10-13 起同一个 Worker 还运行物体检测器，用于文搜图融合、“检测到”分段与以图搜图（[物体检测方案](photo-objects.md)）。Experimental NAS 首次安装带 AI 的版本按[启用相册本地 AI](../runbooks/enable-photo-ai.md)进行，实机资源数字见其中的[首次实机部署证据](../runbooks/enable-photo-ai.md#首次实机部署证据)
-更新时间：2026-11-11
+更新时间：2026-11-26
 
 本文把[相册技术设计](photo-library.md)中 M2 的切片 8–12 细化为可实现的方案：用 Google EmbeddingGemma 2 的全模态 740M 官方包为照片生成向量，在此基础上提供中文自然语言搜索。产品行为以[相册规格](../specs/photo-library.md)为准，模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -229,7 +229,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - **运行环境**：CPU 版 PyTorch 和 torchvision 从官方 CPU wheel 安装，版本与哈希见[锁文件](../../ai/requirements.txt)。依赖门禁从 wheel 文件名提取上游公开版本进行公告审计。单元启用 Hugging Face 和 transformers 离线模式，并将其缓存放在 Worker 的缓存目录。
 - **协议**：`score_aesthetic` 接收一个缩略图描述符，返回 `model` 与 `scores`（`aesthetic`、`technical`）。模型 ID 包含已验证的发布清单 SHA-256（覆盖视觉塔、打分头及预处理配置）与推理库版本。`info` 以 `aestheticModel` 和 `aestheticMemoryBytes` 单独报告打分器，供后续调度使用。
 - **资源**：清单 `memoryBytes` 先按 2 GiB（开发机实测常驻约 1.7 GB、峰值约 1.9 GB）；推理线程与其他模型相同，为可用逻辑核数减 2。开发机 CPU 上 512 px 缩略图每张约 5.5 秒，只适合空闲时后台整理。
-- **验收与分发**：默认发布、设备镜像与主包依赖均不包含打分权重。内部验收可将原始 tar 放入内容库的 `models/<SHA-256>/`，用 `scripts/build-content-packages.sh --aesthetic-scorer-only OUT CONTENT` 单独构建模型包，安装后重启 AI Worker 即可打分。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。目标 NAS（i3-12100）的打分耗时与 Worker cgroup 峰值内存待实测。
+- **验收与分发**：默认发布、设备镜像与主包依赖均不包含打分权重。内部验收可将原始 tar 放入内容库的 `models/<SHA-256>/`，用 `scripts/build-content-packages.sh --aesthetic-scorer-only OUT CONTENT` 单独构建模型包，安装后重启 AI Worker 即可打分。对外分发仍待法务确认训练照片涉及的权利，依据与论文引用见[部署清单](../../deploy/models/qwen35-4b-aesthetic-scorer.json)。2026-11-26 在实验 NAS（i3-12100）上重启 Worker 后给一张生成的 640 × 480 JPEG 打分：第一次 9.3 秒（含加载），第二次 3.0 秒，Worker cgroup 峰值 1.9 GiB（`MemoryPeak` 2042929152 字节），与清单估的 2 GiB 相符；真实照片的批量耗时待相册接入后再测。
 
 ## 切片与顺序
 
