@@ -111,4 +111,4 @@
 
 - 剪辑中心的[规格](../specs/montage-center.md)、[实施方案](../architecture/montage-center.md)与[规划会话](../architecture/montage-planning-session.md)
 - [部署 A-NAS 软件包](deploy-a-nas-packages.md)、[启用配乐分析](enable-montage-music.md)、[启用 AI 助手](enable-ai-assistant.md)
-- 代码：`internal/montage`、`web/src/montage`、`ai/assistant/montage-planner.py`、`scripts/lib/assistant-units.sh`
+- 代码：`internal/montage`、`web/src/videocut`、`ai/assistant/montage-planner.py`、`scripts/lib/assistant-units.sh`
