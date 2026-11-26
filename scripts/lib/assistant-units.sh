@@ -21,8 +21,8 @@
 derive_plan_policy() {
   local policy=$1 server=$2 out=$3
   if [[ "$(grep -c '^mcp_servers:$' "$policy")" != 1 || "$(grep -c '^skills:$' "$policy")" != 1 ]] ||
-    grep -q '^  montage:' "$policy" || grep -q 'creation_nudge_interval' "$policy" ||
-    [[ "$(grep -c '^  montage:$' "$server")" != 1 ]]; then
+    grep -q '^  videocut:' "$policy" || grep -q 'creation_nudge_interval' "$policy" ||
+    [[ "$(grep -c '^  videocut:$' "$server")" != 1 ]]; then
     echo "the assistant's policy and the montage server do not fit together" >&2
     return 1
   fi
@@ -57,7 +57,7 @@ derive_assistant_units() {
   # bridge exits idle, as the member's instance is by anas-assistant-api@.
   sed -e 's#^Description=.*#Description=A-NAS assistant (VNAS) of %i, planning for the montage center#' \
     -e '\#a-nas-companion-assistant#d' \
-    -e '/^Environment=HOME=/a Environment=ANAS_ASSISTANT_CHANNEL=plan HERMES_TUI_TOOLSETS=montage,memory,skills' \
+    -e '/^Environment=HOME=/a Environment=ANAS_ASSISTANT_CHANNEL=plan HERMES_TUI_TOOLSETS=videocut,memory,skills' \
     -e "s#HERMES_MANAGED_DIR=$lib/managed\\b#HERMES_MANAGED_DIR=$lib/managed-plan#" \
     -e 's#members/%i/config.yaml:#members/%i/config-plan.yaml:#' \
     -e 's#wait-port.sh 9119#wait-port.sh 9120#' \
@@ -72,7 +72,7 @@ derive_assistant_units() {
     "$units/anas-assistant-api@.service" >"$units/anas-assistant-planapi@.service"
   # A template that changed under these edits fails here, not on the device.
   local unit line
-  for unit in plan@.service:HERMES_TUI_TOOLSETS=montage,memory,skills plan@.service:HERMES_MANAGED_DIR=$lib/managed-plan \
+  for unit in plan@.service:HERMES_TUI_TOOLSETS=videocut,memory,skills plan@.service:HERMES_MANAGED_DIR=$lib/managed-plan \
     plan@.service:members/%i/config-plan.yaml: plan@.service:'wait-port.sh 9120' plan@.service:a-nas-videocut-assistant/assistant.sock \
     planapi@.socket:ListenStream=/run/a-nas-assistant-plan/%i.sock planapi@.service:anas-assistant-plan@%i.service \
     planapi@.service:127.0.0.1:9120; do

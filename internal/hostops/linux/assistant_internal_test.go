@@ -122,7 +122,7 @@ func TestMemberSettings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(library, "managed-plan"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	planPolicy := strings.Replace(managedPolicy, "mcp_servers:\n", "mcp_servers:\n  montage:\n    trust: full\n", 1)
+	planPolicy := strings.Replace(managedPolicy, "mcp_servers:\n", "mcp_servers:\n  videocut:\n    trust: full\n", 1)
 	if err := os.WriteFile(filepath.Join(library, "managed-plan", "config.yaml"), []byte(planPolicy), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -137,14 +137,14 @@ func TestMemberSettings(t *testing.T) {
 		MCPServers map[string]map[string]any `yaml:"mcp_servers"`
 	}
 	plan, err := os.ReadFile(planPath)
-	if err != nil || yaml.Unmarshal(plan, &planSettings) != nil || planSettings.MCPServers["montage"]["trust"] != "full" ||
+	if err != nil || yaml.Unmarshal(plan, &planSettings) != nil || planSettings.MCPServers["videocut"]["trust"] != "full" ||
 		planSettings.MCPServers["anas"] == nil {
 		t.Fatalf("config-plan.yaml:\n%s", plan)
 	}
 	if _, err := os.Stat(cronPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("config-cron.yaml is still there: %v", err)
 	}
-	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "montage") {
+	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "videocut") {
 		t.Fatalf("the instance's config.yaml has the montage server:\n%s", again)
 	}
 	// Preparing again keeps the secret and the file a running sandbox bound.
@@ -201,7 +201,7 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policyPath, serverPath := filepath.Join(repo, "ai", "assistant", "managed-config.yaml"), filepath.Join(repo, "ai", "assistant", "montage-mcp.yaml")
+	policyPath, serverPath := filepath.Join(repo, "ai", "assistant", "managed-config.yaml"), filepath.Join(repo, "ai", "assistant", "videocut-mcp.yaml")
 	derive := func(policy, server string) (string, error) {
 		out := filepath.Join(t.TempDir(), "config.yaml")
 		command := exec.Command("bash", "-c", `set -euo pipefail; . "$1"; derive_plan_policy "$2" "$3" "$4"`, "derive",
@@ -229,33 +229,33 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	}
 	policy, plan := read(policyPath), read(planPath)
 	servers, _ := plan["mcp_servers"].(map[string]any)
-	montage, _ := servers["montage"].(map[string]any)
+	videocut, _ := servers["videocut"].(map[string]any)
 	want := map[string]any{
-		"command": "/usr/lib/a-nas/assistant/runtime/venv/bin/python", "args": []any{"/usr/lib/a-nas/assistant/anas_montage_mcp.py"},
+		"command": "/usr/lib/a-nas/assistant/runtime/venv/bin/python", "args": []any{"/usr/lib/a-nas/assistant/anas_videocut_mcp.py"},
 		// Full trust, as nobody is there to approve a call in a planning; and every key
 		// written out, since the managed policy wins only for the keys it writes.
 		"trust": "full", "enabled": true, "lazy": false, "timeout": 120,
 		"tools": map[string]any{"prompts": false, "resources": false},
 	}
-	if !reflect.DeepEqual(montage, want) {
-		t.Fatalf("the montage server in the planning policy = %#v", montage)
+	if !reflect.DeepEqual(videocut, want) {
+		t.Fatalf("the montage server in the planning policy = %#v", videocut)
 	}
 	skills, _ := plan["skills"].(map[string]any)
 	if skills["creation_nudge_interval"] != 1 {
 		t.Fatalf("the planning policy's skills = %#v", skills)
 	}
 	// Without them the two are the same: every other server, toolset and setting.
-	delete(servers, "montage")
+	delete(servers, "videocut")
 	delete(skills, "creation_nudge_interval")
 	if !reflect.DeepEqual(plan, policy) {
 		t.Fatal("the planning policy differs from the assistant's policy in more than the montage server and the reviews")
 	}
-	if base, _ := policy["mcp_servers"].(map[string]any); base["montage"] != nil || len(base) == 0 {
+	if base, _ := policy["mcp_servers"].(map[string]any); base["videocut"] != nil || len(base) == 0 {
 		t.Fatalf("the assistant's own policy has servers %v", base)
 	}
 	// No platform's toolsets name it: only the planning instance gives it (HERMES_TUI_TOOLSETS).
 	for platform, toolsets := range policy["platform_toolsets"].(map[string]any) {
-		if slices.Contains(toolsets.([]any), any("montage")) {
+		if slices.Contains(toolsets.([]any), any("videocut")) {
 			t.Fatalf("platform %s lists the montage toolset", platform)
 		}
 	}

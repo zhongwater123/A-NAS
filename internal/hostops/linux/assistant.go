@@ -139,7 +139,7 @@ func (e *Executor) assistantTokenPath(username string) string {
 
 // AssistantPlanDir holds the members' planning grants for the montage center, one file each
 // named by the account: the File Broker writes them behind the member's live session, and
-// root's planner reads them (ai/assistant/montage-planner.py). It is in the Host Agent's own state
+// root's planner reads them (ai/assistant/videocut-planner.py). It is in the Host Agent's own state
 // directory, which no service can write to (docs/architecture/montage-center.md, 规划授权).
 func (e *Executor) AssistantPlanDir() string {
 	return filepath.Join(e.assistantState(), "plans")

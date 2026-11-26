@@ -74,7 +74,7 @@ func TestTheAssistantSocketKnowsTheMemberByUID(t *testing.T) {
 	}}}
 	post := func(route string) (int, string) {
 		t.Helper()
-		response, err := client.Post("http://montage"+route, "application/json", strings.NewReader("{}"))
+		response, err := client.Post("http://videocut"+route, "application/json", strings.NewReader("{}"))
 		if err != nil {
 			t.Fatal(err)
 		}

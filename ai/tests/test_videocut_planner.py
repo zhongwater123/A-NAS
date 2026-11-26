@@ -1,5 +1,5 @@
 """Root's planner hands a planning round to the member's planning instance as one conversation
-(ai/assistant/montage-planner.py, docs/architecture/montage-planning-session.md).
+(ai/assistant/videocut-planner.py, docs/architecture/montage-planning-session.md).
 
 The montage center's socket, the planning instance's login and the model's gateway are stand-ins on Unix sockets; the
 instance's JSON-RPC is a scripted connection in place of the runtime's websockets.
@@ -18,8 +18,8 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "montage-planner.py"
-SPEC = importlib.util.spec_from_file_location("montage_planner", SOURCE)
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "videocut-planner.py"
+SPEC = importlib.util.spec_from_file_location("videocut_planner", SOURCE)
 planner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(planner)
 
@@ -111,7 +111,7 @@ class ScriptedHermes:
     @staticmethod
     def complete(ws):
         ws.push({"id": "srq-1", "method": "approval", "params": {"session_id": "s1", "request_id": "r1"}})
-        ws.event("tool.start", {"name": "mcp__montage__montage_brief"})
+        ws.event("tool.start", {"name": "mcp__videocut__videocut_brief"})
         ws.event("message.complete", {"text": "[SILENT]", "status": "complete"})
         ws.event("review.summary", {"text": "记下了一个技能"})
 
@@ -126,7 +126,7 @@ class PlannerTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.root = root
         paths = {"MARKERS": root / "markers", "GRANTS": root / "grants", "TOKENS": root / "tokens",
-                 "STATE": root / "state" / "state.json", "MONTAGE": root / "videocut.sock",
+                 "STATE": root / "state" / "state.json", "VIDEOCUT": root / "videocut.sock",
                  "PLAN_SOCKETS": root / "plan", "PROMPTS": root / "prompts", "MODEL": root / "model.sock"}
         for name, path in paths.items():
             self.addCleanup(setattr, planner, name, getattr(planner, name))
@@ -141,9 +141,9 @@ class PlannerTests(unittest.TestCase):
         self.claim = {"roundId": ROUND, "jobId": JOB, "attemptToken": TOKEN, "template": "plan-v2", "targetSeconds": 12,
                       "project": "海边"}
         self.started_status = 204
-        self.montage_server, self.montage_calls = serve(str(root / "videocut.sock"), self.montage)
-        self.addCleanup(self.montage_server.server_close)
-        self.addCleanup(self.montage_server.shutdown)
+        self.videocut_server, self.videocut_calls = serve(str(root / "videocut.sock"), self.videocut)
+        self.addCleanup(self.videocut_server.server_close)
+        self.addCleanup(self.videocut_server.shutdown)
         self.login_status = 200
         # Each conversation is a connection of its own, scripted with turn and failing.
         self.turn, self.failing = None, set()
@@ -163,7 +163,7 @@ class PlannerTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def montage(self, method, path, headers, body):
+    def videocut(self, method, path, headers, body):
         account = headers.get("X-A-NAS-Account")
         if path == "/v1/rounds/claim":
             self.claims.append(account)
@@ -364,7 +364,7 @@ class PlannerTests(unittest.TestCase):
         self.instance()
 
         def cut(ws):
-            ws.event("tool.start", {"name": "mcp__montage__montage_submit_outline"})
+            ws.event("tool.start", {"name": "mcp__videocut__videocut_submit_outline"})
             ws.inbox.put_nowait(None)
 
         self.turn = cut
@@ -384,14 +384,14 @@ class PlannerTests(unittest.TestCase):
     def test_a_montage_center_that_does_not_answer_is_asked_again_later_or_for_a_new_grant(self):
         self.member("alice")
         self.instance()
-        self.montage_server.shutdown()
-        self.montage_server.server_close()
-        os.unlink(planner.MONTAGE)
+        self.videocut_server.shutdown()
+        self.videocut_server.server_close()
+        os.unlink(planner.VIDEOCUT)
         loop = planner.Planner()
         loop.cycle(self.now)
         self.assertEqual(loop.until, self.now + 120)
         # Within the wait nothing is claimed: the socket is not even tried.
-        with patch.object(planner, "montage", side_effect=AssertionError("claimed within the wait")):
+        with patch.object(planner, "videocut", side_effect=AssertionError("claimed within the wait")):
             loop.cycle(self.now + 60)
         # A grant registered since is tried at once.
         self.now += 90

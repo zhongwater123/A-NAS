@@ -6,14 +6,14 @@ import (
 	"testing"
 )
 
-// The planner (ai/assistant/montage-planner.py) refuses a claim whose round
+// The planner (ai/assistant/videocut-planner.py) refuses a claim whose round
 // id, job id or token is not what it expects, and so plans nothing. On the
 // Experimental NAS the round script before it expected 24 letters where the
 // montage center makes 26 (crypto/rand.Text): every round was claimed,
 // thrown away and timed out, and no job was ever planned. Its patterns are
 // read from the planner itself, so that the two cannot part.
 func TestThePlannerAcceptsTheIDsAndTokensOfAClaim(t *testing.T) {
-	script, err := os.ReadFile("../../../ai/assistant/montage-planner.py")
+	script, err := os.ReadFile("../../../ai/assistant/videocut-planner.py")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestThePlannerAcceptsTheIDsAndTokensOfAClaim(t *testing.T) {
 		t.Helper()
 		found := regexp.MustCompile(`(?m)^` + name + ` = re\.compile\(r"([^"]+)"\)$`).FindSubmatch(script)
 		if found == nil {
-			t.Fatalf("montage-planner.py has no %s pattern", name)
+			t.Fatalf("videocut-planner.py has no %s pattern", name)
 		}
 		return regexp.MustCompile(`^(?:` + string(found[1]) + `)$`)
 	}

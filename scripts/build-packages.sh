@@ -172,7 +172,7 @@ install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.
 # (docs/architecture/montage-planning-session.md); the fixed prompt templates
 # the planner fills go beside it.
 install -d "$lib/assistant/managed-plan" "$lib/assistant/videocut-prompts"
-derive_plan_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
+derive_plan_policy "$assistant/managed-config.yaml" "$assistant/videocut-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
 install -m 0644 "$repo"/ai/anas_videocut/prompts/*.md "$lib/assistant/videocut-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.

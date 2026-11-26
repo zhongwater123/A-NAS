@@ -21,15 +21,15 @@
 成员平时的 VNAS 是 `anas-assistant@<账号>`（`hermes serve`）。规划进程是同一个沙箱里的第二个 `hermes serve`：
 
 - 由 `scripts/lib/assistant-units.sh` 从 `anas-assistant@.service` 生成，与定时任务、整理单元同法：同样的挂载（同它们一样不绑定伙伴的套接字，没有窗口）、同一个 Hermes 主目录（记忆、技能、对话记录共用）、同一个私有网络与模型桥（`JoinsNamespaceOf=anas-assistant-net@%i.service`），端口换成 9120（`ANAS_ASSISTANT_CHANNEL=plan`，`assistant-start.sh`）。生成时核对每处替换都生效，模板变了在打包时失败。
-- **工具在进程级固定**：`HERMES_TUI_TOOLSETS=montage,memory,skills`。`hermes serve` 不能按单次对话收窄工具，工具组整个进程一致，所以只能用一个单独的进程。实测模型只拿到 `memory`、`skill_manage`、`skill_view`、`skills_list` 与剪辑的 4 个工具。
-- **自己的托管策略**：`managed-plan/` = 普通托管策略加上剪辑的 MCP 服务器（`montage-mcp.yaml`），把 `skills.creation_nudge_interval` 设为 1，每次规划结束都复盘。Host Agent 按它写 `members/<账号>/config-plan.yaml`，单元绑定成 Hermes 的 `config.yaml`。原来的 `managed-cron/` 与 `config-cron.yaml` 只为规划而有，一并去掉，定时任务单元回到普通策略。
+- **工具在进程级固定**：`HERMES_TUI_TOOLSETS=videocut,memory,skills`。`hermes serve` 不能按单次对话收窄工具，工具组整个进程一致，所以只能用一个单独的进程。实测模型只拿到 `memory`、`skill_manage`、`skill_view`、`skills_list` 与剪辑的 4 个工具。
+- **自己的托管策略**：`managed-plan/` = 普通托管策略加上剪辑的 MCP 服务器（`videocut-mcp.yaml`），把 `skills.creation_nudge_interval` 设为 1，每次规划结束都复盘。Host Agent 按它写 `members/<账号>/config-plan.yaml`，单元绑定成 Hermes 的 `config.yaml`。原来的 `managed-cron/` 与 `config-cron.yaml` 只为规划而有，一并去掉，定时任务单元回到普通策略。
 - **只有它绑定剪辑套接字**（`/run/a-nas-videocut-assistant/assistant.sock` → 沙箱内 `/run/anas-assistant-videocut/videocut.sock`）；成员平时的 VNAS、定时任务与整理单元都不绑定。
 - **自己的入口**：`anas-assistant-planapi@.socket`（`/run/a-nas-assistant-plan/<账号>.sock`，root 0600）与 `anas-assistant-planapi@.service`（`systemd-socket-proxyd --exit-idle-time=45s 127.0.0.1:9120`），由 `anas-assistant-api@` 的两个单元生成。连接来了才起进程，没有连接 45 秒后退出（`StopWhenUnneeded=yes`）。Host Agent 与 `anas-assistant-api@.socket` 一样为每个有 VNAS 的成员启用这个套接字；账号停用时连同 `anas-assistant-plan@` 一起屏蔽，删掉密钥时停下。
 - 与成员平时的 VNAS 可以同时运行；两个进程同时写同一主目录的记忆与技能，实测没有丢失。
 
 ### 2. 规划发起方：`anas-videocut-planner.service`
 
-root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务里的规划部分（`cron-waker.py` 只留成员的定时任务）。用 AI 助手运行环境的 Python（有 `websockets`）；与模型网关、唤醒服务一样只在保存了密钥时运行，Host Agent 随密钥启停。每 15 秒看一次。
+root 的长驻服务（`ai/assistant/videocut-planner.py`），取代唤醒服务里的规划部分（`cron-waker.py` 只留成员的定时任务）。用 AI 助手运行环境的 Python（有 `websockets`）；与模型网关、唤醒服务一样只在保存了密钥时运行，Host Agent 随密钥启停。每 15 秒看一次。
 
 1. **找要规划的**：剪辑服务的记号（`/run/a-nas-videocut/plans/<账号>`，只读）、规划授权（只认 root 所有、他人不可写的文件）、账号在用且有 VNAS。全机同一时间只规划一个。
 2. **领取一轮**：在剪辑服务的助手套接字上 `POST /v1/rounds/claim`。规划发起方以 root 连接，请求带 `X-A-NAS-Account: <账号>`；剪辑服务只对 UID 0 的对端认这个头（套接字目录只有 root 进得去，沙箱里绑定的对端都是成员 UID），其余对端照旧按 UID 认成员。
@@ -81,4 +81,4 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 - 决定：[2026-11-20 剪辑规划交给 VNAS 的方式](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）
 - 验证脚本：开发机实测用的 spike 沙箱（`ai/assistant-spike/run.sh`），规划进程与四项检查写进系统测试
-- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/protocol/socket.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-videocut-planner.service`
+- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/protocol/socket.go`、`ai/assistant/videocut-planner.py`、`ai/assistant/anas_videocut_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-videocut-planner.service`

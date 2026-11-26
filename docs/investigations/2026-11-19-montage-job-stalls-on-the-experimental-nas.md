@@ -48,4 +48,4 @@
 - 规格：[剪辑中心](../specs/montage-center.md)
 - ADR：[0038](../adr/0038-keep-montage-media-in-the-photo-library.md)
 - 运行手册：[在实验 NAS 上演示剪辑中心](../runbooks/demo-montage-center.md)
-- 代码：[`internal/photos/airunner.go`](../../internal/photos/airunner.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`ai/assistant/montage-planner.py`](../../ai/assistant/montage-planner.py)（取代回合脚本）、[`web/src/videocut/screens/HeroReel.tsx`](../../web/src/videocut/screens/HeroReel.tsx)
+- 代码：[`internal/photos/airunner.go`](../../internal/photos/airunner.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`ai/assistant/montage-planner.py`](../../ai/assistant/videocut-planner.py)（取代回合脚本）、[`web/src/videocut/screens/HeroReel.tsx`](../../web/src/videocut/screens/HeroReel.tsx)

@@ -38,7 +38,7 @@ install -m 0644 /dev/null "$lib/empty.env"
 # shellcheck source=../../scripts/lib/assistant-units.sh
 . "$src/scripts/lib/assistant-units.sh"
 install -d -m 0755 "$lib/managed-plan" "$lib/videocut-prompts"
-derive_plan_policy "$lib/managed/config.yaml" "$src/ai/assistant/montage-mcp.yaml" "$lib/managed-plan/config.yaml"
+derive_plan_policy "$lib/managed/config.yaml" "$src/ai/assistant/videocut-mcp.yaml" "$lib/managed-plan/config.yaml"
 install -m 0644 "$src"/ai/anas_videocut/prompts/*.md "$lib/videocut-prompts/"
 ln -sfn /opt/a-nas/assistant-runtimes/spike "$lib/runtime"
 [[ -f "$lib/runtime/src/SOUL.md" ]] || { install -d /opt/a-nas/assistant-runtimes/spike/src && : > /opt/a-nas/assistant-runtimes/spike/src/SOUL.md; }

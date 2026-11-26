@@ -22,7 +22,7 @@ import (
 // /run/a-nas-videocut/plans/<account>; root's planner claims a round here,
 // holds it as one conversation with the member's planning instance, and
 // reports that it started and how it ended, or that it never started and
-// why (ai/assistant/montage-planner.py). The model reads the
+// why (ai/assistant/videocut-planner.py). The model reads the
 // briefs and hands the two steps back through the montage tools (briefs.go);
 // each answer is checked there and the first good one kept for the input key
 // of the step it answers. The job's own step then takes it into its plan
@@ -62,7 +62,7 @@ const (
 	planTimeout = 20 * time.Minute
 	// handoverTimeout: a round started is over by then, whatever its model
 	// does. The planner gives a conversation an hour at most
-	// (montage-planner.py's TURN); past that nothing of it is left to call.
+	// (videocut-planner.py's TURN); past that nothing of it is left to call.
 	handoverTimeout = 65 * time.Minute
 	// notTakenAfter: a job that wanted a round this long without one says so.
 	notTakenAfter = 10 * time.Minute

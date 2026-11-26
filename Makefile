@@ -299,13 +299,13 @@ ops-check:
 	grep -Fqx 'Sockets=anas-videocut-assistant.socket' deploy/systemd/system/anas-videocut.service
 	test "$$(grep -c 'videocut-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
 	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-videocut-assistant/assistant.sock:/run/anas-assistant-videocut/videocut.sock' scripts/lib/assistant-units.sh
-	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
-	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-videocut-planner.service
+	grep -Fq 'HERMES_TUI_TOOLSETS=videocut,memory,skills' scripts/lib/assistant-units.sh
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/videocut-planner.py' deploy/systemd/system/anas-videocut-planner.service
 	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-videocut-planner.service
 	test "$$(grep -c '^      systemctl stop anas-videocut-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
 	grep -Fqx '  systemctl stop anas-videocut-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
 	@# Planning grants are in the Host Agent's own state, never under a service's directory.
-	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/montage-planner.py
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/videocut-planner.py
 	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-videocut-compute.service
 	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-videocut-compute.service

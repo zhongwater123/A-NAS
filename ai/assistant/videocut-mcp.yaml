@@ -3,9 +3,9 @@
   # tools with memory and skills and nothing else (HERMES_TUI_TOOLSETS). trust: full,
   # for no one is there to approve a call: root's planner refuses every approval the
   # planning asks for; the montage center checks every answer.
-  montage:
+  videocut:
     command: /usr/lib/a-nas/assistant/runtime/venv/bin/python
-    args: [/usr/lib/a-nas/assistant/anas_montage_mcp.py]
+    args: [/usr/lib/a-nas/assistant/anas_videocut_mcp.py]
     trust: full
     enabled: true
     lazy: false

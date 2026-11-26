@@ -552,7 +552,7 @@ montage/
 
 ### MCP 服务器
 
-- `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
+- `ai/assistant/anas_videocut_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/videocut-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
 - 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `montage,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
 - **云端看不到画面**：规划进程里没有看图、看视频、读文件、终端、相册与桌面的工具，工具只给文字与结构化数据（用户 2026-11-20 决定 3）。
 - 套接字：systemd 的 `anas-videocut-assistant.socket` 持有宿主机上的 `/run/a-nas-videocut-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-videocut/videocut.sock`。
@@ -562,15 +562,15 @@ montage/
 
 | 工具 | 输入 | 输出 |
 |---|---|---|
-| `montage_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第一步的数据（卡片目录、音乐段落、成员的要求）与这一轮的精确 Schema |
-| `montage_submit_outline` | `jobId`、`attemptToken`、大纲 | `accepted`，附下一步该调什么；或 `rejected` 与原因，让模型改了再交 |
-| `montage_shots_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第二步的数据（按收下的大纲生成的画面与可选节拍）与精确 Schema；大纲还没收下时回答“先交大纲” |
-| `montage_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `montage_submit_outline`；还有方案要规划时回答 `next_plan`，全部收下时回答“做完了，只回答 [SILENT]” |
+| `videocut_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第一步的数据（卡片目录、音乐段落、成员的要求）与这一轮的精确 Schema |
+| `videocut_submit_outline` | `jobId`、`attemptToken`、大纲 | `accepted`，附下一步该调什么；或 `rejected` 与原因，让模型改了再交 |
+| `videocut_shots_brief`（`readOnlyHint`） | `jobId`、`attemptToken` | 第二步的数据（按收下的大纲生成的画面与可选节拍）与精确 Schema；大纲还没收下时回答“先交大纲” |
+| `videocut_submit_shots` | `jobId`、`attemptToken`、镜头 | 同 `videocut_submit_outline`；还有方案要规划时回答 `next_plan`，全部收下时回答“做完了，只回答 [SILENT]” |
 
 - **一轮规划两个方案**：一次生成只用掉规划授权 5 轮中的 1 轮。
-  - 工具作用于“当前方案”：第一个还没存进相册、第二步还没有答案的方案；按 `plan_answers` 判断，不看 `plans`，因为模型交完方案一时任务可能还没来得及取走。方案一的镜头收下、后面还有方案时回答 `next_plan`，同一次调用重试也得到同样的回答；模板要求模型回到 `montage_brief` 做下一版。
+  - 工具作用于“当前方案”：第一个还没存进相册、第二步还没有答案的方案；按 `plan_answers` 判断，不看 `plans`，因为模型交完方案一时任务可能还没来得及取走。方案一的镜头收下、后面还有方案时回答 `next_plan`，同一次调用重试也得到同样的回答；模板要求模型回到 `videocut_brief` 做下一版。
   - 方案二的输入键：第一步是 `planKey(方案一第一步的键, 2)`，第二步仍是 `shotsKey(本方案第一步的键, 本方案的大纲)`。任务的步骤与工具用同一对函数，所以答案存进 `plan_answers` 的键就是步骤要找的键。
-  - brief：第一步的 brief 两个方案相同，存在方案一的键下，只做一次；第二步的按各自的键存。方案二的 `montage_brief` 在返回前另拼上 `plan` 与 `earlierOutlines`（方案一收下的大纲），让它换一种讲法；这两项不存进 `plan_briefs`。
+  - brief：第一步的 brief 两个方案相同，存在方案一的键下，只做一次；第二步的按各自的键存。方案二的 `videocut_brief` 在返回前另拼上 `plan` 与 `earlierOutlines`（方案一收下的大纲），让它换一种讲法；这两项不存进 `plan_briefs`。
   - 一轮的身份只记方案一第一步的键（`rounds.input_key`），领取时也按它连接 `steps`。
   - 这一轮在方案二交齐之前结束：方案一照常往下做、存进相册，1 分钟后自动再要一轮，只规划方案二（2026-11-25 用户[决定](../decisions/2026-11-25-montage-planning-retries.md)；原来按 #514 停下等成员）。
 - **答案的上限**写在 brief 的 Schema 里，模型交之前就知道：每个方案的场景数等于段落数（`prefixItems`，`items: false`）；文字答案每项最多 120 字，全部文字最多 1,500 字，枚举不计（[#607](https://github.com/zhongwater123/A-NAS/pull/607)）。
@@ -580,7 +580,7 @@ montage/
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次对话的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/videocut-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__videocut__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/videocut-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 后台对话里没有人回答审批，规划发起方对审批请求一律答拒绝。提示词仍要求不把描述写进记忆。
 
@@ -966,5 +966,5 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；
   - 助手：[`ai/assistant/managed-config.yaml`](../../ai/assistant/managed-config.yaml)、[`internal/assistantapi`](../../internal/assistantapi/rpc.go)；
-  - 规划：[`montage-planner.py`](../../ai/assistant/montage-planner.py)、[`anas_montage_mcp.py`](../../ai/assistant/anas_montage_mcp.py)、[`planning.go`](../../internal/videocut/app/planning.go)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)。
+  - 规划：[`videocut-planner.py`](../../ai/assistant/videocut-planner.py)、[`anas_videocut_mcp.py`](../../ai/assistant/anas_videocut_mcp.py)、[`planning.go`](../../internal/videocut/app/planning.go)、[`assistant-units.sh`](../../scripts/lib/assistant-units.sh)、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)。
 - **调查**：[剪辑任务在实验 NAS 上先停在“等待分析”，再停在“等待 VNAS”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)。

@@ -332,7 +332,7 @@ class BriefTest(unittest.TestCase):
         fields = sorted(set(re.findall(r"\$[a-z_]+", recut)))
         self.assertEqual(fields, sorted(set(re.findall(r"\$[a-z_]+", plan))))
         self.assertEqual(recut[recut.index("## 第一步：大纲"):], plan[plan.index("## 第一步：大纲"):])
-        self.assertLess(recut.index("montage_submit_outline"), recut.index("montage_shots_brief"))
+        self.assertLess(recut.index("videocut_submit_outline"), recut.index("videocut_shots_brief"))
 
 
 @unittest.skipUnless(RUNTIME, "NumPy and Pillow are in the AI runtime")

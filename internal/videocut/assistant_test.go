@@ -78,7 +78,7 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
 		for {
-			response, err := client.Post("http://montage/v1/rounds/claim", "application/json", strings.NewReader("{}"))
+			response, err := client.Post("http://videocut/v1/rounds/claim", "application/json", strings.NewReader("{}"))
 			if err == nil {
 				body, _ := io.ReadAll(response.Body)
 				_ = response.Body.Close()
@@ -106,7 +106,7 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 	waitFor(http.StatusConflict)
 	// The service stops with the socket's server: nothing is left listening.
 	stop()
-	if _, err := client.Post("http://montage/v1/rounds/claim", "application/json", strings.NewReader("{}")); err == nil {
+	if _, err := client.Post("http://videocut/v1/rounds/claim", "application/json", strings.NewReader("{}")); err == nil {
 		t.Fatal("the assistant socket still answers after the service stopped")
 	}
 }

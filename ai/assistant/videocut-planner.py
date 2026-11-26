@@ -6,7 +6,7 @@ INTERVAL seconds it gives one member with a job waiting for a plan a round, one 
 1. Who: a marker the montage service left in MARKERS, the longest waiting first; a planning grant, read only as root's
    own file in root's own directory (GRANTS, the File Broker's), under seven days old and with rounds left, which are
    counted here (STATE); an account in use with VNAS (its instance secret in TOKENS, the Host Agent's word).
-2. Claim: POST /v1/rounds/claim on the montage center's assistant socket (MONTAGE), naming the account in
+2. Claim: POST /v1/rounds/claim on the montage center's assistant socket (VIDEOCUT), naming the account in
    X-A-NAS-Account, which the montage service hears from root alone.
 3. Converse: Hermes's own login (/auth/password-login, the instance's secret as the member's password) on the socket
    of the member's planning instance (PLAN_SOCKETS/<account>.sock, which starts it), then Hermes's JSON-RPC on /api/ws:
@@ -43,7 +43,7 @@ MARKERS = os.environ.get("ANAS_VIDEOCUT_PLAN_MARKERS", "/run/a-nas-videocut/plan
 GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas-host/assistant/plans")
 TOKENS = os.environ.get("ANAS_ASSISTANT_TOKEN_DIR", "/var/lib/a-nas-host/assistant/tokens")
 STATE = os.environ.get("ANAS_VIDEOCUT_PLANNER_STATE", "/var/lib/anas-videocut-planner/state.json")
-MONTAGE = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-videocut-assistant/assistant.sock")
+VIDEOCUT = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-videocut-assistant/assistant.sock")
 PLAN_SOCKETS = os.environ.get("ANAS_ASSISTANT_PLAN_SOCKETS", "/run/a-nas-assistant-plan")
 MODEL = os.environ.get("ANAS_ASSISTANT_MODEL_SOCKET", "/run/anas-assistant-gw/model.sock")
 HOST_SOCKET = os.environ.get("ANAS_HOST_AGENT_SOCKET", "/run/a-nas/host-agent.sock")
@@ -66,7 +66,7 @@ START = 180  # seconds for the planning instance to start and log in
 CALL = 60  # seconds for one JSON-RPC call
 TURN = 60 * 60  # the montage center ends a started round after 65 minutes whatever happens
 REVIEW = 150
-MONTAGE_WAITS = (120, 240, 480, 900)
+VIDEOCUT_WAITS = (120, 240, 480, 900)
 TITLE = "剪辑规划 · "
 
 
@@ -108,9 +108,9 @@ def request(path, method, route, body=None, headers=None, timeout=30):
         conn.close()
 
 
-def montage(account, route, body=None):
+def videocut(account, route, body=None):
     """(status, answer) of one call on the montage center's assistant socket, for account."""
-    status, _, raw = request(MONTAGE, "POST", route, body or {},
+    status, _, raw = request(VIDEOCUT, "POST", route, body or {},
                              {"Content-Type": "application/json", "X-A-NAS-Account": account})
     if status == 503:
         raise Unreachable("the montage center is not available")
@@ -419,7 +419,7 @@ class Hermes:
                 return "interrupted", payload.get("reason", "the connection closed"), tools
             if frame.get("session_id") not in (None, session):
                 continue
-            if kind == "tool.start" and "montage_" in str(payload.get("name", "")):
+            if kind == "tool.start" and "videocut_" in str(payload.get("name", "")):
                 tools += 1
             elif kind == "message.complete":
                 status = payload.get("status") or "complete"
@@ -446,13 +446,13 @@ def abandon(account, round_id, failure, reason):
     say(f"{account}: round {round_id} not started ({failure}): {reason}")
     # Unreachable, the montage center abandons it itself five minutes after its claim.
     with contextlib.suppress(Unreachable):
-        montage(account, f"/v1/rounds/{round_id}/abandon", {"outcome": reason[:500], "failure": failure})
+        videocut(account, f"/v1/rounds/{round_id}/abandon", {"outcome": reason[:500], "failure": failure})
 
 
 def end(account, round_id, result, outcome):
     say(f"{account}: round {round_id} ended: {result}" + ("" if outcome == result else f" ({outcome})"))
     try:
-        montage(account, f"/v1/rounds/{round_id}/end", {"result": result, "outcome": outcome[:500]})
+        videocut(account, f"/v1/rounds/{round_id}/end", {"result": result, "outcome": outcome[:500]})
     except Unreachable as broken:
         say(f"{account}: the end of round {round_id} was not reported ({broken}); the montage center ends it itself")
 
@@ -477,7 +477,7 @@ async def converse(account, key, round_id, text, title):
         if not isinstance(session, str) or not isinstance(stored, str) or not STORED.fullmatch(stored):
             raise Broken(f"session.create answered {json.dumps(created, ensure_ascii=False)[:200]}")
         await hermes.call("session.title", {"session_id": session, "title": title})
-        status, _ = await asyncio.to_thread(montage, account, f"/v1/rounds/{round_id}/started", {"runRef": stored})
+        status, _ = await asyncio.to_thread(videocut, account, f"/v1/rounds/{round_id}/started", {"runRef": stored})
         if status != 204:
             # Abandoned or over meanwhile: no model call without a recorded start.
             say(f"{account}: round {round_id} was not recorded as started ({status}); its prompt is not sent")
@@ -513,7 +513,7 @@ async def converse(account, key, round_id, text, title):
 
 def plan_round(account, key):
     """Claim a round for the member and see it through. Unreachable when the montage center does not answer."""
-    status, claim = montage(account, "/v1/rounds/claim")
+    status, claim = videocut(account, "/v1/rounds/claim")
     if status == 409:
         say(f"{account}: no job to plan")
         return
@@ -569,7 +569,7 @@ class Planner:
             try:
                 plan_round(account, key)
             except Unreachable as broken:
-                wait = MONTAGE_WAITS[min(self.waits, len(MONTAGE_WAITS) - 1)]
+                wait = VIDEOCUT_WAITS[min(self.waits, len(VIDEOCUT_WAITS) - 1)]
                 self.waits += 1
                 self.since, self.until = now, now + wait
                 say(f"the montage center does not answer ({broken}); claiming again in {wait // 60} minutes")
@@ -590,5 +590,5 @@ def main():
 
 if __name__ == "__main__":
     if len(sys.argv) != 1:
-        sys.exit("usage: montage-planner.py")
+        sys.exit("usage: videocut-planner.py")
     main()

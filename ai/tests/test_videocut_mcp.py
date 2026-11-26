@@ -10,11 +10,11 @@ from pathlib import Path
 
 from tests import test_companion_mcp as companion_tests
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "anas_montage_mcp.py"
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "anas_videocut_mcp.py"
 PROMPT = Path(__file__).resolve().parents[1] / "anas_videocut" / "prompts" / "plan-v2.md"
 
 
-def montage_server():
+def videocut_server():
     """The server module under the companion tests' stand-ins, with the ToolAnnotations it also imports."""
     original = companion_tests._module
 
@@ -25,15 +25,15 @@ def montage_server():
 
     companion_tests._module = with_annotations
     try:
-        return companion_tests.load("anas_montage_mcp", SOURCE)
+        return companion_tests.load("anas_videocut_mcp", SOURCE)
     finally:
         companion_tests._module = original
 
 
-class MontageToolTests(unittest.TestCase):
+class VideoCutToolTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.module = montage_server()
+        cls.module = videocut_server()
 
     def center(self, status, body):
         center = companion_tests._Companion(self, self.module, attribute="SOCKET")
@@ -46,14 +46,14 @@ class MontageToolTests(unittest.TestCase):
 
     def test_an_answer_written_as_a_json_string_reaches_the_montage_center_as_an_object(self):
         center = self.center(200, {"status": "accepted"})
-        self.module.call("montage_submit_outline", {"jobId": "job:X", "attemptToken": "ab" * 16, "answer": '{"design": "海"}'})
+        self.module.call("videocut_submit_outline", {"jobId": "job:X", "attemptToken": "ab" * 16, "answer": '{"design": "海"}'})
         self.assertEqual(center.received,
                          [("/v1/tools/outline", {"jobId": "job:X", "attemptToken": "ab" * 16, "answer": {"design": "海"}})])
 
     def test_each_acceptance_says_the_next_step_and_none_reads_as_another(self):
         self.center(200, {"status": "accepted"})
-        outline = self.said(self.module.call("montage_submit_outline", {"jobId": "job:X", "attemptToken": "t", "answer": {}}))
-        shots = self.said(self.module.call("montage_submit_shots", {"jobId": "job:X", "attemptToken": "t", "answer": {}}))
+        outline = self.said(self.module.call("videocut_submit_outline", {"jobId": "job:X", "attemptToken": "t", "answer": {}}))
+        shots = self.said(self.module.call("videocut_submit_shots", {"jobId": "job:X", "attemptToken": "t", "answer": {}}))
         self.assertIn("大纲已收下", outline)
         self.assertIn("全部方案都已收下", shots)
         # The model stops at 全部方案都已收下 and goes on at 还有下一版 (plan-v2.md): neither may be read in the other.
@@ -63,12 +63,12 @@ class MontageToolTests(unittest.TestCase):
         for said in (outline, shots):
             self.assertNotIn("还有下一版", said)
         prompt = PROMPT.read_text(encoding="utf-8")
-        for word in ("大纲已收下", "还有下一版", "全部方案都已收下", "mcp__montage__"):
+        for word in ("大纲已收下", "还有下一版", "全部方案都已收下", "mcp__videocut__"):
             self.assertIn(word, prompt)
 
     def test_a_call_the_montage_center_refuses_as_a_request_is_rejected_with_what_to_fix(self):
         self.center(400, {"error": {"code": "validation_failed", "message": "the request is not valid"}})
-        said = self.said(self.module.call("montage_brief", {"jobId": 7, "attemptToken": "t"}))
+        said = self.said(self.module.call("videocut_brief", {"jobId": 7, "attemptToken": "t"}))
         self.assertIn("不合格", said)
         self.assertIn("jobId", said)
         self.assertNotIn("连不上", said)

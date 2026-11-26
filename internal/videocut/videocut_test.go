@@ -70,7 +70,7 @@ func request(socket, token string) (int, string, error) {
 	client := http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}, Timeout: 5 * time.Second}
-	request, _ := http.NewRequest(http.MethodGet, "http://montage/api/v1/videocut/projects", nil)
+	request, _ := http.NewRequest(http.MethodGet, "http://videocut/api/v1/videocut/projects", nil)
 	if token != "" {
 		request.Header.Set(serviceproxy.SessionHeader, token)
 	}
