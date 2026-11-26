@@ -1,10 +1,14 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
+import { onLocalConsoleActive } from "../lib/localConsole";
 import { session } from "../test/fixtures";
 import {
   addVersion,
+  nobody,
   other,
   reader,
   version,
@@ -24,10 +28,23 @@ beforeEach(() => {
     http.get("/api/v1/session", ({ response }) =>
       response(200).json(session({ id: reader.id, username: reader.name, role: "member" }, { csrfToken: "csrf" })),
     ),
+    http.get("/api/v1/profiles", ({ response }) => response(200).json({ items: [] })),
     ...workspaceHandlers(store),
   );
 });
-afterEach(() => window.history.replaceState(null, "", "/"));
+
+// The device's own screen loads the screen saver's videos and sleep setting.
+const deviceScreen = () => {
+  window.history.replaceState(null, "", "/workspace/page_prd?local-console=1");
+  server.use(
+    http.untyped.get(`${window.location.origin}/local-console/screensavers`, () => HttpResponse.json({ videos: [] })),
+    http.get("/api/v1/local-display", ({ response }) => response(200).json({ sleepAfterMinutes: 10 })),
+  );
+};
+afterEach(() => {
+  vi.useRealTimers();
+  window.history.replaceState(null, "", "/");
+});
 
 const frame = async () => (await screen.findByTitle(/^页面：/)) as HTMLIFrameElement;
 // fromFrame is a message from the page's frame, whose origin is opaque.
@@ -55,18 +72,74 @@ describe("共享页面的标签页", () => {
     expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
   });
 
-  it("tells the member's agent the page is open until the tab closes", async () => {
+  it("says the page is open while the tab can be seen, and whether the member is using it", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    let focused = false;
+    vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+    let hidden = false;
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+    const visibility = (value: boolean) => {
+      hidden = !value;
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    };
+    try {
+      render(<PageTab pageId="page_prd" />);
+      const open = { pageId: "page_prd", version: 2, tab: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/) };
+      await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: false }));
+      // Getting the focus makes it the tab the member uses.
+      focused = true;
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: true }));
+      // Said again every minute: the service forgets a tab that goes quiet.
+      store.viewing = undefined;
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: true }));
+      // A tab in the background takes it back and stays quiet.
+      visibility(false);
+      await waitFor(() => expect(store.viewing).toBeUndefined());
+      const reports = store.reports.length;
+      await act(() => vi.advanceTimersByTimeAsync(120_000));
+      expect(store.reports.length).toBe(reports);
+      visibility(true);
+      await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: true }));
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+      await waitFor(() => expect(store.viewing).toBeUndefined());
+    } finally {
+      delete (document as { hidden?: boolean }).hidden;
+    }
+  });
+
+  it("shows whose agent is at work on the page and who else has it open", async () => {
+    const page = store.pages[0];
+    page.presence = {
+      viewers: [
+        { member: reader, version: 2, since: "2026-11-26T08:00:00Z" },
+        { member: other, version: 1, since: "2026-11-26T08:01:00Z" },
+      ],
+      agents: [
+        {
+          member: other,
+          via: { kind: "codex", name: "笔记本" },
+          action: "read",
+          version: 2,
+          at: new Date().toISOString(),
+        },
+      ],
+    };
     render(<PageTab pageId="page_prd" />);
-    await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_prd", version: 2 }));
-    // Said again every minute: the service forgets a desktop that goes quiet.
-    store.viewing = undefined;
-    await act(() => vi.advanceTimersByTimeAsync(60_000));
-    await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_prd", version: 2 }));
-    act(() => {
-      window.dispatchEvent(new Event("pagehide"));
-    });
-    await waitFor(() => expect(store.viewing).toBeUndefined());
+    // The reader's own face is left out.
+    expect(await screen.findByRole("img", { name: "正在看：bob（v1）" })).toBeTruthy();
+    expect(screen.getByText("bob 经 笔记本 读了 v2")).toBeTruthy();
+    // When the agent saves, the service ends its work there.
+    page.presence = nobody();
+    await waitFor(() => expect(screen.queryByText("bob 经 笔记本 读了 v2")).toBeNull(), { timeout: 6_000 });
+    expect(screen.queryByRole("img", { name: /正在看/ })).toBeNull();
   });
 
   it("shows the reader's own new version at once and points at what changed", async () => {
@@ -196,11 +269,29 @@ describe("共享页面的标签页", () => {
 
   it("closes itself on the device's own screen, which has no browser bar", async () => {
     const user = userEvent.setup();
-    window.history.replaceState(null, "", "/workspace/page_prd?local-console=1");
+    deviceScreen();
     const close = vi.spyOn(window, "close").mockImplementation(() => undefined);
     render(<PageTab pageId="page_prd" />);
     await frame();
     await user.click(screen.getByRole("button", { name: "关闭" }));
     expect(close).toHaveBeenCalled();
+  });
+
+  it("keeps the device screen's screen saver, which reading the page puts off", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    deviceScreen();
+    const used = vi.fn();
+    const stop = onLocalConsoleActive(used);
+    try {
+      render(<PageTab pageId="page_prd" />);
+      await frame();
+      // Scrolling inside the frame is input the tab's window never sees.
+      await fromFrame({ type: "anas:scrolled", y: 120 });
+      expect(used).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(localConsoleScreenSaverIdleMs + 10 * 60_000));
+      expect(await screen.findByRole("dialog", { name: "息屏" })).toBeTruthy();
+    } finally {
+      stop();
+    }
   });
 });

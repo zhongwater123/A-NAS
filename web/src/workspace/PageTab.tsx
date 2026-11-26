@@ -5,7 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import { onSessionEnded, setSession } from "../api/client";
 import type { Session } from "../api.generated";
 import { currentSession } from "../auth/api";
+import { LocalConsoleScreenSaver } from "../desktop/LocalConsoleScreenSaver";
 import { isLocalConsole } from "../lib/localConsole";
+import { loadPeople } from "../people/people";
 import { getPage } from "./api";
 import { PageView, pageKey } from "./PageView";
 import { WorkspaceQueries } from "./queries";
@@ -17,10 +19,31 @@ const tabClass = styles.wsApp;
 // served at /workspace/{pageId}): the page fills the tab, in the same
 // sandboxed frame as ever (ADR 0040), under a thin bar. The tab signs in with
 // the desktop's session. On the device's own screen a tab has no browser
-// bar, so 关闭 takes the member back to the desktop.
+// bar, so 关闭 takes the member back to the desktop, and the tab is what the
+// screen shows, so it keeps the desktop's screen saver and 息屏. The screen
+// saver is imported, not loaded on demand: the desktop imports it too, so
+// both share its chunk and the desktop's first load keeps one stylesheet.
 export function PageTab({ pageId }: { pageId: string }) {
   // undefined while it asks, null when nobody is signed in.
   const [session, setSessionState] = useState<Session | null>();
+  return (
+    <>
+      <SignedIn pageId={pageId} session={session} onSession={setSessionState} />
+      {/* The sign-in message has no screen saver but still goes black, as on the desktop. */}
+      <LocalConsoleScreenSaver enabled={isLocalConsole()} videos={Boolean(session)} />
+    </>
+  );
+}
+
+function SignedIn({
+  pageId,
+  session,
+  onSession: setSessionState,
+}: {
+  pageId: string;
+  session: Session | null | undefined;
+  onSession: (session: Session | null) => void;
+}) {
   useEffect(() => {
     let active = true;
     currentSession().then(
@@ -30,14 +53,16 @@ export function PageTab({ pageId }: { pageId: string }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [setSessionState]);
   useEffect(() => {
     if (!session) return;
+    // Names and faces, as the desktop shows them.
+    void loadPeople();
     return onSessionEnded(() => {
       setSession();
       setSessionState(null);
     });
-  }, [session]);
+  }, [session, setSessionState]);
 
   if (session === undefined) {
     return (

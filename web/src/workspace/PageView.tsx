@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { localConsoleActive } from "../lib/localConsole";
 import { relativeTime } from "../lib/time";
 import {
   clearSelection,
@@ -18,6 +19,7 @@ import {
   type WorkspaceVersion,
 } from "./api";
 import { type Blocked, type Picked, readFromFrame, type ToFrame } from "./frame/protocol";
+import { Presence } from "./Presence";
 import { Failed } from "./parts";
 import { arrivalText, savedText } from "./words";
 import styles from "./workspace.module.css";
@@ -80,20 +82,34 @@ export function PageView({
   useEffect(() => {
     if (missing) onGone();
   }, [missing, onGone]);
-  // What the tab shows is "this page" to the member's agent: said again
-  // every minute while it is open (the service forgets it after three
-  // quiet minutes) and taken back when the tab closes.
+  // The tab the member used last is "this page" to their agent, and every
+  // member sees who has a page open. The tab says so when it is shown or gets
+  // the focus and every minute while it can be seen, and takes it back when
+  // it is hidden or closes; the service forgets a tab after three quiet
+  // minutes.
   const version = load?.version;
   useEffect(() => {
     if (!version) return;
-    const report = () => void reportViewing(pageId, version).catch(() => undefined);
+    const report = () => {
+      if (!document.hidden) void reportViewing(pageId, version, document.hasFocus()).catch(() => undefined);
+    };
+    const shownOrHidden = () => {
+      if (document.hidden) void stopViewing(true).catch(() => undefined);
+      else report();
+    };
     report();
     const again = setInterval(report, 60_000);
-    return () => clearInterval(again);
+    document.addEventListener("visibilitychange", shownOrHidden);
+    window.addEventListener("focus", report);
+    return () => {
+      clearInterval(again);
+      document.removeEventListener("visibilitychange", shownOrHidden);
+      window.removeEventListener("focus", report);
+    };
   }, [pageId, version]);
   useEffect(() => {
     // keepalive: a closing tab does not wait for the answer.
-    const leave = () => void stopViewing(pageId, true).catch(() => undefined);
+    const leave = () => void stopViewing(true).catch(() => undefined);
     window.addEventListener("pagehide", leave);
     return () => {
       window.removeEventListener("pagehide", leave);
@@ -118,6 +134,7 @@ export function PageView({
     <Viewer
       key={pageId}
       page={page}
+      userId={userId}
       load={load}
       incoming={incoming}
       onShow={show}
@@ -130,6 +147,7 @@ export function PageView({
 
 function Viewer({
   page,
+  userId,
   load,
   incoming,
   onShow,
@@ -138,6 +156,7 @@ function Viewer({
   onClose,
 }: {
   page: WorkspacePage;
+  userId: string;
   load: Load;
   incoming?: WorkspaceVersion;
   onShow: (load: Load) => void;
@@ -219,6 +238,7 @@ function Viewer({
         case "anas:picked": {
           // One element each time the member asks to pick.
           if (!armed.current) break;
+          localConsoleActive();
           pick(false);
           const { type: _, ...picked } = message;
           const selection: Selected = { picked, version: load.version, state: "saving" };
@@ -238,6 +258,8 @@ function Viewer({
           }
           break;
         case "anas:scrolled":
+          // Reading a page is input its tab's window never sees.
+          localConsoleActive();
           onScrolled(message.y);
           break;
       }
@@ -261,6 +283,7 @@ function Viewer({
           {page.title}
         </h1>
         <VersionMenu page={page} version={load.version} onPick={(version) => onShow({ version })} />
+        <Presence presence={page.presence} userId={userId} latest={page.latest.version} />
         <button
           type="button"
           className={`${styles.wsButton} ${picking ? styles.on : ""}`}

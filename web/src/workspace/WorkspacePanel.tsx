@@ -24,6 +24,7 @@ import {
 import { ConnectAgent } from "./ConnectAgent";
 import type { Kit } from "./kit";
 import { Members } from "./Members";
+import { Presence } from "./Presence";
 import { acceptHTML, Failed, HTMLPicker } from "./parts";
 import { WorkspaceQueries } from "./queries";
 import { savedText } from "./words";
@@ -44,8 +45,10 @@ export function WorkspacePanel({ userId, admin }: { userId: string; admin: boole
   );
 }
 
-// openPage opens a page's tab, or returns to it when it is open.
-const openPage = (pageId: string) => window.open(tabURL(pageId), tabName(pageId), "noopener");
+// openPage opens a page's tab, or returns to it when it is open. Not
+// noopener: a browser then makes a new tab for every click, whatever its
+// name. The tab itself lets go of the desktop as it loads (tab.tsx).
+const openPage = (pageId: string) => window.open(tabURL(pageId), tabName(pageId));
 
 function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
   const root = useRef<HTMLDivElement>(null);
@@ -138,6 +141,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
             <PageRow
               key={page.id}
               page={page}
+              userId={userId}
               canDelete={admin || page.createdBy.id === userId}
               kit={kit}
               onChanged={refresh}
@@ -178,11 +182,13 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
 // PageRow is one page: its title opens it in its own tab, its menu manages it.
 function PageRow({
   page,
+  userId,
   canDelete,
   kit,
   onChanged,
 }: {
   page: WorkspacePageSummary;
+  userId: string;
   canDelete: boolean;
   kit: Kit;
   onChanged: () => void;
@@ -266,7 +272,6 @@ function PageRow({
         className={styles.wsRowOpen}
         href={tabURL(page.id)}
         target={tabName(page.id)}
-        rel="noopener"
         title={`在新标签页打开“${page.title}”`}
       >
         <FileCode2 className={styles.wsRowIcon} aria-hidden="true" />
@@ -276,6 +281,7 @@ function PageRow({
             {savedText(page.latest)} · v{page.latest.version} · {relativeTime(page.latest.savedAt)}
           </span>
         </span>
+        <Presence presence={page.presence} userId={userId} latest={page.latest.version} compact />
         <ArrowUpRight className={styles.wsRowArrow} aria-hidden="true" />
       </a>
       <RowMenu

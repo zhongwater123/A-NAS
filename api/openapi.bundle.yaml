@@ -4075,7 +4075,7 @@ paths:
       - $ref: '#/components/parameters/WorkspacePageID'
     get:
       operationId: getWorkspacePage
-      summary: A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions
+      summary: A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there
       responses:
         '200':
           description: The page
@@ -4226,7 +4226,7 @@ paths:
   /api/v1/workspace/viewing:
     put:
       operationId: setWorkspaceViewing
-      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without
+      summary: 'The page and version one of the caller''s tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. No tab name is 400 invalid_request'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -4238,16 +4238,23 @@ paths:
       responses:
         '204':
           description: Recorded
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
-  /api/v1/workspace/viewing/{pageId}:
+  /api/v1/workspace/viewing/{tab}:
     parameters:
-      - $ref: '#/components/parameters/WorkspacePageID'
+      - name: tab
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The tab's name as it reported itself
     delete:
       operationId: clearWorkspaceViewing
-      summary: The caller's desktop no longer shows this page; what it said of another page stays
+      summary: This tab of the caller's closed or went to the background; the caller's other tabs stay
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       responses:
@@ -18267,6 +18274,66 @@ components:
         savedAt:
           type: string
           format: date-time
+    WorkspaceViewer:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - version
+        - since
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        version:
+          type: integer
+          minimum: 1
+          description: What the member's tab used last shows.
+        since:
+          type: string
+          format: date-time
+          description: When the first of the member's tabs began to show the page.
+    WorkspaceAgentWork:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - via
+        - action
+        - version
+        - at
+      description: What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page.
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        via:
+          $ref: '#/components/schemas/WorkspaceVia'
+        action:
+          type: string
+          enum:
+            - read
+            - download
+        version:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+    WorkspacePresence:
+      type: object
+      additionalProperties: false
+      required:
+        - viewers
+        - agents
+      description: Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only.
+      properties:
+        viewers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceViewer'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceAgentWork'
     WorkspacePageSummary:
       type: object
       additionalProperties: false
@@ -18276,6 +18343,7 @@ components:
         - createdBy
         - createdAt
         - latest
+        - presence
       properties:
         id:
           type: string
@@ -18288,6 +18356,8 @@ components:
           format: date-time
         latest:
           $ref: '#/components/schemas/WorkspaceVersion'
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageList:
       type: object
       additionalProperties: false
@@ -18308,6 +18378,7 @@ components:
         - createdAt
         - latest
         - versions
+        - presence
       properties:
         id:
           type: string
@@ -18325,6 +18396,8 @@ components:
           items:
             $ref: '#/components/schemas/WorkspaceVersion'
           description: Newest first
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageChanged:
       type: object
       additionalProperties: false
@@ -18342,12 +18415,21 @@ components:
       required:
         - pageId
         - version
+        - tab
+        - focused
       properties:
         pageId:
           type: string
         version:
           type: integer
           minimum: 1
+        tab:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,64}$
+          description: A name the tab made for itself when it opened, random.
+        focused:
+          type: boolean
+          description: 'Whether the tab has the focus: the tab focused last is the one the member uses.'
     WorkspaceRect:
       type: object
       additionalProperties: false

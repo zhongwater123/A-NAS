@@ -205,6 +205,7 @@ func (s *server) context(ctx context.Context, caller workspace.Caller, _ context
 	if err != nil {
 		return s.refusal(ctx, err)
 	}
+	s.store.AgentWorking(caller, viewing.PageID, viewing.Version, workspace.AgentRead)
 	report := map[string]any{
 		"member": caller.Actor.Name,
 		"page": map[string]any{
@@ -297,11 +298,12 @@ type readInput struct {
 	FromLine int    `json:"from_line,omitempty" jsonschema:"the first line to read, 1 when omitted"`
 }
 
-func (s *server) readPage(ctx context.Context, _ workspace.Caller, in readInput) *mcp.CallToolResult {
+func (s *server) readPage(ctx context.Context, caller workspace.Caller, in readInput) *mcp.CallToolResult {
 	source, summary, err := s.store.Content(ctx, in.Page, in.Version)
 	if err != nil {
 		return s.refusal(ctx, err)
 	}
+	s.store.AgentWorking(caller, summary.ID, summary.Latest.Version, workspace.AgentRead)
 	_, latest, err := s.store.Version(ctx, in.Page, 0)
 	if err != nil {
 		return s.refusal(ctx, err)
@@ -361,6 +363,7 @@ func (s *server) checkout(ctx context.Context, caller workspace.Caller, in check
 	if err != nil {
 		return s.refusal(ctx, err)
 	}
+	s.store.AgentWorking(caller, summary.ID, summary.Latest.Version, workspace.AgentDownload)
 	url := caller.Origin + s.options.TransferPath + key
 	return answer("Download v%d of «%s» once, before %s:\ncurl.exe -sS -o page.html \"%s\"\n(On macOS or Linux, use curl instead of curl.exe.) Edit the file, then call workspace_upload with base_version %d.",
 		summary.Latest.Version, summary.Title, expires.Format(time.RFC3339), url, summary.Latest.Version)

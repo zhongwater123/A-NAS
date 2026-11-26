@@ -206,6 +206,85 @@
   background: var(--color-surface);
 }
 
+/* Whose agents are at work on a page and who else has it open (Presence.tsx):
+   in the tab's bar, and compact on the window's rows. */
+.ws-presence {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ws-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 360px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ws-agent-icon {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+.ws-agent-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-agent-when {
+  opacity: 0.72;
+}
+.ws-agent-more {
+  flex: none;
+  font-weight: 600;
+}
+.ws-faces {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding-left: 6px;
+}
+.ws-face {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  margin-left: -6px;
+  place-items: center;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--color-surface);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ws-face-more {
+  background: var(--color-line);
+  color: var(--color-muted);
+  font-size: 11px;
+}
+.ws-presence.compact .ws-agent {
+  max-width: 220px;
+  height: 24px;
+  padding: 0 8px 0 7px;
+  font-size: 12px;
+}
+.ws-presence.compact .ws-agent-icon {
+  width: 14px;
+  height: 14px;
+}
+.ws-presence.compact .ws-face {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
 /* A page in its tab, and what stands in for one. */
 .ws-centered {
   display: grid;

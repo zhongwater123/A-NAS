@@ -47,6 +47,8 @@ describe("共享工作区", () => {
     ]);
     expect(links[0].getAttribute("href")).toBe("/workspace/page_prd");
     expect(links[0].getAttribute("target")).toBe("anas-workspace-page_prd");
+    // noopener would make a browser open a new tab on every click.
+    expect(links[0].getAttribute("rel")).toBeNull();
     // The window shows no page itself.
     expect(screen.queryByTitle(/^页面：/)).toBeNull();
     expect(screen.queryByRole("button", { name: "成员" })).toBeNull();
@@ -72,7 +74,31 @@ describe("共享工作区", () => {
     ]);
     const toast = (await screen.findByText("已上传“新的 PRD”")).parentElement as HTMLElement;
     await user.click(within(toast).getByRole("button", { name: "打开" }));
-    expect(open).toHaveBeenCalledWith("/workspace/page_3", "anas-workspace-page_3", "noopener");
+    expect(open).toHaveBeenCalledWith("/workspace/page_3", "anas-workspace-page_3");
+  });
+
+  it("shows on each row whose agent is at work and who else has it open", async () => {
+    store.pages[0].presence = {
+      viewers: [
+        { member: reader, version: 2, since: "2026-11-26T08:00:00Z" },
+        { member: other, version: 2, since: "2026-11-26T08:01:00Z" },
+      ],
+      agents: [
+        {
+          member: other,
+          via: { kind: "claude-code", name: "办公电脑" },
+          action: "download",
+          version: 2,
+          at: new Date().toISOString(),
+        },
+      ],
+    };
+    render(<WorkspacePanel userId={reader.id} admin={false} />);
+    const prd = await row("家庭相册分享 PRD");
+    expect(within(prd).getByRole("img", { name: "正在看：bob" })).toBeTruthy();
+    expect(within(prd).getByText("bob 经 办公电脑 下载了 v2")).toBeTruthy();
+    const old = await row("旧方案");
+    expect(within(old).queryByRole("img")).toBeNull();
   });
 
   it("asks before uploading over a version saved since", async () => {

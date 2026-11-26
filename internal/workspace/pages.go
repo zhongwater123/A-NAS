@@ -387,6 +387,7 @@ func (s *Store) commitVersion(ctx context.Context, actor Actor, pageID string, c
 	if err != nil {
 		return VersionInfo{}, err
 	}
+	s.live.saved(via.TokenID, pageID)
 	// As scanVersion would read it back.
 	return VersionInfo{
 		Version: next, Size: int64(len(content)), SavedBy: Person{ID: actor.AccountID, Name: actor.Name},
