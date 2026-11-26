@@ -1,5 +1,4 @@
-import { Suspense, useEffect, useState } from "react";
-import { ErrorBoundary } from "react-error-boundary";
+import { useEffect, useState } from "react";
 
 import { onSessionEnded, setSession } from "./api/client";
 import type { Session } from "./api.generated";
@@ -7,16 +6,10 @@ import { Authentication, AuthMode } from "./auth/Authentication";
 import { currentSession, getSetupStatus, logout } from "./auth/api";
 import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
-import { isLocalConsole } from "./lib/localConsole";
+import { DeviceScreenSaver } from "./desktop/DeviceScreenSaver";
 import { transferStore } from "./transfers/store";
-import { lazyCode } from "./ui/lazyCode";
 import "./styles/index.css";
 import "./desktop/desktop.module.css";
-
-// Only the device's own screen has a screen saver, so only it downloads one.
-const LocalConsoleScreenSaver = lazyCode(() =>
-  import("./desktop/LocalConsoleScreenSaver").then((module) => module.LocalConsoleScreenSaver),
-);
 
 export default function App() {
   const [session, setSessionState] = useState<Session>();
@@ -86,18 +79,8 @@ export default function App() {
           onUserChange={(user) => setSessionState((current) => current && { ...current, user })}
         />
       )}
-      {/* The sign-in pages have no screen saver but still go black. Without
-          its code the screen stays lit; the page works on. */}
-      {isLocalConsole() && (
-        <ErrorBoundary
-          fallback={null}
-          onError={(error, info) => console.error("A-NAS screen saver failed", error, info.componentStack)}
-        >
-          <Suspense fallback={null}>
-            <LocalConsoleScreenSaver enabled videos={signedIn} />
-          </Suspense>
-        </ErrorBoundary>
-      )}
+      {/* The sign-in pages have no screen saver but still go black. */}
+      <DeviceScreenSaver videos={signedIn} />
     </>
   );
 }

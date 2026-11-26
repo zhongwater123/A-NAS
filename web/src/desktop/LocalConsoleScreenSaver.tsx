@@ -54,8 +54,9 @@ export function selectScreenSaverVideo(
 // the screen black once the video has played the minutes set in 设置 →
 // 个性化. Without videos (or on the sign-in page, where videos is false) the
 // screen goes black at the same moment. The first input after either only
-// wakes the page. App.tsx loads this module only on the device's own screen
-// (isLocalConsole), so other visitors download neither its code nor its styles.
+// wakes the page. Only the device's own screen loads this module
+// (DeviceScreenSaver.tsx), so other visitors download neither its code nor its
+// styles.
 //
 // Both covers are children of <body>, next to the page rather than inside it,
 // so that the stylesheet can stop the page beneath from rendering while they
