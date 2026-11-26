@@ -29,7 +29,7 @@ status=0; bash scripts/system-test.sh > "$dst.system-test.log" 2>&1 || status=$?
 echo "PASS: $(grep -c '^PASS' "$dst.system-test.log" || true)"; grep '^FAIL' "$dst.system-test.log" || true; exit "$status"
 ```
 
-在 Linux 机器或 CI 中直接运行 `make system-test`。
+在共享开发服务器上按 [check-on-shared-server](../check-on-shared-server/SKILL.md#变体) 的“系统测试”运行（它独占门禁的全部槽位）。在其他 Linux 机器或 CI 中直接运行 `make system-test`。
 
 ## 变体
 
