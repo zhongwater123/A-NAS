@@ -33,7 +33,7 @@ import {
 } from "../assistant/taskNotices";
 import type { AssistantTaskNotice } from "../desktop/api";
 import { focusedWindowBox, subscribeFocusedWindow } from "../desktop/focusedWindow";
-import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole, localConsoleCovered, onLocalConsoleDismissed } from "../lib/localConsole";
 import { companionPhysics, companionWeights, installedAnimations, workStatusTexts } from "./animations";
 import { BEHAVIORS, behaviorLine, shortDetail } from "./behaviors";
 import type { CompanionOpeners, InstalledAnimations } from "./Companion";

@@ -183,6 +183,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     window.history.replaceState(null, "", "/?local-console=1");
     try {
       const setups: unknown[] = [];
+      let videoLists = 0;
       serveDesktop({ setup: { setupRequired: true } });
       server.use(
         http.post("/api/v1/setup/admin", async ({ request, response }) => {
@@ -191,9 +192,10 @@ describe("A-NAS v1.0.1 desktop", () => {
         }),
         http.get("/api/v1/local-display", ({ response }) => response(200).json({ sleepAfterMinutes: 30 })),
         // The screen saver's videos are static files beside the page, outside the product API.
-        http.untyped.get(`${window.location.origin}/local-console/screensavers`, () =>
-          HttpResponse.json({ videos: [] }),
-        ),
+        http.untyped.get(`${window.location.origin}/local-console/screensavers`, () => {
+          videoLists += 1;
+          return HttpResponse.json({ videos: [] });
+        }),
       );
       const user = userEvent.setup();
       render(<App />);
@@ -202,6 +204,8 @@ describe("A-NAS v1.0.1 desktop", () => {
       await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
       expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
       expect(setups).toEqual([{ username: "owner", password: "correct horse battery staple", localConsole: true }]);
+      // Only this screen loads the screen saver; signed in, it asks for its videos.
+      await waitFor(() => expect(videoLists).toBe(1));
     } finally {
       window.history.replaceState(null, "", "/");
     }
