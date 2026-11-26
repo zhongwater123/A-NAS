@@ -21,15 +21,16 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/storeservice"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// The compute Worker's client provides what the jobs ask of it; these checks
-// move to internal/videocut/external/compute.go in #665.
+// The Workers' clients provide what app asks of them.
 var (
 	_ app.Compute       = videocutcompute.Client{}
 	_ app.MusicComputer = videocutcompute.Client{}
+	_ app.MusicAnalyzer = external.MusicWorker{}
 )
 
 type Config struct {

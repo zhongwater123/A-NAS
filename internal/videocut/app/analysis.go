@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,12 +31,6 @@ import (
 // AnalysisVersion names how songs are analysed now: allin1's harmonix-all
 // and the eighth version's excerpt.
 const AnalysisVersion = "allin1-harmonix-all/music-v8"
-
-// Rates the analysis reads the song at (ffmpegworker.AudioRequest.PCM).
-const (
-	stereoRate = 44100
-	monoRate   = 22050
-)
 
 // analysisRetry is how long a song waits for a Worker that was away, or
 // between attempts that failed.
@@ -212,7 +205,7 @@ func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, [
 	if err := json.Unmarshal([]byte(text.String), &analysis); err != nil {
 		return songAnalysis{}, nil, err
 	}
-	loudness, err := decodeLoudness(blob)
+	loudness, err := domain.DecodeLoudness(blob)
 	if err != nil || analysis.Structure == nil || len(loudness) == 0 {
 		return songAnalysis{}, nil, err
 	}
@@ -250,9 +243,9 @@ func (s *Store) findStructure(ctx context.Context, sha string) (domain.Analysis,
 	whole := make(chan error, 1)
 	decoded := make(chan error, 1)
 	go func() {
-		err := s.decodeInto(ctx, file, stereoIn, 2, stereoRate)
+		err := s.decodeInto(ctx, file, stereoIn, 2, domain.StereoRate)
 		if err == nil {
-			err = s.decodeInto(ctx, file, monoIn, 1, monoRate)
+			err = s.decodeInto(ctx, file, monoIn, 1, domain.MonoRate)
 		} else {
 			_ = monoIn.Close()
 		}
@@ -301,7 +294,7 @@ func (s *Store) keepStructure(ctx context.Context, sha string, analysis songAnal
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `UPDATE songs SET analysis_json = ?, loudness = ?, analysis_version = ?, updated_at = ?
-		WHERE sha256 = ? AND state = 'analyzing'`, string(encoded), encodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
+		WHERE sha256 = ? AND state = 'analyzing'`, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
 	return err
 }
 
@@ -311,7 +304,7 @@ func (s *Store) finish(ctx context.Context, sha, state, reason string, analysis 
 	if err == nil {
 		_, err = s.db.ExecContext(ctx, `UPDATE songs SET state = ?, reason = ?, waiting = '', next_try = NULL, analysis_json = ?,
 			loudness = ?, analysis_version = ?, updated_at = ? WHERE sha256 = ? AND state = 'analyzing'`,
-			state, reason, string(encoded), encodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
+			state, reason, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, sqlitedb.FormatTime(s.now()), sha)
 	}
 	if err != nil {
 		s.logger.WarnContext(ctx, "recording a song's analysis failed", "error", err)
@@ -351,26 +344,4 @@ func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalys
 		s.logger.WarnContext(ctx, "a song's analysis failed too often; the song cannot be used", "song", sha, "attempts", attempts)
 		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
 	}
-}
-
-// encodeLoudness is the curve as little-endian float32, as the Workers pass
-// it and the songs table keeps it.
-func encodeLoudness(values []float32) []byte {
-	if values == nil {
-		return nil
-	}
-	// Append fails only for types without a fixed size.
-	out, _ := binary.Append(make([]byte, 0, 4*len(values)), binary.LittleEndian, values)
-	return out
-}
-
-func decodeLoudness(data []byte) ([]float32, error) {
-	if len(data)%4 != 0 {
-		return nil, errors.New("a song's loudness is not whole float32 values")
-	}
-	out := make([]float32, len(data)/4)
-	if _, err := binary.Decode(data, binary.LittleEndian, out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }

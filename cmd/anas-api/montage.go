@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/storeservice"
 	"github.com/zhongwater123/A-NAS/internal/videocut"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -40,7 +41,7 @@ func runMontageService(logger *slog.Logger) error {
 		Sessions:   sessionlookup.NewClient(config.SessionSocket),
 		Grants:     photosapi.GrantClient(config.GrantSocket),
 		Media:      config.Media.client(),
-		Music:      app.MusicWorker{Socket: config.MusicSocket},
+		Music:      external.MusicWorker{Socket: config.MusicSocket},
 		Compute:    videocutcompute.Client{SocketPath: config.ComputeSocket},
 		JobCompute: videocutcompute.Client{SocketPath: config.ComputeSocket},
 		Editing:    config.Media.client(),
@@ -89,7 +90,7 @@ func configuredMontage(ctx context.Context, config Config, grants app.Grants, me
 	editing, _ := media.(app.Editing)
 	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.MontagePlanAnswers), Logger: logger}
 	if config.MontageMusicSocket != "" {
-		options.Music = app.MusicWorker{Socket: config.MontageMusicSocket}
+		options.Music = external.MusicWorker{Socket: config.MontageMusicSocket}
 	}
 	if config.MontageComputeSocket != "" {
 		client := videocutcompute.Client{SocketPath: config.MontageComputeSocket}

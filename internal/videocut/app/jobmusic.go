@@ -178,7 +178,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 			if s.compute == nil {
 				return domain.Excerpt{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 			}
-			loudness, err := decodeLoudness(row.loudness)
+			loudness, err := domain.DecodeLoudness(row.loudness)
 			if err != nil {
 				return domain.Excerpt{}, err
 			}

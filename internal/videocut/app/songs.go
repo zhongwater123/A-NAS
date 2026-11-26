@@ -474,7 +474,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		if s.compute == nil {
 			return domain.SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 		}
-		loudness, err := decodeLoudness(row.loudness)
+		loudness, err := domain.DecodeLoudness(row.loudness)
 		if err != nil {
 			return domain.SongDetail{}, err
 		}

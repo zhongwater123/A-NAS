@@ -1,4 +1,8 @@
-package app
+// Package external reaches the rest of the NAS for the montage center: the
+// Workers, the photo library and the planner. It implements the interfaces
+// in internal/videocut/app/ports.go and never imports app; videocut.go
+// hands its values to app (docs/architecture/montage-center.md, 代码结构).
+package external
 
 import (
 	"context"
@@ -147,8 +151,8 @@ func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <
 		timeout = 30 * time.Minute
 	}
 	request := map[string]any{"op": "analyze", "confirm": true, "streams": []map[string]any{
-		{"name": "stereo", "channels": 2, "rate": stereoRate},
-		{"name": "mono", "channels": 1, "rate": monoRate},
+		{"name": "stereo", "channels": 2, "rate": domain.StereoRate},
+		{"name": "mono", "channels": 1, "rate": domain.MonoRate},
 	}}
 	var answer musicAnswer
 	if err := callWorker(ctx, w.Socket, timeout, request, []*os.File{stereo, mono}, whole, &answer); err != nil {
@@ -158,11 +162,9 @@ func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <
 	if err != nil {
 		return domain.Analysis{}, fmt.Errorf("%w: loudness: %v", videocutcompute.ErrWorkerFailed, err)
 	}
-	loudness, err := decodeLoudness(raw)
+	loudness, err := domain.DecodeLoudness(raw)
 	if err != nil || len(answer.Downbeats) == 0 && len(answer.Beats) == 0 && len(loudness) == 0 {
 		return domain.Analysis{}, fmt.Errorf("%w: the answer has no song in it: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	return domain.Analysis{Structure: answer.Structure, Loudness: loudness, Seconds: answer.Seconds}, nil
 }
-
-var _ MusicAnalyzer = MusicWorker{}
