@@ -247,6 +247,8 @@ linters:
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal"
               desc: app uses the contract packages, the basic libraries, domain and db; the rest is behind app/ports.go
+            - pkg: "database/sql"
+              desc: the database is db's; app reads and writes through db's methods and types (#665)
         videocut-app-photos:
           list-mode: lax
           files:
@@ -271,6 +273,8 @@ linters:
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal"
               desc: app uses the contract packages, the basic libraries, domain and db; the rest is behind app/ports.go
+            - pkg: "database/sql"
+              desc: the database is db's; app reads and writes through db's methods and types (#665)
         videocut-outer:
           list-mode: lax
           files:

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -567,7 +566,8 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		return err
 	}
 	defer unlock()
-	var grantID sql.NullString
+	var grantID string
+	var granted bool
 	var jobs []string
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		row, err := s.project(ctx, tx, owner, projectID)
@@ -577,13 +577,13 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 		if row.State != projectReady {
 			return domain.ErrNotFound
 		}
-		grantID = row.GrantID
+		grantID, granted = row.GrantID.String, row.GrantID.Valid
 		// The jobs go with the project; a running one is stopped below.
 		if jobs, err = tx.ProjectJobIDs(ctx, projectID); err != nil {
 			return err
 		}
-		if grantID.Valid {
-			if err := s.queueRevocation(ctx, tx, grantID.String); err != nil {
+		if granted {
+			if err := s.queueRevocation(ctx, tx, grantID); err != nil {
 				return err
 			}
 		}
@@ -604,8 +604,8 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 	s.songs.Lock()
 	s.removeUnusedCopies(ctx)
 	s.songs.Unlock()
-	if grantID.Valid {
-		s.revokeSoon(grantID.String)
+	if granted {
+		s.revokeSoon(grantID)
 	}
 	return nil
 }

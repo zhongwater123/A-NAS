@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -615,7 +614,7 @@ func (s *Store) readDraft(ctx context.Context, owner, draftID string, src *editS
 type undone struct {
 	revision int
 	shots    string
-	back     sql.NullInt64
+	back     *int
 }
 
 // undoTarget is the revision undoing revision goes back to; ok is false
@@ -649,8 +648,8 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	state := draft.state
 	var next domain.DraftState
 	var message string
-	var seed sql.NullInt64
-	back := sql.NullInt64{Int64: int64(base), Valid: true}
+	var seed *int64
+	back := new(base)
 	switch op.Type {
 	case "undo":
 		target, ok, err := s.undoTarget(ctx, draftID, base)
@@ -672,7 +671,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		} else {
 			value = randomSeed()
 		}
-		seed = sql.NullInt64{Int64: value, Valid: true}
+		seed = new(value)
 		if next, message, err = s.shuffle(ctx, src, state, value); err != nil {
 			return domain.Draft{}, err
 		}
@@ -711,7 +710,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 	if err != nil {
 		return domain.Draft{}, err
 	}
-	// Not back.Valid: an undo's back may be a revision trimmed long since,
+	// Not back != nil: an undo's back may be a revision trimmed long since,
 	// past the last keptRevisions steps.
 	canUndo, err := s.canUndo(ctx, draftID, base+1)
 	if err != nil {
@@ -733,10 +732,10 @@ func trimRevisions(ctx context.Context, tx *db.Tx, draftID string, latest int) e
 	keep := map[int]bool{latest: true}
 	for at, n := latest, 0; n < keptRevisions; n++ {
 		back := backs[at]
-		if !back.Valid {
+		if back == nil {
 			break
 		}
-		at = int(back.Int64)
+		at = *back
 		keep[at] = true
 	}
 	for revision := range backs {

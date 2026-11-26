@@ -339,13 +339,13 @@ func (tx *Tx) ProjectJobActive(ctx context.Context, projectID string) (bool, err
 
 // NewJob is a job to queue, its settings encoded: an edit names the
 // version it came from, its draft and the draft's revision; a recut the
-// version.
+// version. Each is nil when the job names none.
 type NewJob struct {
 	ID, Owner, ProjectID, RequestKey, Settings string
 	Plans                                      int
 	Kind                                       string
-	SourceVersion, Draft                       sql.NullString
-	DraftRevision                              sql.NullInt64
+	SourceVersion, Draft                       *string
+	DraftRevision                              *int
 }
 
 // AddJob queues job, made and due at at.

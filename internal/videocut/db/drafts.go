@@ -86,48 +86,59 @@ func (tx *Tx) AdvanceDraft(ctx context.Context, owner, draftID string, base int,
 
 // AddRevision keeps revision of draftID: the step op that made it, the
 // seed it drew with, the revision undoing it goes back to, and its shots.
-func (tx *Tx) AddRevision(ctx context.Context, draftID string, revision int, op string, seed, back sql.NullInt64, shots string, at time.Time) error {
+// Seed and back are nil for none.
+func (tx *Tx) AddRevision(ctx context.Context, draftID string, revision int, op string, seed *int64, back *int, shots string, at time.Time) error {
 	_, err := tx.tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
 		draftID, revision, op, seed, back, shots, sqlitedb.FormatTime(at))
 	return err
 }
 
 // Revision is a kept revision as an undo reads it: its number, its shots
-// and the revision undoing it goes back to.
+// and the revision undoing it goes back to (nil when none).
 type Revision struct {
 	Revision int
 	Shots    string
-	Back     sql.NullInt64
+	Back     *int
 }
 
 // UndoTarget is the revision undoing revision of draftID goes back to;
 // ErrNotFound when it has none or it is no longer kept.
 func (d *DB) UndoTarget(ctx context.Context, draftID string, revision int) (Revision, error) {
 	var target Revision
+	var back sql.NullInt64
 	err := queryRow(ctx, d.db, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
 		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
-		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.Revision, &target.Shots, &target.Back)
+		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.Revision, &target.Shots, &back)
+	target.Back = intOrNil(back)
 	return target, err
 }
 
 // RevisionBacks are the revisions kept of draftID, each with the revision
-// undoing it goes back to.
-func (tx *Tx) RevisionBacks(ctx context.Context, draftID string) (map[int]sql.NullInt64, error) {
+// undoing it goes back to (nil when none).
+func (tx *Tx) RevisionBacks(ctx context.Context, draftID string) (map[int]*int, error) {
 	rows, err := tx.tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	backs := map[int]sql.NullInt64{}
+	backs := map[int]*int{}
 	for rows.Next() {
 		var revision int
 		var back sql.NullInt64
 		if err := rows.Scan(&revision, &back); err != nil {
 			return nil, err
 		}
-		backs[revision] = back
+		backs[revision] = intOrNil(back)
 	}
 	return backs, rows.Err()
+}
+
+// intOrNil is a revision as kept, nil for NULL.
+func intOrNil(value sql.NullInt64) *int {
+	if !value.Valid {
+		return nil
+	}
+	return new(int(value.Int64))
 }
 
 // DeleteRevision stops keeping revision of draftID.

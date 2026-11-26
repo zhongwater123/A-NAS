@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -99,8 +98,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		// stay with the version they planned.
 		settings.ProjectName, settings.Edit, settings.Recut = row.Name, &edit, nil
 		if jobID, err = s.queueJob(ctx, tx, settings, db.NewJob{Owner: owner, ProjectID: src.projectID, RequestKey: requestKey, Kind: KindEdit, Plans: 1,
-			SourceVersion: sql.NullString{String: src.versionID, Valid: true}, Draft: sql.NullString{String: draftID, Valid: true},
-			DraftRevision: sql.NullInt64{Int64: int64(draft.revision), Valid: true}}); err != nil {
+			SourceVersion: new(src.versionID), Draft: new(draftID), DraftRevision: new(draft.revision)}); err != nil {
 			return err
 		}
 		created = true
