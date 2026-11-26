@@ -1184,8 +1184,13 @@
   }
 }
 
-/* On a narrow screen the rail is a bar along the bottom; the panel fills the space above it. */
-@media (max-width: 620px) {
+/* On a narrow screen the rail is a bar along the bottom; the panel fills the space above it.
+   Windows fill the screen there too, so the button would sit on top of their
+   content: it shows on the home screen only. */
+@media (max-width: 620px), (max-height: 520px) {
+  :global(main):has(:global([data-window-id]:not([hidden]))) .fb-fab {
+    display: none;
+  }
   .fb-panel {
     top: 8px;
     right: 8px;

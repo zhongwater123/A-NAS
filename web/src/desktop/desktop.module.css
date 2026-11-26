@@ -2053,7 +2053,10 @@ button.net-rates {
     max-width: calc(100vw - 112px);
   }
 }
-@media (max-width: 620px) {
+/* Phones: upright, or on their side, where the screen is too short for the
+   desktop's 600px minimum and would be cut off at the bottom (as would a
+   browser window that short on a computer). */
+@media (max-width: 620px), (max-height: 520px) {
   .desktop-shell {
     min-width: 0;
     min-height: 0;
@@ -2141,10 +2144,16 @@ button.net-rates {
     width: auto !important;
     height: auto !important;
     min-width: 0;
+    max-width: none;
     min-height: 0;
     border-radius: 14px;
   }
   .task-shelf {
+    display: none;
+  }
+  /* A window always fills the screen, so it cannot be maximized or resized. */
+  .window-actions .window-maximize,
+  .resize-handle {
     display: none;
   }
 }

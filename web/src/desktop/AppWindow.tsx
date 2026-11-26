@@ -122,6 +122,7 @@ export function AppWindow({
             <Minus />
           </button>
           <button
+            className={styles.windowMaximize}
             aria-label={`${model.maximized ? "还原" : "最大化"}${title}`}
             onClick={() => dispatch({ type: "maximize", id: model.id })}
           >
