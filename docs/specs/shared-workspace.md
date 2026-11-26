@@ -132,7 +132,7 @@
 - **agent 的读取**：读源码按段返回，每段不超过 4 万字符，并说明下一段从哪一行开始；内嵌的大段 base64 数据折叠成占位符，含占位符的原文不能用于修改。整份下载或上传走 10 分钟内只能用一次的地址，agent 用 `curl.exe` 传文件，内容不经过对话。
 - **限额**：页面 20 MB；标题 200 字；版本说明 500 字；一次修改最多 50 处；agent 的一次请求不超过 4 MiB（更大的改动走整份上传）。超出时返回 `413 request_too_large` 或 `422 validation_failed`。
 - **令牌错误**：令牌不对、已撤销或失效时返回 `401 authentication_required`；同一客户端连续失败按登录失败的方式等待，返回 `429 too_many_attempts` 与 `Retry-After`。带 `Origin` 头的请求（来自浏览器）一律拒绝。
-- **看不到共享工作区的人**：`GET /api/v1/workspace` 返回 `404`，桌面不显示图标；其余接口返回 `403 workspace_forbidden`。
+- **看不到共享工作区的人**：`GET /api/v1/workspace` 返回 `404`，桌面不显示图标；其余接口返回 `403 workspace_forbidden`。窗口开着时被移出的成员，下一次读页面或列表时窗口清空，只显示“管理员没有让你使用共享工作区”和“重试”；桌面图标在页面下次回到前台时消失。
 - **服务或数据卷不可用**：接口返回 `503 workspace_unavailable`，窗口写“共享工作区暂时不可用（数据盘未就绪），请稍后再试”和“重试”。不在系统盘暂存。agent 收到同样的说明。
 - **活动记录**：上传、保存新版本、改名、删除页面，以及管理员改“成员”，分别记为 `workspace.page_created`、`workspace.page_saved`、`workspace.page_renamed`、`workspace.page_deleted`、`workspace.member_added`、`workspace.member_removed`，归入[日志](logs.md)的“共享工作区”类别，只给操作者本人看。创建、撤销 agent 令牌记为 `user.agent_token_created`、`user.agent_token_revoked`。
 - **账号删除**：被删账号从“成员”里去掉，它的令牌随账号删除；它上传和保存的页面与版本保留，显示删除时的名字（[重新启用与删除账号](account-enable-and-delete.md)）。
