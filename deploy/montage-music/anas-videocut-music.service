@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS montage music analysis Worker (allin1)
 Documentation=https://github.com/zhongwater123/A-NAS
-Requires=anas-montage-music.socket
-After=anas-montage-music.socket
+Requires=anas-videocut-music.socket
+After=anas-videocut-music.socket
 
 [Service]
 Type=simple

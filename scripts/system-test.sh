@@ -81,7 +81,7 @@ if [[ "${1:-}" != --inside ]]; then
   sed -i -E 's/, a-nas-docker-policy \(>= [^)]*\)//' "$legacy_host/DEBIAN/control"
   dpkg-deb --root-owner-group -Zxz --build "$legacy_host" "$work/previous/a-nas-host_${version}~previous_all.deb" >/dev/null
   # The previous release also came before the montage center (ADR 0038): its
-  # product package has no anas-montage unit, so installing this release is
+  # product package has no anas-videocut unit, so installing this release is
   # the first with it, and rolling back takes the unit away as a real older
   # release does. Its programs are this tree's, which need the montage
   # account, so the account stays.
@@ -93,25 +93,25 @@ if [[ "${1:-}" != --inside ]]; then
   rm "$legacy_product/usr/lib/systemd/system/anas-phone-hotspot.service" "$legacy_product/usr/lib/a-nas/phone-hotspot"
   # Nor has it the photo service's grant socket for the montage center, the
   # montage center's socket for planning, or its planner.
-  rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
-    "$legacy_product/usr/lib/systemd/system/anas-montage-planner.service" \
-    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage-planner.service" \
-    "$legacy_product/usr/lib/systemd/system/anas-montage-assistant.socket" \
-    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-assistant.socket" \
-    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-montage.service" \
+  rm "$legacy_product/usr/lib/systemd/system/anas-videocut.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-videocut-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-videocut-planner.service" \
+    "$legacy_product/usr/lib/systemd/system/anas-videocut-assistant.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-videocut-assistant.socket" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-videocut.service" \
     "$legacy_product/usr/lib/systemd/system/anas-photos-grants.socket" \
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-photos-grants.socket" \
-    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.socket" \
-    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-montage-compute.socket" \
-    "$legacy_product/usr/lib/systemd/system/anas-montage-compute.service"
-  sed -i -e '/systemctl stop anas-montage-assistant\.socket/d' -e 's/ anas-montage-assistant\.socket//g' \
-    -e 's/ anas-montage-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
-    -e 's/anas-montage\.service//g' -e "s/ 'anas-montage montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
-    -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-montage-compute\.\(socket\|service\)//g' \
+    "$legacy_product/usr/lib/systemd/system/anas-videocut-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-videocut-compute.socket" \
+    "$legacy_product/usr/lib/systemd/system/anas-videocut-compute.service"
+  sed -i -e '/systemctl stop anas-videocut-assistant\.socket/d' -e 's/ anas-videocut-assistant\.socket//g' \
+    -e 's/ anas-videocut-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
+    -e 's/anas-videocut\.service//g' -e "s/ 'anas-videocut montage\/montage\.db montage'//" -e 's/ a-nas-montage:31003//' \
+    -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-videocut-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
   sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
     "$legacy_product/usr/lib/systemd/system/anas-photos.service"
-  ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+  ! grep -rqE 'anas-videocut|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
     "$legacy_product/usr/lib/systemd/system" ||
     { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
   # Nor the shared workspace (ADR 0040). Its account stays for the same reason
@@ -642,7 +642,7 @@ check "smbd then listens only on the loopback and SMB interface's addresses" smb
 
 # --- Every service runs under its production unit (issue #38).
 # One unit per check: systemctl is-active A B succeeds when any of them is (#423).
-for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage anas-workspace smbd; do
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-videocut anas-workspace smbd; do
   check "services are active: $unit" systemctl is-active --quiet "$unit"
 done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
@@ -1084,7 +1084,7 @@ check "with its switch on the desktop is told the montage center is there" \
 check "a member lists her montage projects through the montage service" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -c .)" = '{"items":[]}'
 check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/videocut/projects")" = 401
-cat > /usr/local/lib/anas-montage-probe.py <<'PY'
+cat > /usr/local/lib/anas-videocut-probe.py <<'PY'
 import socket, sys
 leaks = []
 for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_NETLINK, socket.SOCK_DGRAM)):
@@ -1096,13 +1096,13 @@ for family, kind in ((socket.AF_INET, socket.SOCK_STREAM), (socket.AF_INET6, soc
 print("; ".join(leaks) or "contained")
 sys.exit(1 if leaks else 0)
 PY
-sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-videocut-probe.py|' \
   -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
-  /usr/lib/systemd/system/anas-montage.service > /etc/systemd/system/anas-montage-probe.service
+  /usr/lib/systemd/system/anas-videocut.service > /etc/systemd/system/anas-videocut-probe.service
 systemctl daemon-reload
-check "the probe opens network sockets outside the montage service's sandbox" finds /usr/local/lib/anas-montage-probe.py 'opened a AF_INET socket'
-check "the montage service's sandbox opens no network socket" systemctl start anas-montage-probe.service
-rm /etc/systemd/system/anas-montage-probe.service
+check "the probe opens network sockets outside the montage service's sandbox" finds /usr/local/lib/anas-videocut-probe.py 'opened a AF_INET socket'
+check "the montage service's sandbox opens no network socket" systemctl start anas-videocut-probe.service
+rm /etc/systemd/system/anas-videocut-probe.service
 systemctl daemon-reload
 
 # --- Shared workspace (ADR 0040): its own identity and store, off the
@@ -1159,7 +1159,7 @@ check "a session cookie does not open the MCP endpoint" test "$(status_of -b /tm
   -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$api/api/v1/workspace/mcp")" = 401
 check "an agent token does not open the desktop's routes" \
   test "$(status_of -H "Authorization: Bearer $(cat /tmp/workspace-token)" "$api/api/v1/workspace/pages")" = 401
-sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-videocut-probe.py|' \
   -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
   /usr/lib/systemd/system/anas-workspace.service > /etc/systemd/system/anas-workspace-probe.service
 systemctl daemon-reload
@@ -1173,9 +1173,9 @@ systemctl daemon-reload
 # open for writing on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares anas-family anas-montage anas-workspace
+systemctl stop anas-photos anas-shares anas-family anas-videocut anas-workspace
 check "the data volume remounts read-only" mount -o remount,ro "$data"
-systemctl start anas-montage
+systemctl start anas-videocut
 videocut_unavailable() {
   for _ in $(seq 1 50); do
     [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -r .error.code)" == videocut_unavailable ]] && return 0
@@ -1184,7 +1184,7 @@ videocut_unavailable() {
   return 1
 }
 check "on a read-only volume the montage center answers videocut_unavailable" videocut_unavailable
-systemctl stop anas-montage
+systemctl stop anas-videocut
 systemctl start anas-workspace
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 workspace_unavailable() {
@@ -1214,7 +1214,7 @@ check "the health check names the read-only data volume" \
 mount -o remount,rw "$data"
 writable_at=$(journal_mark)
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares anas-family anas-montage anas-workspace
+systemctl start anas-photos anas-shares anas-family anas-videocut anas-workspace
 check "once the volume is writable, the Host Agent reconciles it" \
   journal_wait 10 "$writable_at" 'data volume reconciled' -u anas-host-agent
 check "and reports nothing wrong" \
@@ -1430,8 +1430,8 @@ check "the montage account cannot list the photo store" denied a-nas-montage ls 
 # reads, and turns the second step's answer back; any other request is
 # refused, as the real Worker refuses what it cannot do.
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
-  install -d /run/systemd/system/anas-montage-compute.service.d
-  cat > /run/systemd/system/anas-montage-compute.service.d/system-test.conf <<'EOF'
+  install -d /run/systemd/system/anas-videocut-compute.service.d
+  cat > /run/systemd/system/anas-videocut-compute.service.d/system-test.conf <<'EOF'
 [Service]
 ExecStart=
 ExecStart=/usr/bin/python3 /usr/local/lib/montage-compute-fixture.py
@@ -1565,12 +1565,12 @@ if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
   check "the compute worker cannot see the data volume or create an IP socket" \
     python3 /usr/local/lib/montage-compute-client.py probe
 fi
-compute_pid=$(systemctl show -p MainPID --value anas-montage-compute.service)
-check "kill the running compute worker" systemctl kill --kill-whom=main --signal=SIGKILL anas-montage-compute.service
+compute_pid=$(systemctl show -p MainPID --value anas-videocut-compute.service)
+check "kill the running compute worker" systemctl kill --kill-whom=main --signal=SIGKILL anas-videocut-compute.service
 check "the compute worker answers the next connection after it is killed" \
   python3 /usr/local/lib/montage-compute-client.py
 check "systemd replaced the compute worker" \
-  test "$(systemctl show -p MainPID --value anas-montage-compute.service)" != "$compute_pid"
+  test "$(systemctl show -p MainPID --value anas-videocut-compute.service)" != "$compute_pid"
 
 # --- Montage projects (ADR 0038): a project holds the videos its member
 # handed over, through a grant; another member cannot see it, and deleting
@@ -3065,7 +3065,7 @@ check "and the workspace database" \
 check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
 check "the previous release, which came before the montage center, has no montage unit" \
-  test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
+  test "$(systemctl show -p LoadState --value anas-videocut.service):$(systemctl show -p ActiveState --value anas-videocut.service)" = \
   not-found:inactive
 check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
 check "nor a workspace unit, whose service stopped before its unit went" \
@@ -3075,11 +3075,11 @@ check "no workspace process runs on the previous release" fails pgrep -u a-nas-w
 check "nor the photo service's grant socket, which stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
   not-found:inactive
-for unit in anas-montage-compute.socket anas-montage-compute.service anas-montage-assistant.socket; do
+for unit in anas-videocut-compute.socket anas-videocut-compute.service anas-videocut-assistant.socket; do
   check "rollback removed and stopped $unit" \
     test "$(systemctl show -p LoadState --value "$unit"):$(systemctl show -p ActiveState --value "$unit")" = not-found:inactive
 done
-check "the compute worker is no longer running" fails systemctl is-active --quiet anas-montage-compute.service
+check "the compute worker is no longer running" fails systemctl is-active --quiet anas-videocut-compute.service
 legacy_without_policy() {
   ! dpkg-query -W -f='${Depends}' a-nas-host | grep -Fq a-nas-docker-policy
 }
@@ -3107,7 +3107,7 @@ check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}'
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
-  test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
+  test "$(systemctl is-active anas-videocut):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
   "active:31003:700 a-nas-montage:660 a-nas-montage"
 check "after upgrading again the workspace service has its account, store and socket" \
   test "$(systemctl is-active anas-workspace):$(id -u a-nas-workspace):$(stat -c '%a %U' "$data/workspace"):$(stat -c '%a %G' /run/a-nas-workspace/workspace.sock)" = \
@@ -3115,7 +3115,7 @@ check "after upgrading again the workspace service has its account, store and so
 check "and the shared page is still there" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages/$workspace_page') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
-  test "$(systemctl is-active anas-montage-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
+  test "$(systemctl is-active anas-videocut-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "two copies of the databases stay, under the same names on both disks" \

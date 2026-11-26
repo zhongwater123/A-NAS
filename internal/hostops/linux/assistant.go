@@ -38,7 +38,7 @@ const (
 	assistantWakerUnit   = "anas-assistant-cron-waker.service"
 	// assistantPlannerUnit hands the montage center's planning to members'
 	// planning instances (docs/architecture/montage-planning-session.md).
-	assistantPlannerUnit = "anas-montage-planner.service"
+	assistantPlannerUnit = "anas-videocut-planner.service"
 )
 
 // assistantTemplates are the assistant's unit templates (ADR 0024).

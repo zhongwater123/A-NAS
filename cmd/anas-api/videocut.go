@@ -23,7 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-const videoCutServiceCommand = "montage-service"
+const videoCutServiceCommand = "videocut-service"
 
 func runVideoCutService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {

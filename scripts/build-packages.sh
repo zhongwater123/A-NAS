@@ -200,14 +200,14 @@ wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
-for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-workspace anas-search anas-site \
-  anas-assistant-gateway anas-assistant-cron-waker anas-montage-planner; do
+for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-videocut anas-workspace anas-search anas-site \
+  anas-assistant-gateway anas-assistant-cron-waker anas-videocut-planner; do
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket
 wants sockets.target anas-photos-grants.socket
-wants sockets.target anas-montage-compute.socket
-wants sockets.target anas-montage-assistant.socket
+wants sockets.target anas-videocut-compute.socket
+wants sockets.target anas-videocut-assistant.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-photos-assistant.socket
 wants sockets.target anas-companion-assistant.socket
@@ -261,8 +261,8 @@ if "$montage_music"; then
     ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)" "$lib/${role%%:*}"
   done
   ln -s "/opt/a-nas/montage-music-runtimes/$(montage_music_runtime_id "$repo")" "$lib/runtime"
-  install -m 0644 "$repo"/deploy/montage-music/anas-montage-music.{socket,service} "$units/"
-  ln -s ../anas-montage-music.socket "$units/sockets.target.wants/anas-montage-music.socket"
+  install -m 0644 "$repo"/deploy/montage-music/anas-videocut-music.{socket,service} "$units/"
+  ln -s ../anas-videocut-music.socket "$units/sockets.target.wants/anas-videocut-music.socket"
   printf '%s\n' 'A-NAS: https://github.com/zhongwater123/A-NAS' \
     "allin1's and Demucs' weights and the runtime keep their own licenses; see their content packages." \
     >"$root/usr/share/doc/a-nas-montage-music/copyright"

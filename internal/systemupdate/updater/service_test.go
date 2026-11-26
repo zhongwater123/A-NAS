@@ -1106,12 +1106,12 @@ func TestRestoringTheDatabasesTakesTheVideoCutServiceAlong(t *testing.T) {
 	restore := slices.IndexFunc(host.calls, func(call string) bool {
 		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage")
 	})
-	socket := slices.Index(host.calls, "systemctl stop anas-montage-assistant.socket")
-	montage := slices.Index(host.calls, "systemctl stop anas-montage")
+	socket := slices.Index(host.calls, "systemctl stop anas-videocut-assistant.socket")
+	montage := slices.Index(host.calls, "systemctl stop anas-videocut")
 	photos := slices.IndexFunc(host.calls, func(call string) bool {
 		return strings.HasPrefix(call, "systemctl stop ") && strings.Contains(call, " anas-photos")
 	})
-	started := slices.Index(host.calls, "systemctl start anas-montage")
+	started := slices.Index(host.calls, "systemctl start anas-videocut")
 	if socket < 0 || socket > montage || montage > photos || photos > restore || restore > started {
 		t.Fatalf("calls = %v; want the montage center's assistant socket stopped, then the montage service, then the photo service, "+
 			"the databases restored and the montage service started", host.calls)
@@ -1128,10 +1128,10 @@ func TestRestoringTheDatabasesNeedsTheVideoCutServiceStopped(t *testing.T) {
 		fails    map[string]error
 		restored bool
 	}{
-		{"no such units", map[string]error{"systemctl stop anas-montage": exitStatus(5), "systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
-		{"no socket yet", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(5)}, true},
-		{"stop failed", map[string]error{"systemctl stop anas-montage": exitStatus(1)}, false},
-		{"the socket did not stop", map[string]error{"systemctl stop anas-montage-assistant.socket": exitStatus(1)}, false},
+		{"no such units", map[string]error{"systemctl stop anas-videocut": exitStatus(5), "systemctl stop anas-videocut-assistant.socket": exitStatus(5)}, true},
+		{"no socket yet", map[string]error{"systemctl stop anas-videocut-assistant.socket": exitStatus(5)}, true},
+		{"stop failed", map[string]error{"systemctl stop anas-videocut": exitStatus(1)}, false},
+		{"the socket did not stop", map[string]error{"systemctl stop anas-videocut-assistant.socket": exitStatus(1)}, false},
 	} {
 		host := newFakeHost()
 		host.fails = tc.fails

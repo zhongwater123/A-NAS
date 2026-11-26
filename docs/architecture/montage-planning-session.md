@@ -27,7 +27,7 @@
 - **自己的入口**：`anas-assistant-planapi@.socket`（`/run/a-nas-assistant-plan/<账号>.sock`，root 0600）与 `anas-assistant-planapi@.service`（`systemd-socket-proxyd --exit-idle-time=45s 127.0.0.1:9120`），由 `anas-assistant-api@` 的两个单元生成。连接来了才起进程，没有连接 45 秒后退出（`StopWhenUnneeded=yes`）。Host Agent 与 `anas-assistant-api@.socket` 一样为每个有 VNAS 的成员启用这个套接字；账号停用时连同 `anas-assistant-plan@` 一起屏蔽，删掉密钥时停下。
 - 与成员平时的 VNAS 可以同时运行；两个进程同时写同一主目录的记忆与技能，实测没有丢失。
 
-### 2. 规划发起方：`anas-montage-planner.service`
+### 2. 规划发起方：`anas-videocut-planner.service`
 
 root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务里的规划部分（`cron-waker.py` 只留成员的定时任务）。用 AI 助手运行环境的 Python（有 `websockets`）；与模型网关、唤醒服务一样只在保存了密钥时运行，Host Agent 随密钥启停。每 15 秒看一次。
 
@@ -36,7 +36,7 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 3. **开对话**：先确认模型网关应答（`GET /v1/models`，不花 token），连 `/run/a-nas-assistant-plan/<账号>.sock`，用 Hermes 自己的登录（`/auth/password-login`，密码是 Host Agent 写的实例密钥，`/var/lib/a-nas-host/assistant/tokens/<账号>.env`，只认 root 所有的文件），再走 `/api/ws` 的 JSON-RPC：`client.capabilities {server_requests: true}`、`session.create`、`session.title`（“剪辑规划 · <项目名>”，项目名随领取的回答带来）。然后报 `POST /v1/rounds/<轮次>/started`，`runRef` 是对话的存储编号（`stored_session_id`）；记下开始后才 `prompt.submit`（固定模板 `ai/anas_videocut/prompts/<模板>.md`，只填检查过的轮次、任务编号、token 与目标秒数），没记下开始（这一轮已作废或任务取消了）就不提交，模型不会被调用。
 4. **等它结束**：一直连着，收事件直到这次提问的 `message.complete`，至多 60 分钟（超时先 `session.interrupt`）；Hermes 发来的审批请求一律答 `{"choice": "deny"}`（实测不应答也是拒绝，这里明确拒绝），别的服务器请求答“不处理”。报完结果后再连着，等后台复盘的 `review.summary`，至多 150 秒（复盘在断开约 20 秒后会被回收）。连接断了、进程崩溃或超时，都算这一轮结束，按结果报告。
 5. **报结果**：`POST /v1/rounds/<轮次>/end`，`result` 是 `complete`、`error`（附错误原文）、`timeout` 或 `interrupted`；提示词没交进去（模型网关不应答、登录不了、对话建不起来）报 `abandon`，`failure` 写明是连不上（`unreachable`）还是出错（`error`）。
-6. **轮数**：规划发起方自己数它发起的对话，按授权（账号与签发时间）记在自己的状态目录（`/var/lib/anas-montage-planner/state.json`），不再要成员目录里的回执。提示词交进去之前先记一轮，进程中途死掉也不会少记；模型没调用过剪辑工具、对话也没有完成的，退回这一轮。
+6. **轮数**：规划发起方自己数它发起的对话，按授权（账号与签发时间）记在自己的状态目录（`/var/lib/anas-videocut-planner/state.json`），不再要成员目录里的回执。提示词交进去之前先记一轮，进程中途死掉也不会少记；模型没调用过剪辑工具、对话也没有完成的，退回这一轮。
 
 ### 3. 剪辑中心
 
@@ -81,4 +81,4 @@ root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务
 - 决定：[2026-11-20 剪辑规划交给 VNAS 的方式](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
 - [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 10（会话闸门）
 - 验证脚本：开发机实测用的 spike 沙箱（`ai/assistant-spike/run.sh`），规划进程与四项检查写进系统测试
-- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/protocol/socket.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-montage-planner.service`
+- 代码：`internal/videocut/app/planning.go`、`internal/videocut/protocol/assistant.go`、`internal/videocut/protocol/socket.go`、`ai/assistant/montage-planner.py`、`ai/assistant/anas_montage_mcp.py`、`scripts/lib/assistant-units.sh`、`internal/hostops/linux/assistant.go`、`deploy/systemd/system/anas-videocut-planner.service`

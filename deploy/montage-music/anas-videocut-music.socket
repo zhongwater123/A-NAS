@@ -3,7 +3,7 @@ Description=A-NAS montage music analysis socket
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Socket]
-# The first connection starts anas-montage-music.service, which analyses one
+# The first connection starts anas-videocut-music.service, which analyses one
 # song at a time and exits when idle. Only the montage service reaches it
 # (docs/architecture/montage-music.md); the directory is root's.
 ListenStream=/run/a-nas-montage-music/music.sock

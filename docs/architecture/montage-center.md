@@ -62,7 +62,7 @@
   剪辑中心窗口：① 上传视频（相册现有的上传队列）② 建项目、选歌、写要求、开始
      │
      ▼
-anas-api ──转发 /api/v1/videocut──▶ anas-montage：项目、规划、时间线、任务
+anas-api ──转发 /api/v1/videocut──▶ anas-videocut：项目、规划、时间线、任务
   │ “开始”前经文件代理               │ ⑤ 任务等规划时留下记号
   │ 登记规划授权                     ├──▶ 相册授权套接字：③ 登记授权 ④ 请求分析、读结果
   ▼                                  │                    ⑧ 取原片描述符 ⑨ 存回成片
@@ -72,7 +72,7 @@ anas-api ──转发 /api/v1/videocut──▶ anas-montage：项目、规划�
      │
      ▼
 Hermes 规划进程（成员的 VNAS，同一个沙箱与主目录，只有剪辑、记忆、技能工具）
-  ⑥ 经剪辑的助手套接字调 montage MCP 工具，回到 anas-montage：读目录、交大纲、交镜头
+  ⑥ 经剪辑的助手套接字调 montage MCP 工具，回到 anas-videocut：读目录、交大纲、交镜头
 anas-photos
   ├─ 剪辑分析（只为请求过的视频）：窗口向量 → 卡片 → 画质 → 描述
   │    用 FFmpeg Worker、剪辑计算 Worker、AI Worker，受相册的 AI 准入约束
@@ -174,7 +174,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 ## 服务形态与部署
 
-- **进程**：`/usr/lib/a-nas/anas-api montage-service`，单元 `anas-montage.service`。
+- **进程**：`/usr/lib/a-nas/anas-api videocut-service`，单元 `anas-videocut.service`。
   - 系统账号 `a-nas-montage`，固定 UID 31003，是 sysusers 里下一个空闲号。附加组 `a-nas-photos`，用来连 FFmpeg Worker 与剪辑计算 Worker 的套接字。这个组也让它能连上相册的产品接口与 AI Worker 的套接字，和家庭中心一样（见“项目授权”的“被攻破时”）。
   - 沙箱照搬 `anas-family.service` 的全部加固项，不只是下面几项：
     - `PrivateNetwork`、`ProtectSystem=strict`、`RestrictAddressFamilies=AF_UNIX`；
@@ -187,7 +187,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 - **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-montage`，每 15 分钟修复一次漂移。
   - 数据卷离线或只读时，整个服务回答 503 `videocut_unavailable`，不在系统盘建替代目录。
   - 容量不足只拒绝写入，不让整个服务不可用（[不变量 12](OVERVIEW.md#不变量)）：渲染写 `tmp/` 前用 `capacity.Admits` 按预计大小检查，存回时相册照常检查；不够时任务进入 `needs_input(storage_full)`，腾出空间后重试。已有项目与成片照常可看。
-- **剪辑计算 Worker**：`anas-montage-compute.socket` 加 `anas-montage-compute.service`。
+- **剪辑计算 Worker**：`anas-videocut-compute.socket` 加 `anas-videocut-compute.service`。
   - 单个常驻实例，逐个处理连接，免得每个连接都重新导入 NumPy。
   - DynamicUser，没有网络，看不到数据卷，用设备上已有的 AI 运行环境 `/usr/lib/a-nas/ai/runtime` 运行 `python -m anas_videocut.worker`。
   - 套接字 `SocketGroup=a-nas-photos`、`0660`，相册与剪辑中心都能连。
@@ -555,7 +555,7 @@ montage/
 - `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
 - 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `montage,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
 - **云端看不到画面**：规划进程里没有看图、看视频、读文件、终端、相册与桌面的工具，工具只给文字与结构化数据（用户 2026-11-20 决定 3）。
-- 套接字：systemd 的 `anas-montage-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-montage/montage.sock`。
+- 套接字：systemd 的 `anas-videocut-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-montage/montage.sock`。
 - 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号，只回答这位成员自己的任务。UID 0 的对端（规划发起方）用 `X-A-NAS-Account` 指明成员。
 - 套接字上有两类调用：MCP 服务器的工具（下表，`/v1/tools/*`），和规划发起方的 `claim`、`started`、`abandon`、`end`（`/v1/rounds/*`）。
 - 同一个 UID 在沙箱里还能用终端（成员平时的 VNAS），所以工具调用要带着进行中那一轮的 token，套接字还限制请求大小（80 KiB）与频率（每位成员每秒 5 次，突发 20 次）。

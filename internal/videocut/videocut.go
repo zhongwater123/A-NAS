@@ -1,7 +1,7 @@
 //go:build linux
 
 // Package videocut runs the montage center as its own service
-// (anas-montage.service, ADR 0038): the Product Service forwards
+// (anas-videocut.service, ADR 0038): the Product Service forwards
 // /api/v1/videocut with the browser's session token, and the service confirms
 // the session with the Host Agent itself (storeservice).
 package videocut

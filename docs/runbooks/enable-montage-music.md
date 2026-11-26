@@ -9,7 +9,7 @@
 
 成功后：
 
-- `anas-montage-music.socket` 在监听，剪辑服务选歌后几分钟内，这首歌从 `analyzing` 变成 `ready` 或写明原因的 `unusable`；
+- `anas-videocut-music.socket` 在监听，剪辑服务选歌后几分钟内，这首歌从 `analyzing` 变成 `ready` 或写明原因的 `unusable`；
 - 一首 4 分钟的歌的用时与 Worker 峰值内存记进[配乐分析设计](../architecture/montage-music.md#用时与内存)。
 
 ## 前提与风险
@@ -25,7 +25,7 @@
 - **停止条件**（出现任一项立即停止）：
   - 构建报告下载与 `deploy/montage-music/sources.json` 或锁文件的哈希不符、`pip check` 不通过，或 `madmom's model files are in the runtime`；
   - apt 报告依赖无法满足或版本不是 `a-nas` 的同一版本；
-  - `journalctl -u anas-montage-music` 出现 `does not match` 的权重核对失败或 `oom-kill`。
+  - `journalctl -u anas-videocut-music` 出现 `does not match` 的权重核对失败或 `oom-kill`。
 
 ## 已验证与未验证
 
@@ -68,16 +68,16 @@
    apt install /var/tmp/montage-music/*.deb
    ```
 
-   - 完成标准：`systemctl is-active anas-montage-music.socket` 是 `active`，`a-nas-check` 没有 `FAIL`。
+   - 完成标准：`systemctl is-active anas-videocut-music.socket` 是 `active`，`a-nas-check` 没有 `FAIL`。
 
 5. **实测**。测试账号的“音乐”文件夹里放一首 4 分钟左右的测试歌（开发机 C 的 `~/Music/QQ音乐`，只放在实验 NAS 上），在剪辑中心建项目、选这首歌。以 root 记下用时与峰值内存：
 
    ```bash
-   journalctl -u anas-montage-music -o cat | grep 'separated in'
+   journalctl -u anas-videocut-music -o cat | grep 'separated in'
    ```
 
    ```bash
-   systemctl show anas-montage-music -p MemoryPeak
+   systemctl show anas-videocut-music -p MemoryPeak
    ```
 
    - 完成标准：配乐页显示选段；把用时、各步用时与 `MemoryPeak` 记进设计文档的[用时与内存](../architecture/montage-music.md#用时与内存)。
@@ -87,11 +87,11 @@
 - 单元通过校验，没有任何输出：
 
   ```bash
-  systemd-analyze verify --man=no /usr/lib/systemd/system/anas-montage-music.socket /usr/lib/systemd/system/anas-montage-music.service
+  systemd-analyze verify --man=no /usr/lib/systemd/system/anas-videocut-music.socket /usr/lib/systemd/system/anas-videocut-music.service
   ```
 
 - 剪辑服务的接口：`GET /api/v1/videocut/projects/<id>/song` 的 `state` 是 `ready`，`selection` 有选段与小节槽。
-- Worker 没有网络、看不到数据卷：`systemctl show anas-montage-music -p PrivateNetwork -p InaccessiblePaths` 为 `yes` 与 `-/srv/a-nas`。
+- Worker 没有网络、看不到数据卷：`systemctl show anas-videocut-music -p PrivateNetwork -p InaccessiblePaths` 为 `yes` 与 `-/srv/a-nas`。
 - 运行环境里没有 madmom 的模型文件：
 
   ```bash

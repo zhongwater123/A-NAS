@@ -126,7 +126,7 @@ func callWorker(ctx context.Context, socket string, timeout time.Duration, reque
 }
 
 // MusicWorker reaches the music analysis Worker
-// (anas-montage-music.socket): allin1 in a runtime of its own, one song at
+// (anas-videocut-music.socket): allin1 in a runtime of its own, one song at
 // a time.
 type MusicWorker struct {
 	Socket string

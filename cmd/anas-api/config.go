@@ -491,8 +491,8 @@ type videoCutServiceConfig struct {
 	// Media decodes and probes the songs and renders the films.
 	Media MediaConfig
 	// MusicSocket reaches the music analysis Worker, allin1 in a runtime of
-	// its own (anas-montage-music.socket); ComputeSocket the compute
-	// Worker (anas-montage-compute.socket). While either is missing, songs
+	// its own (anas-videocut-music.socket); ComputeSocket the compute
+	// Worker (anas-videocut-compute.socket). While either is missing, songs
 	// wait.
 	MusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET" envDefault:"/run/a-nas-montage-music/music.sock"`
 	ComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET" envDefault:"/run/a-nas-montage-compute/compute.sock"`

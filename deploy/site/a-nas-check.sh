@@ -131,8 +131,8 @@ else
   fail anas-site "anas-site.service failed; see journalctl -u anas-site"
 fi
 
-for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service \
-  anas-workspace.service anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-montage-compute.socket anas-montage-assistant.socket \
+for unit in anas-host-agent.service anas-api.service anas-photos.service anas-shares.service anas-family.service anas-videocut.service \
+  anas-workspace.service anas-ai.socket anas-ffmpeg.socket anas-photos-grants.socket anas-videocut-compute.socket anas-videocut-assistant.socket \
   anas-vectors-proxy@a-nas-photos.socket smbd.service; do
   # A unit that is starting or restarting, as smbd does when the Host Agent
   # writes Samba's configuration, gets time to finish.
@@ -162,11 +162,11 @@ fi
 # VNAS runs while the administrator's model key is saved, and with it the montage center's
 # planner, which hands the planning to members' planning instances.
 if [[ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]]; then
-  if systemctl is-active --quiet anas-montage-planner.service; then
-    pass "anas-montage-planner.service is active"
+  if systemctl is-active --quiet anas-videocut-planner.service; then
+    pass "anas-videocut-planner.service is active"
   else
-    fail unit:anas-montage-planner.service \
-      "anas-montage-planner.service is $(systemctl is-active anas-montage-planner.service); see journalctl -u anas-montage-planner"
+    fail unit:anas-videocut-planner.service \
+      "anas-videocut-planner.service is $(systemctl is-active anas-videocut-planner.service); see journalctl -u anas-videocut-planner"
   fi
 else
   echo "INFO VNAS and the montage center's planner: off without the model key"
@@ -178,7 +178,7 @@ fi
 # its "ready" and "unavailable" lines since it started tells.
 if mountpoint -q /srv/a-nas/data; then
   for store in 'anas-photos photos/catalog.db photo' 'anas-shares shares/catalog.db member-share' \
-    'anas-family family/family.db family' 'anas-montage montage/montage.db montage' \
+    'anas-family family/family.db family' 'anas-videocut montage/montage.db montage' \
     'anas-workspace workspace/workspace.db workspace'; do
     read -r unit database name <<<"$store"
     if [[ ! -f "/srv/a-nas/data/$database" ]]; then

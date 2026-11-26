@@ -295,7 +295,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		"systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - -",
 		"systemctl restart --no-block anas-assistant-gateway.service",
 		"systemctl start --no-block anas-assistant-cron-waker.service",
-		"systemctl start --no-block anas-montage-planner.service",
+		"systemctl start --no-block anas-videocut-planner.service",
 		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 	} {
 		if !host.ran(command) {
@@ -320,7 +320,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		t.Fatalf("the credential is still there: %v", err)
 	}
 	for _, command := range []string{
-		"systemctl stop anas-assistant-cron-waker.service anas-montage-planner.service anas-assistant-gateway.service",
+		"systemctl stop anas-assistant-cron-waker.service anas-videocut-planner.service anas-assistant-gateway.service",
 		"systemctl disable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 		stopAlice,
 	} {

@@ -8,7 +8,7 @@ Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/architecture
 # the administrator's model key the assistant is off, and so is this (the Host Agent starts
 # and stops it with the key).
 ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
-After=anas-host-agent.service anas-montage.service
+After=anas-host-agent.service anas-videocut.service
 
 [Service]
 Type=simple
@@ -17,7 +17,7 @@ ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/ass
 Restart=always
 RestartSec=10s
 # The rounds each planning grant has had.
-StateDirectory=anas-montage-planner
+StateDirectory=anas-videocut-planner
 StateDirectoryMode=0700
 ProtectSystem=strict
 ProtectHome=true

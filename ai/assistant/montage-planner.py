@@ -1,6 +1,6 @@
 """Hands the montage center's planning to members' VNAS (docs/architecture/montage-planning-session.md).
 
-anas-montage-planner.service runs this as root with the Hermes runtime's Python, which has websockets. Every
+anas-videocut-planner.service runs this as root with the Hermes runtime's Python, which has websockets. Every
 INTERVAL seconds it gives one member with a job waiting for a plan a round, one round on the whole device at a time:
 
 1. Who: a marker the montage service left in MARKERS, the longest waiting first; a planning grant, read only as root's
@@ -42,7 +42,7 @@ from datetime import datetime
 MARKERS = os.environ.get("ANAS_VIDEOCUT_PLAN_MARKERS", "/run/a-nas-montage/plans")
 GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas-host/assistant/plans")
 TOKENS = os.environ.get("ANAS_ASSISTANT_TOKEN_DIR", "/var/lib/a-nas-host/assistant/tokens")
-STATE = os.environ.get("ANAS_VIDEOCUT_PLANNER_STATE", "/var/lib/anas-montage-planner/state.json")
+STATE = os.environ.get("ANAS_VIDEOCUT_PLANNER_STATE", "/var/lib/anas-videocut-planner/state.json")
 MONTAGE = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-montage-assistant/assistant.sock")
 PLAN_SOCKETS = os.environ.get("ANAS_ASSISTANT_PLAN_SOCKETS", "/run/a-nas-assistant-plan")
 MODEL = os.environ.get("ANAS_ASSISTANT_MODEL_SOCKET", "/run/anas-assistant-gw/model.sock")

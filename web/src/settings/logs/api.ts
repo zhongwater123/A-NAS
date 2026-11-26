@@ -61,7 +61,7 @@ export const systemLogServices: Array<{ id: SystemLogService; label: string; uni
   { id: "photos", label: "相册服务", unit: "anas-photos" },
   { id: "shares", label: "分享服务", unit: "anas-shares" },
   { id: "family", label: "家庭服务", unit: "anas-family" },
-  { id: "montage", label: "剪辑服务", unit: "anas-montage" },
+  { id: "montage", label: "剪辑服务", unit: "anas-videocut" },
   { id: "workspace", label: "共享工作区服务", unit: "anas-workspace" },
   { id: "containers", label: "容器代理", unit: "anas-container-agent" },
   { id: "ai", label: "本地 AI", unit: "anas-ai" },

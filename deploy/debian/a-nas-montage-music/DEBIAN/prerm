@@ -5,6 +5,6 @@ set -euo pipefail
 
 [[ -d /run/systemd/system ]] || exit 0
 case "${1:-}" in
-  remove | deconfigure) systemctl stop anas-montage-music.socket anas-montage-music.service || true ;;
+  remove | deconfigure) systemctl stop anas-videocut-music.socket anas-videocut-music.service || true ;;
 esac
 exit 0

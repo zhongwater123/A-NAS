@@ -245,11 +245,11 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
-	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-montage.service
-	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api montage-service' deploy/systemd/system/anas-montage.service
-	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
-	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
-	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api videocut-service' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
 	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
@@ -289,26 +289,26 @@ ops-check:
 	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-videocut-compute.socket
 	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
 	@# the members' planning instances alone, and stopped before the montage service it would start again.
-	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
-	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
-	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
-	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-montage-assistant.socket
-	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-videocut-assistant.socket
+	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-videocut-assistant.socket
+	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-videocut-assistant.socket
+	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-videocut-assistant.socket
+	grep -Fqx 'Sockets=anas-videocut-assistant.socket' deploy/systemd/system/anas-videocut.service
 	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
 	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
 	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
-	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-montage-planner.service
-	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-montage-planner.service
-	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
-	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-videocut-planner.service
+	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-videocut-planner.service
+	test "$$(grep -c '^      systemctl stop anas-videocut-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
+	grep -Fqx '  systemctl stop anas-videocut-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
 	@# Planning grants are in the Host Agent's own state, never under a service's directory.
 	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/montage-planner.py
 	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
-	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
-	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-videocut-compute.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-videocut-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket

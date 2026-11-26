@@ -24,7 +24,7 @@ import (
 )
 
 // The montage center's assistant socket (docs/architecture/montage-planning-session.md):
-// systemd holds it as anas-montage-assistant.socket, named "assistant", open
+// systemd holds it as anas-videocut-assistant.socket, named "assistant", open
 // to every UID in a directory only root enters; it is bound only into
 // members' planning instances. The peer's UID, which the kernel reports, is
 // the member; the Host Agent says which account it is. Root's planner, the

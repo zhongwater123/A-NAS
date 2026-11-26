@@ -908,7 +908,7 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	// again with the service.
 	// The shared workspace service (ADR 0040) came later still, and stops for
 	// the same reason.
-	for _, unit := range []string{"anas-montage-assistant.socket", "anas-montage", "anas-workspace"} {
+	for _, unit := range []string{"anas-videocut-assistant.socket", "anas-videocut", "anas-workspace"} {
 		if output, err := s.Commands.Run(ctx, "systemctl", "stop", unit); err != nil && !unitNotLoaded(err) {
 			return fmt.Errorf("stop %s: %w: %s", unit, err, lastLines(string(output), 3))
 		}
@@ -934,7 +934,7 @@ done`
 	output, err := s.Commands.Run(ctx, "sh", "-c", script, "restore", backup)
 	slices.Reverse(services)
 	_, _ = s.Commands.Run(ctx, "systemctl", append([]string{"start"}, services...)...)
-	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-montage")
+	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-videocut")
 	_, _ = s.Commands.Run(ctx, "systemctl", "start", "anas-workspace")
 	if err != nil {
 		return fmt.Errorf("restore the databases: %w: %s", err, lastLines(string(output), 3))

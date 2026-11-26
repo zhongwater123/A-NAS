@@ -110,7 +110,7 @@ check "and his units are no longer masked" \
 check "the administrator deletes the key" \
   test "$(status_of -X DELETE -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/assistant-key")" = 200
 check "without the key the model gateway, the waker and the montage center's planner stop" \
-  test "$(systemctl is-active anas-assistant-gateway.service anas-assistant-cron-waker.service anas-montage-planner.service |
+  test "$(systemctl is-active anas-assistant-gateway.service anas-assistant-cron-waker.service anas-videocut-planner.service |
     sort -u | paste -sd ' ' || true)" = inactive
 check "alice's assistant is off" test ! -S /run/a-nas-assistant/alice.sock
 check "and alice is told why" \

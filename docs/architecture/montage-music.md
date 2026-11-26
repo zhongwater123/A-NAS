@@ -11,7 +11,7 @@
 浏览器 ──PUT /projects/{id}/song {trackId}──▶ anas-api
                                                │ 音乐功能播放的同一条路径：经文件代理以成员身份打开文件
                                                ▼
-                                     anas-montage（流式收下）
+                                     anas-videocut（流式收下）
    songs/<sha256>/audio ◀── 按内容摘要存一份；FFmpeg Worker probe：要有音频，30 秒到 8 分钟
         │ 后台，一次一首
         ├─ FFmpeg Worker audio PCM：立体声 44.1 kHz ─┐  两条管道，依次写
@@ -53,7 +53,7 @@
 3. 8 个分折模型的集成推理，madmom 的 DBN 找重拍。
 4. 响度是第八版的 RMS 曲线（2048 点一帧、每 512 点，22050 Hz），用运行环境里的 `librosa.feature.rms` 算，居中与补零写明在参数里；与第八版手写的算式逐位相同。
 
-单元 [`anas-montage-music.socket`](../../deploy/montage-music/anas-montage-music.socket) 与 [`.service`](../../deploy/montage-music/anas-montage-music.service)：
+单元 [`anas-videocut-music.socket`](../../deploy/montage-music/anas-videocut-music.socket) 与 [`.service`](../../deploy/montage-music/anas-videocut-music.service)：
 
 - 套接字 `/run/a-nas-montage-music/music.sock`，`SocketUser=a-nas-montage`、0600，只有剪辑服务能连；
 - DynamicUser，`PrivateNetwork`，`InaccessiblePaths=-/srv/a-nas`，`HF_HUB_OFFLINE=1`；歌曲只经两条管道进来；
@@ -159,7 +159,7 @@
   - 分析、等待与失败：[`internal/videocut/app/analysis.go`](../../internal/videocut/app/analysis.go)、[`internal/videocut/external/music.go`](../../internal/videocut/external/music.go)
   - 任务取选段：[`internal/videocut/app/jobmusic.go`](../../internal/videocut/app/jobmusic.go)
   - 选段：[`ai/anas_videocut/ops/music.py`](../../ai/anas_videocut/ops/music.py)、[`ai/anas_videocut/algo/music.py`](../../ai/anas_videocut/algo/music.py)、[`internal/videocutcompute/music.go`](../../internal/videocutcompute/music.go)
-  - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-montage-music.service)
+  - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-videocut-music.service)
   - 运行环境与打包：[`scripts/build-montage-music-runtime.sh`](../../scripts/build-montage-music-runtime.sh)、[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)、[`scripts/build-packages.sh`](../../scripts/build-packages.sh)
   - 仓库与软件包不含歌曲的检查：[`scripts/check-no-songs.sh`](../../scripts/check-no-songs.sh)
 - 测试：

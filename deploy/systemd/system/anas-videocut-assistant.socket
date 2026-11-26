@@ -7,7 +7,7 @@ Description=A-NAS montage center socket for planning by members' VNAS
 # the member. Open to every UID, so its directory is root's alone; only
 # anas-assistant-plan@.service binds it into its sandbox, never a
 # conversation's instance, the scheduled tasks or the curator. systemd holds
-# it, so it outlives restarts of the montage service. anas-montage.service
+# it, so it outlives restarts of the montage service. anas-videocut.service
 # takes it (Sockets=).
 
 [Socket]
@@ -15,7 +15,7 @@ ListenStream=/run/a-nas-montage-assistant/assistant.sock
 SocketMode=0666
 DirectoryMode=0700
 FileDescriptorName=assistant
-Service=anas-montage.service
+Service=anas-videocut.service
 
 [Install]
 WantedBy=sockets.target

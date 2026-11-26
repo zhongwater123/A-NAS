@@ -1,8 +1,8 @@
 [Unit]
 Description=A-NAS montage compute Worker
 Documentation=https://github.com/zhongwater123/A-NAS
-Requires=anas-montage-compute.socket
-After=anas-montage-compute.socket
+Requires=anas-videocut-compute.socket
+After=anas-videocut-compute.socket
 
 [Service]
 Type=simple

@@ -155,7 +155,7 @@ check "without the bind, the sandbox's path is the empty mount point" \
 # the socket is root's alone, and root is answered only for the account it names: that is the
 # planner, which hands the planning to her planning instance.
 montage_socket=/run/a-nas-montage-assistant/assistant.sock
-check "the montage service holds its socket for planning" systemctl is-active --quiet anas-montage-assistant.socket
+check "the montage service holds its socket for planning" systemctl is-active --quiet anas-videocut-assistant.socket
 check "the montage center's socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" "$montage_socket"
 montage_claim() { # [HEADER]: the status of a claim of a planning round on it, as root
@@ -191,7 +191,7 @@ check "her scheduled tasks are back on the ordinary policy" \
   test ! -e /usr/lib/a-nas/assistant/managed-cron -a ! -e "$members/alice/config-cron.yaml"
 check "her planning instance has a socket of its own, root's alone" \
   test "$(stat -c '%a %U' /run/a-nas-assistant-plan/alice.sock 2>/dev/null)" = "600 root"
-check "root's planner runs while the key is saved" systemctl is-active --quiet anas-montage-planner.service
+check "root's planner runs while the key is saved" systemctl is-active --quiet anas-videocut-planner.service
 check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v2.md
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
@@ -648,24 +648,24 @@ if "$real_runtime"; then
       -d '{"requestKey":"system-test-plan"}' "$api/api/v1/videocut/projects/$plan_project/generate" | jq -r .id || true)
     check "she starts it, which registers her planning grant on the way" \
       bash -c "[[ -n '$plan_job' && '$plan_job' != null ]] && jq -e '(.issuedAt | fromdateiso8601) > (now - 120)' '$plans/alice' >/dev/null"
-    systemctl stop anas-montage-assistant.socket anas-montage.service || true
+    systemctl stop anas-videocut-assistant.socket anas-videocut.service || true
     seeded=$(setpriv --reuid=a-nas-montage --regid=a-nas-montage --clear-groups \
       python3 /spike/montage-plan-seed.py "$data/montage/montage.db" "$plan_job" "$clip" 2>&1 || true)
-    systemctl start anas-montage.service anas-montage-assistant.socket || true
+    systemctl start anas-videocut.service anas-videocut-assistant.socket || true
     check "the test gives her job a catalog and her song an analysis" grep -q '^seeded ' <<<"$seeded"
     echo "INFO montage planning: $seeded"
     waits_for_vnas() { [[ "$(montage_job | jq -r '.state + " " + (.waitReason // "")')" == "waiting vnas" ]]; }
     for _ in $(seq 1 60); do waits_for_vnas && break; sleep 2; done
     check "her job comes to planning by itself and waits for VNAS" waits_for_vnas
     echo "INFO montage planning: the job before its round: $(montage_job | jq -c '{state, step, waitReason, error}' || true)"
-    planner_said() { journalctl -u anas-montage-planner.service -o cat --no-pager | grep -q "$1"; }
+    planner_said() { journalctl -u anas-videocut-planner.service -o cat --no-pager | grep -q "$1"; }
     for _ in $(seq 1 30); do planner_said "alice: round .* handed to VNAS" && break; sleep 2; done
     check "root's planner claims a round for her and hands it to her planning instance" planner_said "alice: round .* handed to VNAS"
     check "her planning instance runs apart from her ordinary one" \
       test "$(systemctl show -p ActiveEnterTimestampMonotonic --value anas-assistant-plan@alice.service)" != 0
     for _ in $(seq 1 240); do planner_said "alice: round .* ended" && break; sleep 2; done
     check "the round ends with both 方案 handed in" planner_said "alice: round .* ended: complete"
-    check "the montage center took both steps of both 方案" test "$(journalctl -u anas-montage.service -o cat --no-pager |
+    check "the montage center took both steps of both 方案" test "$(journalctl -u anas-videocut.service -o cat --no-pager |
       grep 'planning step taken' | grep -cF "$plan_job")" = 4
     past_planning() {
       montage_job | jq -e '([.steps[] | select(.name == "pick" or .name == "shots") | .state] == ["done", "done"])
@@ -693,12 +693,12 @@ if "$real_runtime"; then
     check "and wrote what it learned as a skill of hers" \
       test -n "$(find "$data/assistant/alice/hermes/skills" -path '*/montage-planning-notes/SKILL.md' 2>/dev/null)"
     check "the planner counted the round on her grant" \
-      jq -e '[.counts | to_entries[] | select(.key | startswith("alice|")) | .value] == [1]' /var/lib/anas-montage-planner/state.json
+      jq -e '[.counts | to_entries[] | select(.key | startswith("alice|")) | .value] == [1]' /var/lib/anas-videocut-planner/state.json
     check "no marker is left for her" test ! -e /run/a-nas-montage/plans/alice
     for _ in $(seq 1 90); do systemctl is-active --quiet anas-assistant-plan@alice.service || break; sleep 2; done
     check "her planning instance stops once the planner has left it" \
       test "$(systemctl is-active anas-assistant-plan@alice.service || true)" != active
-    echo "INFO montage planning: $(journalctl -u anas-montage-planner.service -o cat --no-pager | tail -n 6 | tr '\n' ';' || true)"
+    echo "INFO montage planning: $(journalctl -u anas-videocut-planner.service -o cat --no-pager | tail -n 6 | tr '\n' ';' || true)"
   fi
 fi
 

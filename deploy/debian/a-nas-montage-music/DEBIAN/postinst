@@ -9,5 +9,5 @@ set -euo pipefail
 
 [[ "${1:-}" == configure && -d /run/systemd/system ]] || exit 0
 systemctl daemon-reload
-systemctl start anas-montage-music.socket
+systemctl start anas-videocut-music.socket
 exit 0
