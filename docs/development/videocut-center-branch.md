@@ -11,6 +11,7 @@
 ## 分支
 
 - **`videocut-center`**：从 `main` 拉出，是剪辑小组的集成分支。剪辑中心的功能分支从它开，PR 的目标分支选它（`gh pr create --base videocut-center`；网页上新建 PR 时默认目标是 `main`，要手动改）。评审照常进行，CI 对任何目标分支的 PR 都会运行；直接推送到本分支不触发 CI，所以改动都走 PR。
+- **谁审核合并**：目标是 `videocut-center` 的 PR 由 `liangjianshu` 审核，CI 通过后用合并提交合入，不 squash、不 rebase；`liangjianshu` 自己的 PR 找一位组员审核后再合。阶段合回 `main` 的 PR 和公共代码的主干 PR 照常由仓库维护者审核。本分支没有 GitHub 的分支保护，有写权限的人都能直接推送或合并，以上靠约定执行。
 - **每周同步一次 `main`**：在 `videocut-center` 上合并 `main`，用 merge，不用 rebase，免得改写组员已经推送的提交。同步后运行 `make check`。组员轮流负责，同步前在群里说一声。
 - **阶段完成后合回 `main`**：开一个 `videocut-center` → `main` 的 PR，按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 的流程评审。按本文的规则做，这个 PR 里的公共代码应当只剩“登记”类改动。
 - **研究用的改动不进 `videocut-center`**：比如把描述模型换成公司的模型 API、放开 AI Worker 的联网限制。这类改动放在从 `videocut-center` 拉出的 `research/<主题>` 分支上，只部署到实验 NAS，不提 PR。
@@ -31,9 +32,10 @@
 ## 公共代码的改动怎么提
 
 1. **能拆就先拆。** 公共代码单独开分支，从 `main` 拉，PR 目标选 `main`，按普通流程评审。审核人优先找这个模块最近的维护者（用 `git log` 看谁改得多）。合进 `main` 后同步到 `videocut-center`，再提剪辑中心那部分。
-2. **来不及拆，可以先合进 `videocut-center`**，但同时开一个 Issue，打上 `待合主干` 标签，写明文件和原因。下一次同步 `main` 之前（最长一周）提出主干 PR。
-3. **主干 PR 要能单独成立。** 有自己的测试；剪辑中心还没合回时，这段代码在 `main` 上没人调用也不会出错。
-4. **文档跟着代码走。** 公共代码对应的文档（比如 `docs/architecture/photo-ai.md`）随主干 PR 一起改；剪辑中心的规格和技术设计留在 `videocut-center`。
+2. **主干 PR 还在等审核、剪辑中心又急着用时**，可以把它的提交先合进 `videocut-center`，主干 PR 保持开着，不用另开 `待合主干` Issue。合进本分支的 PR 要用指向同一提交的新分支来提（`git push origin <主干 PR 的分支>:refs/heads/chore/<主题>-into-videocut`），不能直接用主干 PR 的分支：仓库在合并后自动删除 PR 的分支，用同一个分支，合并时会删掉它，主干 PR 也随之关闭。之后主干 PR 合进 `main`，本分支同步 `main` 时这些提交已经在了，不会重复。例：[#645](https://github.com/zhongwater123/A-NAS/pull/645) 经 [#659](https://github.com/zhongwater123/A-NAS/pull/659) 先合进本分支。
+3. **来不及拆，可以先合进 `videocut-center`**，但同时开一个 Issue，打上 `待合主干` 标签，写明文件和原因。下一次同步 `main` 之前（最长一周）提出主干 PR。
+4. **主干 PR 要能单独成立。** 有自己的测试；剪辑中心还没合回时，这段代码在 `main` 上没人调用也不会出错。
+5. **文档跟着代码走。** 公共代码对应的文档（比如 `docs/architecture/photo-ai.md`）随主干 PR 一起改；剪辑中心的规格和技术设计留在 `videocut-center`。
 
 ## 检查命令
 
