@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -430,7 +431,7 @@ func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte
 func (s *Store) startStep(ctx context.Context, jobID string, st step, key string, later []step, saved map[int]bool) error {
 	name := st.name
 	now := sqlitedb.FormatTime(s.now())
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.db.Update(ctx, func(tx *db.Tx) error {
 		var stored string
 		err := tx.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&stored)
 		switch {
@@ -477,7 +478,7 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 // from none.
 func (s *Store) finishStep(ctx context.Context, jobID, name string, result []byte) error {
 	now := sqlitedb.FormatTime(s.now())
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",
 			string(result), now, jobID, name); err != nil {
 			return err
@@ -974,7 +975,7 @@ func (s *Store) shots(ctx context.Context, run *jobRun) (any, error) {
 }
 
 // voidPlans voids the job's plans: the catalog changed.
-func voidPlans(ctx context.Context, tx *sql.Tx, jobID string, at time.Time) error {
+func voidPlans(ctx context.Context, tx *db.Tx, jobID string, at time.Time) error {
 	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
 	return err
 }

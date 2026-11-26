@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -153,7 +154,7 @@ type batchRow struct {
 // request, another project or other videos it is ErrConflict.
 func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, name string, ids []string) (batchRow, error) {
 	var row batchRow
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		var assets string
 		err := tx.QueryRowContext(ctx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
 			owner, requestKey).Scan(&row.id, &row.projectID, &row.kind, &assets, &row.state)
@@ -241,7 +242,7 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 			}
 		}
 	}
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.db.Update(ctx, func(tx *db.Tx) error {
 		now := sqlitedb.FormatTime(s.now())
 		for _, asset := range looked {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO project_assets(project_id, asset_id, object_id, batch_id, added_at)
@@ -281,7 +282,7 @@ func (s *Store) undo(ctx context.Context, b batchRow, grantID string) {
 func (s *Store) settle(ctx context.Context, b batchRow, grantID string) (string, error) {
 	if b.kind == kindCreate {
 		var revoke string
-		err := s.withTx(ctx, func(tx *sql.Tx) error {
+		err := s.db.Update(ctx, func(tx *db.Tx) error {
 			var recorded sql.NullString
 			err := tx.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", b.projectID).Scan(&recorded)
 			if errors.Is(err, sql.ErrNoRows) {
@@ -671,7 +672,7 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 	defer unlock()
 	var grantID sql.NullString
 	var jobs []string
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		row, err := s.project(ctx, tx, owner, projectID)
 		if err != nil {
 			return err
@@ -980,7 +981,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 	}
 	defer unlock()
 	var jobs []string
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		if jobs, err = jobIDs(ctx, tx, "SELECT id FROM jobs WHERE owner_user_id = ?", userID); err != nil {
 			return err
 		}

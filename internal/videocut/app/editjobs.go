@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -70,7 +71,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		card, _, _ := src.beat(shot.Beat)
 		used[card.Video] = src.videos[card.Video].ObjectID
 	}
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// A retry with the same key may have made the job since the look above.
 		var err error
 		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindEdit, "draft_id", draftID); err != nil || jobID != "" {

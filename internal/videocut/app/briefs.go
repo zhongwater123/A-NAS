@@ -13,6 +13,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -365,7 +366,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	}
 	var late *domain.ToolAnswer
 	first := false
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, late, err = s.standing(ctx, tx, owner, jobID, token); err != nil || late != nil {
 			return err
 		}
@@ -409,7 +410,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 func (s *Store) refuse(ctx context.Context, owner, jobID, token string, reasons []string) (domain.ToolAnswer, error) {
 	var late *domain.ToolAnswer
 	var rejections int
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		call, over, err := s.standing(ctx, tx, owner, jobID, token)
 		if err != nil || over != nil {
 			late = over

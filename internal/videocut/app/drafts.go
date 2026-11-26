@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -663,7 +664,7 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (doma
 		}
 		id = newID("draft")
 		now := sqlitedb.FormatTime(s.now())
-		err = s.withTx(ctx, func(tx *sql.Tx) error {
+		err = s.db.Update(ctx, func(tx *db.Tx) error {
 			result, err := tx.ExecContext(ctx, `INSERT INTO drafts(id, owner_user_id, project_id, base_version_id, revision, shots_json, updated_at)
 				VALUES(?, ?, ?, ?, 0, ?, ?) ON CONFLICT (base_version_id) DO NOTHING`, id, owner, src.projectID, versionID, encoded, now)
 			if err != nil {
@@ -853,7 +854,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		return domain.Draft{}, err
 	}
 	now := s.now()
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		result, err := tx.ExecContext(ctx, "UPDATE drafts SET revision = revision + 1, shots_json = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND revision = ?",
 			encoded, sqlitedb.FormatTime(now), draftID, owner, base)
 		if err != nil {
@@ -887,7 +888,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 // trimRevisions keeps the last keptRevisions revisions and those undoing
 // from latest goes back through, so that the last keptRevisions steps can
 // be undone however many of them were undos themselves.
-func trimRevisions(ctx context.Context, tx *sql.Tx, draftID string, latest int) error {
+func trimRevisions(ctx context.Context, tx *db.Tx, draftID string, latest int) error {
 	backs, err := revisionBacks(ctx, tx, draftID)
 	if err != nil {
 		return err
@@ -914,7 +915,7 @@ func trimRevisions(ctx context.Context, tx *sql.Tx, draftID string, latest int) 
 
 // revisionBacks is each kept revision of a draft with the one undoing it
 // goes back to.
-func revisionBacks(ctx context.Context, tx *sql.Tx, draftID string) (map[int]sql.NullInt64, error) {
+func revisionBacks(ctx context.Context, tx *db.Tx, draftID string) (map[int]sql.NullInt64, error) {
 	rows, err := tx.QueryContext(ctx, "SELECT revision, back FROM draft_revisions WHERE draft_id = ?", draftID)
 	if err != nil {
 		return nil, err

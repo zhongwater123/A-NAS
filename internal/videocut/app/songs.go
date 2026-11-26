@@ -19,6 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -250,7 +251,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 	if err := s.keep(file, sha); err != nil {
 		return domain.SongDetail{}, errors.Join(err, os.Remove(file.Name()))
 	}
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		songID, err := s.songRowFor(ctx, tx, owner, sha, title, contentType, duration)
 		if err != nil {
 			return err
@@ -272,7 +273,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 // songRowFor finds or adds owner's row for the song with this digest. A new
 // row takes the analysis another member's row has finished for the same
 // content.
-func (s *Store) songRowFor(ctx context.Context, tx *sql.Tx, owner, sha, title, contentType string, duration float64) (string, error) {
+func (s *Store) songRowFor(ctx context.Context, tx *db.Tx, owner, sha, title, contentType string, duration float64) (string, error) {
 	now := sqlitedb.FormatTime(s.now())
 	var id string
 	err := tx.QueryRowContext(ctx, "SELECT id FROM songs WHERE owner_user_id = ? AND sha256 = ?", owner, sha).Scan(&id)

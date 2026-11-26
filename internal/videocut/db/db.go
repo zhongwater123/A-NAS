@@ -31,3 +31,14 @@ func Open(ctx context.Context, root string) (*DB, error) {
 	}
 	return &DB{database}, nil
 }
+
+// Tx is one transaction: reads and writes that stand or fall together.
+// It still lends app its *sql.Tx while the reads and writes move here
+// (#665).
+type Tx struct{ *sql.Tx }
+
+// Update runs apply in one transaction and commits it when apply returns
+// nil; otherwise nothing apply wrote stays.
+func (d *DB) Update(ctx context.Context, apply func(*Tx) error) error {
+	return sqlitedb.WithTx(ctx, d.DB, func(tx *sql.Tx) error { return apply(&Tx{tx}) })
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -162,7 +163,7 @@ func (src *editSource) scenes() []domain.SceneCount {
 // (docs/decisions/2026-11-19-montage-edit-defaults.md).
 func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (domain.ProjectDetail, error) {
 	var projectID string
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		err := tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
 			WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`, versionID, owner).Scan(&projectID)
 		if errors.Is(err, sql.ErrNoRows) {

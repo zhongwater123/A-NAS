@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -483,7 +484,7 @@ func newToken() string {
 // leaves no marker behind: the planner would claim for it again and again.
 func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, error) {
 	var claim domain.Claim
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		username, _, granted, err := s.planGrant(ctx, tx, owner)
 		if err != nil {
 			return err
@@ -575,7 +576,7 @@ func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outco
 // newPlanEpoch starts the job's planning over: the rounds before it no
 // longer say the plan is unknown, a round in progress is over, and the
 // refusals so far are forgotten.
-func (s *Store) newPlanEpoch(ctx context.Context, tx *sql.Tx, jobID, why string) error {
+func (s *Store) newPlanEpoch(ctx context.Context, tx *db.Tx, jobID, why string) error {
 	if _, err := tx.ExecContext(ctx, "UPDATE jobs SET plan_rejections = 0, plan_epoch = plan_epoch + 1 WHERE id = ?", jobID); err != nil {
 		return err
 	}
@@ -589,7 +590,7 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 	if len(runRef) > 128 {
 		return domain.ErrInvalid
 	}
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.db.Update(ctx, func(tx *db.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
 		if err != nil {
 			return err
@@ -616,7 +617,7 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failur
 	if failure != failureError {
 		failure = failureUnreachable
 	}
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
 		if err != nil {
 			return err
@@ -650,7 +651,7 @@ func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result st
 	if result != "" && result != RoundComplete {
 		failure = failureError
 	}
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
 		if err != nil {
 			return err
@@ -688,7 +689,7 @@ func (s *Store) SweepRounds(ctx context.Context) error {
 	late := `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND (started_at <= ? OR called_at <= ?))`
 	bounds := []any{sqlitedb.FormatTime(now.Add(-claimTimeout)), sqlitedb.FormatTime(now.Add(-handoverTimeout)), sqlitedb.FormatTime(now.Add(-planTimeout))}
 	var swept int64
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+late+")",
 			append([]any{sqlitedb.FormatTime(now)}, bounds...)...); err != nil {
 			return err

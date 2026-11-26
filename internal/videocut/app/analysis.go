@@ -13,6 +13,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -327,7 +328,7 @@ func (s *Store) wait(ctx context.Context, sha, why string) {
 // far.
 func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalysis, loudness []float32) {
 	var attempts int
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE songs SET waiting = ?, attempts = attempts + 1, next_try = ?
 			WHERE sha256 = ? AND state = 'analyzing'`, why, sqlitedb.FormatTime(s.now().Add(analysisRetry)), sha); err != nil {
 			return err

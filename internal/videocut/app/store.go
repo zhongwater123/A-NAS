@@ -5,7 +5,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/keylock"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 )
 
@@ -195,8 +193,4 @@ func (s *Store) soon(work func(context.Context)) {
 		return
 	}
 	s.background.Go(func() { work(s.base) })
-}
-
-func (s *Store) withTx(ctx context.Context, apply func(*sql.Tx) error) error {
-	return sqlitedb.WithTx(ctx, s.db.DB, apply)
 }

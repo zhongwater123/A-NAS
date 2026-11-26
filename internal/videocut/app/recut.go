@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -45,7 +46,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 		return domain.Job{}, false, err
 	}
 	created := false
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// A retry with the same key may have made the job since the look above.
 		var err error
 		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindRecut, "source_version_id", versionID); err != nil || jobID != "" {

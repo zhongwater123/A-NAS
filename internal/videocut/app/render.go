@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -693,7 +694,7 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 		timeline = string(encoded)
 	}
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// An edit's version is an edit of the version it came from, at the
 		// draft's revision; a generate job's was planned.
 		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,

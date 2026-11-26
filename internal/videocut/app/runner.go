@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -115,7 +116,7 @@ func (s *Store) cancelRunning(jobID string) {
 // intermediate files of jobs that ended; it runs before RunJobs.
 func (s *Store) RecoverJobs(ctx context.Context) error {
 	now := sqlitedb.FormatTime(s.now())
-	if err := s.withTx(ctx, func(tx *sql.Tx) error {
+	if err := s.db.Update(ctx, func(tx *db.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
 			WHERE cancel_requested = 1 AND `+activeStateQuery, now, now); err != nil {
 			return err
@@ -211,7 +212,7 @@ func (s *Store) nextDue(ctx context.Context) time.Duration {
 func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	var job claimed
 	found := false
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		now := s.now()
 		var settings string
 		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
@@ -318,7 +319,7 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 		s.releaseSong(ctx, job.owner)
 		return
 	}
-	dbErr := s.withTx(ctx, func(tx *sql.Tx) error {
+	dbErr := s.db.Update(ctx, func(tx *db.Tx) error {
 		var attempts int
 		var cancelled, saving bool
 		if err := tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", job.id).Scan(&attempts, &cancelled, &saving); err != nil {

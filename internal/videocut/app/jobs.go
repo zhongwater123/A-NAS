@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -118,7 +119,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	}
 	var jobID string
 	created := false
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		var err error
 		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindGenerate, "project_id", projectID); err != nil || jobID != "" {
 			return err
@@ -185,7 +186,7 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, s
 
 // projectIdle answers ErrJobActive while a job of the project has not
 // ended: a project has one job in progress at a time, of any kind.
-func projectIdle(ctx context.Context, tx *sql.Tx, projectID string) error {
+func projectIdle(ctx context.Context, tx *db.Tx, projectID string) error {
 	var active bool
 	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active); err != nil {
 		return err
@@ -207,7 +208,7 @@ type newJob struct {
 }
 
 // queueJob writes a job, due now, and returns its ID.
-func (s *Store) queueJob(ctx context.Context, tx *sql.Tx, job newJob) (string, error) {
+func (s *Store) queueJob(ctx context.Context, tx *db.Tx, job newJob) (string, error) {
 	encoded, err := json.Marshal(job.settings)
 	if err != nil {
 		return "", err
@@ -402,7 +403,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 // resume puts a job that waits, needs the member or failed back in the
 // queue. It no longer wants a round: a round is claimed only for a job that
 // came to planning and waits there (awaitPlan).
-func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, states ...string) error {
+func (s *Store) resume(ctx context.Context, tx *db.Tx, owner, jobID string, states ...string) error {
 	marks := strings.TrimSuffix(strings.Repeat("?, ", len(states)), ", ")
 	args := []any{sqlitedb.FormatTime(s.now()), sqlitedb.FormatTime(s.now()), jobID, owner}
 	for _, state := range states {
@@ -465,7 +466,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 			return domain.Job{}, domain.GrantError(err)
 		}
 	}
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM job_assets WHERE job_id = ? AND asset_id = ?", jobID, id); err != nil {
 				return err
@@ -515,7 +516,7 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (domain.
 	if err := s.analyzeAssets(ctx, grantID, job.Missing, true); err != nil {
 		return domain.Job{}, domain.GrantError(err)
 	}
-	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
+	if err := s.db.Update(ctx, func(tx *db.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
 		return domain.Job{}, err
 	}
 	s.wakeJobs()
@@ -533,7 +534,7 @@ func (s *Store) Retry(ctx context.Context, owner, jobID string) (domain.Job, err
 	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic, NeedModel}, job.WaitReason) {
 		return domain.Job{}, domain.ErrJobState
 	}
-	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
+	if err := s.db.Update(ctx, func(tx *db.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
 		return domain.Job{}, err
 	}
 	s.wakeJobs()
@@ -557,7 +558,7 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (domain.Job, er
 	if !failedPlanning && !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, NeedPlanError, WaitVNAS}, job.WaitReason) {
 		return domain.Job{}, domain.ErrJobState
 	}
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		if failedPlanning {
 			if err := s.reopenable(ctx, tx, job.ProjectID, jobID); err != nil {
 				return err
@@ -580,7 +581,7 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (domain.Job, er
 // latest, no other job of the project runs (a project has one at a time),
 // and the song it was started with is still kept, which ending it may have
 // let go (releaseSong) when the project has another since.
-func (s *Store) reopenable(ctx context.Context, tx *sql.Tx, projectID, jobID string) error {
+func (s *Store) reopenable(ctx context.Context, tx *db.Tx, projectID, jobID string) error {
 	var latest string
 	if err := tx.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).
 		Scan(&latest); err != nil {
