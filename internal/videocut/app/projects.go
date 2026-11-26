@@ -521,26 +521,26 @@ func (s *Store) lookup(ctx context.Context, grantID string, ids []string) (map[s
 // progress keeps the settings it started with.
 func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, change domain.ProjectChange) (domain.ProjectDetail, error) {
 	var fields db.ProjectChange
-	given := 0
 	if change.Name != nil {
 		name := strings.TrimSpace(*change.Name)
 		if name == "" || !validText(name, MaxNameRunes) {
 			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
-		fields.Name, given = &name, given+1
+		fields.Name = &name
 	}
 	if change.Ask != nil {
 		if !validText(*change.Ask, MaxAskRunes) {
 			return domain.ProjectDetail{}, domain.ErrInvalid
 		}
 		ask := strings.TrimSpace(*change.Ask)
-		fields.Ask, given = &ask, given+1
+		fields.Ask = &ask
 	}
 	if change.Chronological != nil {
 		chronological := *change.Chronological
-		fields.Chronological, given = &chronological, given+1
+		fields.Chronological = &chronological
 	}
-	if given == 0 && change.SongStart == nil {
+	none := fields == db.ProjectChange{}
+	if none && change.SongStart == nil {
 		return domain.ProjectDetail{}, domain.ErrInvalid
 	}
 	if change.SongStart != nil {
@@ -549,7 +549,7 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		if _, err := s.SongStart(ctx, owner, projectID, *change.SongStart); err != nil {
 			return domain.ProjectDetail{}, err
 		}
-		if given == 0 {
+		if none {
 			return s.Project(ctx, owner, projectID)
 		}
 	}
