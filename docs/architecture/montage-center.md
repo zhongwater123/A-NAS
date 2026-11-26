@@ -442,6 +442,7 @@ montage/
 **样本**：第八版的结果文件来自真人素材，不进公开的仓库。
 - 位置：开发机 C（macOS，见[开发环境](../development/LOCAL_ENVIRONMENT.md)）的 `~/A-NAS-datasets/`：原片在 `videos/`，窗口向量在 `cache/`，卡片与描述在 `剪辑对比/卡片`，规划与镜头表在 `剪辑对比/规划与成片`。
 - 后两个目录 2026-11-23 之前叫 `第五版` 和 `第四版/剪法24（2026-11-08）`。原型的 [`mac-dev.toml`](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/profiles/mac-dev.toml) 仍写旧名，开发机 C 上的旧名是指向新目录的符号链接，删掉它们原型就找不到样本。卡片与镜头表里写着的关键帧绝对路径用的也是旧名，同样靠这两个符号链接解析；黄金比对不比较这些路径。2026-11-23 曾把 22 个文件里的路径随目录改成新名，2026-11-24 已换回原文件，内容与 M6 时逐字节相同，输入的 SHA-256 见 [#584](https://github.com/zhongwater123/A-NAS/issues/584)。
+- 成片基准 `cut-<组>-recut-1.json`：`ch` 一直是第六版的结果，与第八版逐镜相同。`pj`、`ne` 原来也是第六版的，第八版的填槽在 pj 的 1 个、ne 的 4 个镜头上选得不同，比对一直失败；2026-11-26 按用户决定，用第八版原型（`19f2d6db`，`cut --free --no-render`，配乐只读已有结果）重新填槽、覆盖这两个文件，原型同时把当年没量过的 5 个遮挡区间补进 `held-pj.json`、`held-ne.json`。第六版的原文件备份在 `~/A-NAS-datasets/archive/2026-11-26-第六版pj与ne成片基准/`；新旧 SHA-256 与做法见 [#675](https://github.com/zhongwater123/A-NAS/pull/675)。
 - 组名见原型的 [`cases.toml`](https://github.com/zhongwater123/A-NAS/blob/19f2d6db/ai/montage_v8/profiles/cases.toml)：`pj`（品杰，新西兰）、`ne`（新西兰）、`ch`（川西）。
 - 黄金比对的测试从环境变量给出的目录读样本，没有样本时跳过，所以证据层是“开发机”。M6 的 PR 列出所用各文件的 SHA-256；首版闭环所用的 11 段视频清单与摘要记在 M10 的 PR 里。
 
