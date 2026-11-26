@@ -49,11 +49,12 @@
 6. **NAS（root）：只在这台设备上打开剪辑中心**。
    ```bash
    install -d -m 0755 /etc/systemd/system/anas-api.service.d
-   printf '[Service]\nEnvironment=ANAS_VIDEOCUT_ENABLED=1\n' > /etc/systemd/system/anas-api.service.d/montage-demo.conf
+   printf '[Service]\nEnvironment=ANAS_VIDEOCUT_ENABLED=1\n' > /etc/systemd/system/anas-api.service.d/videocut-demo.conf
    systemctl daemon-reload
    systemctl restart anas-api
    ```
    - 完成标准：以成员登录，桌面上有“剪辑中心”。
+   - 这台设备装过改名前（#669 之前）的版本时，先做下面“从改名前的版本升级”的第 1 步，再接着往下。
 7. **准备演示素材**：
    - 演示成员的“音乐”文件夹里放好《Symphony》；
    - 本机有品杰一组的 11 段视频，用来在剪辑中心里上传；
@@ -86,6 +87,111 @@
      journalctl -u anas-videocut --since today | grep -E 'planning (round claimed|step taken)'
      ```
 
+## 从改名前的版本升级
+
+#669 把剪辑中心的运行时名字从 montage 改成了 videocut（[规格 #639](https://github.com/zhongwater123/A-NAS/issues/639) 的“运行时改名”“不写升级迁移”）。新版不迁移旧数据：服务账号换成 `a-nas-videocut`（UID 31005），数据目录换成数据卷上的 `videocut/`，剪辑中心从空开始；旧的 `montage/` 目录、账号 `a-nas-montage`（UID 31003）留在设备上，新版不读、不碰。装过旧版的只有实验 NAS，上面是可丢弃的测试数据（2026-11-26 定）。
+
+升级本身按上面第 1–5 步做；第 5 步装配乐分析时按[启用配乐分析](enable-videocut-music.md)第 4 步，旧包 `a-nas-montage-music` 由 apt 自动卸掉。升级完成后以 root 依次做：
+
+1. **换演示开关**。旧的 drop-in 设的是 `ANAS_MONTAGE_ENABLED`，新版不认，升级后桌面上的剪辑中心会消失：
+
+   ```bash
+   cat /etc/systemd/system/anas-api.service.d/montage-demo.conf
+   rm /etc/systemd/system/anas-api.service.d/montage-demo.conf
+   printf '[Service]\nEnvironment=ANAS_VIDEOCUT_ENABLED=1\n' > /etc/systemd/system/anas-api.service.d/videocut-demo.conf
+   systemctl daemon-reload
+   systemctl restart anas-api
+   systemctl show -p Environment anas-api | tr ' ' '\n' | grep VIDEOCUT
+   ```
+
+   - 预期：第一条显示的正是 `Environment=ANAS_MONTAGE_ENABLED=1`（不是时先停下，看清这个文件还设了什么）；最后一条输出 `ANAS_VIDEOCUT_ENABLED=1`。
+   - 完成标准：以成员登录，桌面上有“剪辑中心”，项目列表为空。
+   - 回滚：删掉 `videocut-demo.conf`、写回原来的 `montage-demo.conf`，`daemon-reload` 后重启 `anas-api`；只在退回改名前的版本时才需要。
+2. **核对相册里的旧授权**。旧项目在相册里建的素材授权（相册库的 `montage_grants`）不随剪辑数据消失。新版第一次连上相册时对账：相册有、剪辑中心没有的授权都撤销（`internal/videocut/app/projects.go` 的 `reconcile`），撤销后授权放开素材，分析结果一周后由相册清掉（`PruneMontageAnalysis`），所以旧授权既不挡成员删照片，也不长期占空间。核对撤销确实做了：
+
+   ```bash
+   journalctl -u anas-videocut --since today -o cat | grep -c 'revoking a photo grant no project holds'
+   cat > /tmp/photo-grants.py <<'PY'
+   import json, socket, struct, sys
+   request = {"op": "list"} if len(sys.argv) == 1 else {"op": "revoke", "grantId": sys.argv[1]}
+   conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+   conn.connect("/run/a-nas-photos-grants/grants.sock")
+   body = json.dumps(request).encode()
+   conn.sendall(struct.pack(">I", len(body)) + body)
+   length = struct.unpack(">I", conn.recv(4))[0]
+   answer = b""
+   while len(answer) < length:
+       answer += conn.recv(length - len(answer))
+   print(json.loads(answer))
+   PY
+   setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups python3 /tmp/photo-grants.py
+   ```
+
+   - 相册的授权套接字只回答剪辑服务的账号（UID 31005），所以要以 `a-nas-videocut` 的身份连；以别的身份连会被拒绝。
+   - 预期：第一条的数字等于旧项目的个数（相册当时不可用时为 0，剪辑服务每分钟维护一次，会再对账）；`list` 回答 `"ok": True`，`grants` 里只有升级后新建项目的授权（升级后还没建项目时为空）。
+   - 仍有旧授权时（`projectId` 不是新版里的任何项目）：等几分钟再看一次；还在的话按 ID 逐条撤销，撤销可以重复，不影响其他授权：
+
+     ```bash
+     setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups python3 /tmp/photo-grants.py <授权 ID>
+     ```
+
+   - 完成标准：`list` 里没有旧项目的授权。撤销后不能恢复，但它只放开相册对这些素材的引用，不删素材，也不动已存进相册的成片。做完 `rm /tmp/photo-grants.py`。
+3. **（演示需要时）放回主页背景片**。背景片原来在 `/srv/a-nas/data/montage/hero/`，新版只看 `videocut/hero/`：按第 7 步，把 `/srv/a-nas/data/montage/hero/hero.mp4` 与 `hero.jpg` 用 `install` 放进 `videocut/hero/`。
+
+### 清理旧东西（可选）
+
+旧的账号、目录与缓存不影响运行，留着也可以。确定不再退回改名前的版本后再删：退回旧版时，旧版要用的正是 `montage/` 目录与 `a-nas-montage` 账号。下面每一项都是删除，以 root 做。
+
+1. **数据卷上的旧目录 `/srv/a-nas/data/montage/`**（真实磁盘写操作）：
+   - **目标识别**：
+
+     ```bash
+     findmnt -no SOURCE,FSTYPE,OPTIONS /srv/a-nas/data
+     btrfs subvolume show /srv/a-nas/data/montage
+     stat -c '%n %u %a' /srv/a-nas/data/montage /srv/a-nas/data/videocut
+     ls -la /srv/a-nas/data/montage
+     du -sh /srv/a-nas/data/montage
+     ```
+
+     预期：数据卷是这台设备的数据盘（btrfs，可写）；`montage` 是这个卷上的子卷（Host Agent 当年建的），属主 UID 31003、权限 700，里面只有 `montage.db`（及 `-wal`、`-shm`）、`songs/`、`hero/`、`tmp/`；`videocut` 属主 UID 31005。和预期不符时停下，不要删。
+   - **确认**：`systemctl is-active anas-videocut` 是 `active`，桌面上的剪辑中心能用；`pgrep -u 31003` 没有输出（没有进程还在用旧账号）。主页背景片要保留的话，第 3 步已经放进 `videocut/hero/`。
+   - **先改名，观察后再删**：
+
+     ```bash
+     mv /srv/a-nas/data/montage /srv/a-nas/data/montage.removed-$(date +%Y%m%d)
+     ```
+
+     用一两天剪辑中心与相册都正常，再删这个子卷：
+
+     ```bash
+     btrfs subvolume delete /srv/a-nas/data/montage.removed-<日期>
+     ```
+
+   - **回滚**：改名之后、删除之前，`mv` 回 `/srv/a-nas/data/montage` 即可；删除之后不能恢复（这些是可丢弃的测试数据，2026-11-26 定）。
+   - **验证**：`ls /srv/a-nas/data` 里没有 `montage` 与 `montage.removed-*`；`stat -c '%U %a' /srv/a-nas/data/videocut` 仍是 `a-nas-videocut 700`；`a-nas-check` 没有 `FAIL`。
+2. **旧账号 `a-nas-montage`**：在第 1 项之后删，免得留下属主不明的文件。
+
+   ```bash
+   getent passwd a-nas-montage
+   find /srv/a-nas/data /var /etc -xdev -uid 31003 2>/dev/null | head
+   userdel a-nas-montage
+   getent group a-nas-montage && groupdel a-nas-montage
+   ```
+
+   - 预期：第一条是 `a-nas-montage:x:31003:31003:A-NAS montage service:/nonexistent:/usr/sbin/nologin`；第二条没有输出（有输出时先看清是什么，不要删账号）。
+   - 回滚：只在退回改名前的版本时需要；旧版 `a-nas` 的 sysusers 配置会用同一个 UID 31003 重新建出它。
+   - 验证：`getent passwd a-nas-montage`、`getent group a-nas-montage` 都没有输出，`id -u a-nas-videocut` 是 31005。
+3. **系统盘上的旧状态**：
+
+   ```bash
+   ls -la /var/lib/anas-montage-planner /var/cache/a-nas-montage-music 2>&1
+   rm -rf /var/lib/anas-montage-planner /var/cache/a-nas-montage-music
+   ```
+
+   - `/var/lib/anas-montage-planner/state.json` 是旧规划发起方给每位成员计的轮数；新的在 `/var/lib/anas-videocut-planner/`。`/var/cache/a-nas-montage-music` 是旧配乐 Worker 的编译缓存（[启用配乐分析](enable-videocut-music.md)第 4 步也删它）。
+   - 运行目录 `/run/a-nas-montage*`、`/run/anas-assistant-montage` 在内存里，重启后自然消失，不用删。
+   - 验证：两个目录都不在了，`systemctl is-active anas-videocut-planner` 在有模型密钥时仍是 `active`。
+
 ## 验证
 
 - **任务走完**：剪辑中心项目页不再显示进度，“成片”里并排有方案一（第 1 版）与方案二（第 2 版），相册的个人图库里有 v1 与 v2 两个文件。
@@ -99,7 +205,7 @@
 
 - **关掉剪辑中心**：删掉 drop-in 并重启产品服务。
   ```bash
-  rm /etc/systemd/system/anas-api.service.d/montage-demo.conf
+  rm /etc/systemd/system/anas-api.service.d/videocut-demo.conf
   systemctl daemon-reload && systemctl restart anas-api
   ```
   项目与成片都留着。成片在相册里，与剪辑中心无关。

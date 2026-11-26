@@ -17,7 +17,7 @@
   - 虚拟伙伴的动画池 `36492963e4112f55`（A-NAS-assets 固定副本，#445）。
   - Caddy 2.11.9 来自 A-NAS 软件源，另装了 `wireguard-tools`；互联网入口关闭（`/etc/a-nas/internet.env` 不存在），第一版暂缓（[决定](../decisions/2026-11-09-home-network-first.md)）。
 - AI 助手 V1：2026-11-19 由 `a-nas` 接管试用（[手册](../runbooks/enable-ai-assistant.md#从试用接管)），成员都能用。
-- 剪辑中心由 drop-in `montage-demo.conf` 只在本机打开（[手册](../runbooks/demo-videocut-center.md)）；配乐分析[手动装](../runbooks/enable-videocut-music.md)，不随 release 发布。
+- 剪辑中心由 drop-in `montage-demo.conf` 只在本机打开（[手册](../runbooks/demo-videocut-center.md)；部署 #669 改名后的版本时按手册换成 `videocut-demo.conf`）；配乐分析[手动装](../runbooks/enable-videocut-music.md)，不随 release 发布。
 - 照片打分模块以脚本装在本机（11-13 安装，11-17 更新，[手册](../runbooks/install-and-remove-photo-scoring.md)）。
 - 数据卷是两块 ST500DM002 组成的 Btrfs raid1；一块盘坏了不再卸载整个数据卷（#441，2026-11-10 重启后核对，[调查](../investigations/2026-11-06-mirror-missing-a-disk.md)）。
 - 本地控制台以专用账号 `a-nas-kiosk` 运行；`anas-dev` 名下的旧 Chromium 配置文件可以按[迁移后的验证](../runbooks/operate-local-kiosk.md#迁移后的验证)删除。屏保由 GPU 解码；停止渲染下层桌面的 [#315](https://github.com/zhongwater123/A-NAS/pull/315) 已部署，CPU 占用待复测（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。

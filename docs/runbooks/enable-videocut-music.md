@@ -1,7 +1,7 @@
 # 在实验 NAS 上启用剪辑中心的配乐分析
 
 状态：draft（见“已验证与未验证”；实验 NAS 上的安装还没做）
-更新时间：2026-11-19
+更新时间：2026-11-26（#669 改名：包名 `a-nas-videocut-music`，原来叫 `a-nas-montage-music`）
 
 ## 目的
 
@@ -45,6 +45,7 @@
 
    - 预期：输出 `build/videocut-music-runtime.json`，`id` 与 `scripts/lib/content.sh` 的 `videocut_music_runtime_id` 相同。NATTEN 单文件编译时约占 2 GiB，`ANAS_NATTEN_JOBS` 默认 2。
    - 完成标准：`build/videocut-music-runtime/<id>.tar.gz` 存在。
+   - 改名前（#669 之前）编过的 `montage-music-runtimes` 运行环境不能沿用：虚拟环境里写死了旧的安装路径 `/opt/a-nas/montage-music-runtimes/<id>`，`id` 也变了，要按这一步重编。
 
 2. **备好权重**。从 Hugging Face 的固定版本下载两份权重（地址与版本见 [`allin1-harmonix-all.json`](../../deploy/models/allin1-harmonix-all.json)、[`htdemucs.json`](../../deploy/models/htdemucs.json)），按内容库的布局放好：`CONTENT/models/<清单的 sha256>/<文件>`，`CONTENT/videocut-music-runtimes/<id>.tar.gz`。
    - 完成标准：下一步的构建不报 `missing or not as pinned`（它按清单逐个核对大小与 SHA-256）。
@@ -69,6 +70,16 @@
    ```
 
    - 完成标准：`systemctl is-active anas-videocut-music.socket` 是 `active`，`a-nas-check` 没有 `FAIL`。
+   - **装过改名前的包时**：`a-nas-videocut-music` 声明 `Conflicts`、`Replaces: a-nas-montage-music`，这条 `apt install` 会先卸掉 `a-nas-montage-music`（apt 列出 `REMOVED: a-nas-montage-music`，确认后继续）。旧的运行环境包是当时按文件名手动装的，不会随之卸掉，装好新包后以 root 删掉它和旧的缓存：
+
+     ```bash
+     dpkg-query -W -f '${Package} ${Status}\n' 'a-nas-montage-music*'
+     apt remove $(dpkg-query -W -f '${Package}\n' 'a-nas-montage-music-runtime-*')
+     rm -rf /var/cache/a-nas-montage-music
+     ```
+
+     - 预期：第一条只列出 `a-nas-montage-music-runtime-<旧 id>`（`a-nas-montage-music` 已是 `deinstall` 或不在列表里）；第二条只删这一个包，不涉及 `a-nas-model-*`（权重包按内容命名，新旧包共用）；缓存在系统盘上，只是 matplotlib 与 numba 的编译缓存。
+     - 完成标准：`dpkg-query -W 'a-nas-montage-music*'` 不再列出已安装的包，`/opt/a-nas/montage-music-runtimes` 不存在，`systemctl is-active anas-videocut-music.socket` 仍是 `active`。
 
 5. **实测**。测试账号的“音乐”文件夹里放一首 4 分钟左右的测试歌（开发机 C 的 `~/Music/QQ音乐`，只放在实验 NAS 上），在剪辑中心建项目、选这首歌。以 root 记下用时与峰值内存：
 
