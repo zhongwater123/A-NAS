@@ -329,11 +329,9 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 		return err
 	}
 	run.grantID = grantID
-	kept, err := s.db.JobAssets(ctx, run.id)
-	if err != nil {
+	if run.assets, err = s.db.JobAssets(ctx, run.id); err != nil {
 		return err
 	}
-	run.assets = kept
 	if len(run.assets) != len(assets) {
 		return fmt.Errorf("job %s lists its videos twice", run.id)
 	}
@@ -859,10 +857,6 @@ func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, cata
 	return json.RawMessage(answer), err == nil, err
 }
 
-func (s *Store) accept(ctx context.Context, jobID string, plan int, step, catalogKey string, answer json.RawMessage) error {
-	return s.db.AcceptPlan(ctx, jobID, plan, step, catalogKey, string(answer), s.now())
-}
-
 func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(context.Context, domain.PlanInput) (json.RawMessage, error)) (any, error) {
 	if answer, ok, err := s.accepted(ctx, run.id, run.plan, step, run.keys["catalog"]); err != nil || ok {
 		return answer, err
@@ -885,7 +879,7 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	if !json.Valid(answer) {
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: errors.New("the plan is not JSON")}
 	}
-	return answer, s.accept(ctx, run.id, run.plan, step, run.keys["catalog"], answer)
+	return answer, s.db.AcceptPlan(ctx, run.id, run.plan, step, run.keys["catalog"], string(answer), s.now())
 }
 
 func (s *Store) pick(ctx context.Context, run *jobRun) (any, error) {

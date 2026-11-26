@@ -177,9 +177,8 @@ func projectIdle(ctx context.Context, tx *db.Tx, projectID string) error {
 	return nil
 }
 
-// queueJob writes job, due now, with settings, and returns its ID: an
-// edit names the version it came from, its draft and the draft's revision;
-// a recut the version. job's ID and Settings are queueJob's to fill.
+// queueJob writes job, due now, with settings, and returns its ID; job's ID
+// and Settings are queueJob's to fill.
 func (s *Store) queueJob(ctx context.Context, tx *db.Tx, settings domain.JobSettings, job db.NewJob) (string, error) {
 	encoded, err := json.Marshal(settings)
 	if err != nil {

@@ -81,7 +81,6 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 	if token == "" || len(token) > 64 {
 		return roundCall{}, nil, domain.ErrNotFound
 	}
-	call := roundCall{jobID: jobID}
 	r, err := q.RoundStanding(ctx, owner, jobID, token)
 	if errors.Is(err, sql.ErrNoRows) {
 		return roundCall{}, nil, domain.ErrNotFound
@@ -89,13 +88,12 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 	if err != nil {
 		return roundCall{}, nil, err
 	}
-	call.roundID, call.pickKey, call.plans = r.ID, r.InputKey, r.Plans
-	state, epoch, current, cancelled, pickKey := r.State, r.Epoch, r.JobEpoch, r.Cancelled, r.PickKey
+	call := roundCall{jobID: jobID, roundID: r.ID, pickKey: r.InputKey, plans: r.Plans}
 	status := ""
 	switch {
-	case cancelled:
+	case r.Cancelled:
 		status = ToolCancelled
-	case state != RoundClaimed && state != RoundStarted, epoch != current, !pickKey.Valid || pickKey.String != call.pickKey:
+	case r.State != RoundClaimed && r.State != RoundStarted, r.Epoch != r.JobEpoch, !r.PickKey.Valid || r.PickKey.String != call.pickKey:
 		status = ToolRoundOver
 	}
 	if status != "" {

@@ -580,21 +580,20 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 	if err != nil {
 		return nil, keptDraft{}, err
 	}
-	versionID, stateJSON, updated := row.VersionID, row.Shots, row.Updated
 	draft.revision = row.Revision
 	if src == nil {
-		if src, err = s.versionSource(ctx, owner, versionID); err != nil {
+		if src, err = s.versionSource(ctx, owner, row.VersionID); err != nil {
 			return nil, keptDraft{}, err
 		}
 	}
 	var ok bool
-	if draft.state, ok = src.stateOf(stateJSON); !ok {
+	if draft.state, ok = src.stateOf(row.Shots); !ok {
 		return nil, keptDraft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
 	}
 	if !src.holds(draft.state) {
 		return nil, keptDraft{}, domain.ErrNotEditable
 	}
-	draft.updated, _ = time.Parse(time.RFC3339Nano, updated)
+	draft.updated, _ = time.Parse(time.RFC3339Nano, row.Updated)
 	return src, draft, nil
 }
 
