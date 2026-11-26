@@ -2,7 +2,7 @@ import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "luci
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
-import { lastPointerWasTouch } from "../lib/touch";
+import { rowGestures } from "../ui/rowGestures";
 import { FileArtwork } from "./FileIcon";
 import styles from "./files.module.css";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
@@ -25,7 +25,6 @@ export function FileList({
   view,
   items,
   selectedIDs,
-  picking,
   order,
   loading,
   hasSpace,
@@ -42,8 +41,6 @@ export function FileList({
   view: FileView;
   items: FileBrowserItem[];
   selectedIDs: string[];
-  // A long press on a touch screen started choosing several items.
-  picking: boolean;
   order: FileOrder;
   loading: boolean;
   hasSpace: boolean;
@@ -104,22 +101,19 @@ export function FileList({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
   };
-  const itemProps = (item: FileBrowserItem) => ({
-    "data-file-item": item.id,
-    ...dragProps(item),
-    onClick: (event: ReactMouseEvent) => {
-      // A tap opens, as a double click does; while choosing several items
-      // (after a long press), taps add to or take from the selection.
-      if (lastPointerWasTouch() && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
-        if (picking) onSelect(item, { ctrlKey: true, metaKey: false, shiftKey: false });
-        else onOpen(item);
-        return;
-      }
-      onSelect(item, event);
-    },
-    onDoubleClick: () => onOpen(item),
-    onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
-  });
+  const itemProps = (item: FileBrowserItem) => {
+    const drag = dragProps(item);
+    return {
+      "data-file-item": item.id,
+      ...drag,
+      ...rowGestures({
+        open: () => onOpen(item),
+        select: (event: ReactMouseEvent) => onSelect(item, event),
+        draggable: drag.draggable,
+      }),
+      onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
+    };
+  };
   const pinBadge = (item: FileBrowserItem) =>
     isPinned(item, order) && <Pin className={styles.filePinBadge} aria-label="已置顶" />;
 

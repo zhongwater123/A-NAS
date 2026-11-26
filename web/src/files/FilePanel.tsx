@@ -300,6 +300,15 @@ export function FilePanel({
     else if (item.entry?.kind === "file") download([item.entry]);
     else if (item.resource) openResource(item.resource);
   };
+  const toggleItem = (item: FileBrowserItem) => {
+    setSelectedItemIDs((current) =>
+      current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
+    );
+    setSelectedItemID(item.id);
+  };
+  // A tap opens, as a double click does; while choosing several items after
+  // a long press, it adds to or takes from the selection instead.
+  const tapItem = (item: FileBrowserItem) => (picking ? toggleItem(item) : openItem(item));
   const selectItem = (item: FileBrowserItem, event?: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
     if (event?.shiftKey && selectedItemID) {
       const anchor = visibleItems.findIndex((candidate) => candidate.id === selectedItemID);
@@ -314,10 +323,7 @@ export function FilePanel({
       }
     }
     if (event?.ctrlKey || event?.metaKey) {
-      setSelectedItemIDs((current) =>
-        current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
-      );
-      setSelectedItemID(item.id);
+      toggleItem(item);
       return;
     }
     setSelectedItemIDs([item.id]);
@@ -605,7 +611,6 @@ export function FilePanel({
           view={view}
           items={visibleItems}
           selectedIDs={selectedItemIDs}
-          picking={picking}
           order={order}
           loading={loading}
           hasSpace={Boolean(spaceID)}
@@ -615,7 +620,7 @@ export function FilePanel({
           onSort={changeSort}
           onSelect={selectItem}
           onBoxSelect={selectBox}
-          onOpen={openItem}
+          onOpen={tapItem}
           onContextMenu={showContextMenu}
           onClearQuery={() => setQuery("")}
         />

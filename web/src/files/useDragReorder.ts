@@ -1,7 +1,6 @@
 import { DragEvent as ReactDragEvent, useRef, useState } from "react";
 
 import { carriesFiles } from "../lib/pickedFiles";
-import { touchScreen } from "../lib/touch";
 import { FileBrowserItem } from "./model";
 import { FileOrder, isPinned, reorderFiles } from "./useFileOrder";
 
@@ -24,10 +23,8 @@ export function useDragReorder({
 }) {
   const draggedItem = useRef<{ id: string; scope: string } | undefined>(undefined);
   const [dropTarget, setDropTarget] = useState("");
-  // On a touch screen a long press opens the item's menu instead.
-  const draggable = enabled && !touchScreen();
   return (item: FileBrowserItem) => ({
-    draggable,
+    draggable: enabled,
     onDragStart: (event: ReactDragEvent<HTMLElement>) => {
       if (!enabled) {
         event.preventDefault();

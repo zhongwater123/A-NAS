@@ -13,7 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
-import { lastPointerWasTouch } from "../lib/touch";
+import { rowGestures } from "../ui/rowGestures";
 import { Dialog, EmptyState, EntryIcon, Notice, Spinner } from "../ui/workspace";
 import workspaceStyles from "../ui/workspace.module.css";
 import {
@@ -503,9 +503,7 @@ function SnapshotBrowser({ snapshot, manage, onBack }: { snapshot: Snapshot; man
               aria-selected={selected === entry.id}
               tabIndex={0}
               className={`${styles.bkEntry}${selected === entry.id ? ` ${styles.selected}` : ""}`}
-              // A tap opens, as a double click does.
-              onClick={() => (lastPointerWasTouch() ? open(entry) : setSelected(entry.id))}
-              onDoubleClick={() => open(entry)}
+              {...rowGestures({ open: () => open(entry), select: () => setSelected(entry.id) })}
               onKeyDown={(event) => {
                 if (event.key === "Enter") open(entry);
               }}

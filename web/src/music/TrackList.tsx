@@ -13,7 +13,7 @@ import {
   useState,
 } from "react";
 
-import { lastPointerWasTouch, touchScreen } from "../lib/touch";
+import { rowGestures } from "../ui/rowGestures";
 import type { Track } from "./api";
 import { Cover, carriesTracks, dragType, Equalizer, readDrag, useMusic } from "./context";
 import { artistKey, artistLine, artistsOf, formatDuration, lossless, qualityOf, unknownAlbum } from "./library";
@@ -284,11 +284,11 @@ function TrackRow({
       aria-selected={selected}
       aria-rowindex={position + 1}
       style={{ transform: `translateY(${top}px)` }}
-      // On a touch screen a tap plays, as a double click does, and a long
-      // press opens the menu rather than starting a drag.
-      draggable={!touchScreen()}
-      onClick={(event) => (lastPointerWasTouch() ? onPlay(position) : onSelect(position, event))}
-      onDoubleClick={() => onPlay(position)}
+      {...rowGestures({
+        open: () => onPlay(position),
+        select: (event: MouseEvent) => onSelect(position, event),
+        draggable: true,
+      })}
       onContextMenu={(event) => onMenu(event, position)}
       onDragStart={(event) => onDragStart(event, position)}
       {...dropProps}
