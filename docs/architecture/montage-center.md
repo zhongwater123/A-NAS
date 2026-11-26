@@ -62,7 +62,7 @@
   剪辑中心窗口：① 上传视频（相册现有的上传队列）② 建项目、选歌、写要求、开始
      │
      ▼
-anas-api ──转发 /api/v1/montage──▶ anas-montage：项目、规划、时间线、任务
+anas-api ──转发 /api/v1/videocut──▶ anas-montage：项目、规划、时间线、任务
   │ “开始”前经文件代理               │ ⑤ 任务等规划时留下记号
   │ 登记规划授权                     ├──▶ 相册授权套接字：③ 登记授权 ④ 请求分析、读结果
   ▼                                  │                    ⑧ 取原片描述符 ⑨ 存回成片
@@ -182,10 +182,10 @@ internal/videocutcompute/   计算工人的客户端与消息类型
     - `UMask=0077`、`RuntimeDirectoryMode=0750`；
     - `ReadWritePaths=/srv/a-nas/data`。实际能写哪里由子卷的属主与 ACL 决定，和家庭中心一样。
   - 资源：`MemoryMax=512M`、`CPUWeight=20`、`IOWeight=20`。重计算都在 Worker 和相册里，服务本身只管状态。
-- **入口**：anas-api 用 `mount("/api/v1/montage", apiroute.Session, ...)` 把请求转到 `/run/a-nas-montage/montage.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-montage-sessions/montage.sock`，确认来人是谁。
-- **开关**：环境变量 `ANAS_MONTAGE_ENABLED`，M10 之前默认关闭。关闭时产品服务不挂载 `/api/v1/montage`，桌面不显示入口。网页入口只是外观，隐藏它挡不住接口，所以开关放在服务端；先例是 `ANAS_PHOTO_ASSISTANT_LOOKUP`。
+- **入口**：anas-api 用 `mount("/api/v1/videocut", apiroute.Session, ...)` 把请求转到 `/run/a-nas-montage/montage.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-montage-sessions/montage.sock`，确认来人是谁。
+- **开关**：环境变量 `ANAS_MONTAGE_ENABLED`，M10 之前默认关闭。关闭时产品服务不挂载 `/api/v1/videocut`，桌面不显示入口。网页入口只是外观，隐藏它挡不住接口，所以开关放在服务端；先例是 `ANAS_PHOTO_ASSISTANT_LOOKUP`。
 - **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-montage`，每 15 分钟修复一次漂移。
-  - 数据卷离线或只读时，整个服务回答 503 `montage_unavailable`，不在系统盘建替代目录。
+  - 数据卷离线或只读时，整个服务回答 503 `videocut_unavailable`，不在系统盘建替代目录。
   - 容量不足只拒绝写入，不让整个服务不可用（[不变量 12](OVERVIEW.md#不变量)）：渲染写 `tmp/` 前用 `capacity.Admits` 按预计大小检查，存回时相册照常检查；不够时任务进入 `needs_input(storage_full)`，腾出空间后重试。已有项目与成片照常可看。
 - **剪辑计算 Worker**：`anas-montage-compute.socket` 加 `anas-montage-compute.service`。
   - 单个常驻实例，逐个处理连接，免得每个连接都重新导入 NumPy。
@@ -601,7 +601,7 @@ montage/
     | 设备没有开启 VNAS、这个账号没有 VNAS | 转发，带 `X-A-NAS-Assistant: off` | 任务照常建，页面写明“VNAS 没有开启”；开启后点“重新规划” |
     | `unavailable`，或连不上文件代理 | 回答 503 `assistant_unavailable`，不转发 | 页面提示稍后再试 |
 
-  - 转发代理只去掉 Cookie、CSRF 与 Authorization 头，别的头照样转发（`internal/serviceproxy`）。所以 anas-api 在 `/api/v1/montage` 的挂载层对所有请求都先去掉 `X-A-NAS-Assistant`，只在上面几项请求里自己设置；剪辑中心也只在这几项请求上读它。
+  - 转发代理只去掉 Cookie、CSRF 与 Authorization 头，别的头照样转发（`internal/serviceproxy`）。所以 anas-api 在 `/api/v1/videocut` 的挂载层对所有请求都先去掉 `X-A-NAS-Assistant`，只在上面几项请求里自己设置；剪辑中心也只在这几项请求上读它。
 - **按成员，不按任务**：同一成员的几个任务共用这 5 轮。一个任务通常只用 1 轮（两个方案在同一次对话里交完）。
 - **计数与使用**：只有 root 的规划发起方读授权文件、按签发时间计数；剪辑中心读不到也改不了它。签发超过 7 天或领取满 5 轮就不再发起。
 - **被攻破时**：
@@ -724,7 +724,7 @@ montage/
 
 ## 接口
 
-新增 `api/paths/videocut.yaml`，挂在 `/api/v1/montage`。约定：
+新增 `api/paths/videocut.yaml`，挂在 `/api/v1/videocut`。约定：
 - 错误统一用 `ProductError`；
 - 创建类请求在请求体里带 `requestKey`，按成员限定唯一，沿用家庭中心的做法；
 - 长任务用“202 加轮询”，和应用中心安装、系统更新一致；

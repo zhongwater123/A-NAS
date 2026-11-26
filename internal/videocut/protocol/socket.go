@@ -106,7 +106,7 @@ func authenticatePeer(resolver AccountResolver, uidOf func(string) (int, error),
 			return
 		case err != nil:
 			logger.ErrorContext(r.Context(), "account lookup failed", "error", err)
-			httpjson.WriteError(w, http.StatusServiceUnavailable, "montage_unavailable", "the montage center is not available")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "videocut_unavailable", "the montage center is not available")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: account.UserID, Username: account.Username})))

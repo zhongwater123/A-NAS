@@ -50,7 +50,7 @@ func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			seen = nil
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/montage/jobs/job:1/replan", nil)
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/videocut/jobs/job:1/replan", nil)
 			request = request.WithContext(accounts.WithSessionToken(request.Context(), "session-token"))
 			// The browser's own header is never believed.
 			request.Header.Set(protocol.AssistantHeader, "on")

@@ -90,7 +90,7 @@
   systemd-analyze verify --man=no /usr/lib/systemd/system/anas-montage-music.socket /usr/lib/systemd/system/anas-montage-music.service
   ```
 
-- 剪辑服务的接口：`GET /api/v1/montage/projects/<id>/song` 的 `state` 是 `ready`，`selection` 有选段与小节槽。
+- 剪辑服务的接口：`GET /api/v1/videocut/projects/<id>/song` 的 `state` 是 `ready`，`selection` 有选段与小节槽。
 - Worker 没有网络、看不到数据卷：`systemctl show anas-montage-music -p PrivateNetwork -p InaccessiblePaths` 为 `yes` 与 `-/srv/a-nas`。
 - 运行环境里没有 madmom 的模型文件：
 

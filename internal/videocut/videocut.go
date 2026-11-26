@@ -2,7 +2,7 @@
 
 // Package videocut runs the montage center as its own service
 // (anas-montage.service, ADR 0038): the Product Service forwards
-// /api/v1/montage with the browser's session token, and the service confirms
+// /api/v1/videocut with the browser's session token, and the service confirms
 // the session with the Host Agent itself (storeservice).
 package videocut
 
@@ -88,7 +88,7 @@ func RequireOwnedStore(root string) error {
 }
 
 // Proxy forwards the montage API to the service on socketPath; while the
-// service cannot be reached, requests answer montage_unavailable.
+// service cannot be reached, requests answer videocut_unavailable.
 func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 	return serviceproxy.New(socketPath, serviceproxy.Unavailable{
 		Code: protocol.Unavailable, Message: "the montage center is not available",
@@ -97,7 +97,7 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 
 // Run serves the montage API on SocketPath until ctx ends. While the store
 // cannot be opened, as when the data volume is offline or read-only,
-// requests answer montage_unavailable. Every store it opens is reconciled
+// requests answer videocut_unavailable. Every store it opens is reconciled
 // with the photo library's grants and retries the revocations it missed
 // (app.Store.Upkeep), and analyses the songs waiting in it
 // (app.Store.StartWorkers).

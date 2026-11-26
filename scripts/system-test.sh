@@ -1067,23 +1067,23 @@ check "nor in the Host Agent's log in Settings" \
 
 # --- Montage center (ADR 0038): its own identity and store, and off until
 # ANAS_MONTAGE_ENABLED turns it on: then the Product Service forwards
-# /api/v1/montage and the montage service confirms the session itself.
+# /api/v1/videocut and the montage service confirms the session itself.
 check "montage store belongs to the montage service alone" \
   test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-montage"
 check "Product Service account cannot list the montage store" denied a-nas ls "$data/montage"
 check "the montage socket is the service's, for the Product Service's group" \
   test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-montage:a-nas-montage:750 a-nas-montage"
 check "the montage center is not served while its switch is off" \
-  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage"):$(status_of -b /tmp/alice.jar "$api/api/v1/montage/projects")" = 404:404
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut"):$(status_of -b /tmp/alice.jar "$api/api/v1/videocut/projects")" = 404:404
 printf 'Environment=ANAS_MONTAGE_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
 systemctl daemon-reload
 systemctl restart anas-api
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "with its switch on the desktop is told the montage center is there" \
-  test "$(status_of -b /tmp/alice.jar "$api/api/v1/montage")" = 204
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut")" = 204
 check "a member lists her montage projects through the montage service" \
-  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -c .)" = '{"items":[]}'
-check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/montage/projects")" = 401
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -c .)" = '{"items":[]}'
+check "without a session the montage center answers 401" test "$(status_of "$api/api/v1/videocut/projects")" = 401
 cat > /usr/local/lib/anas-montage-probe.py <<'PY'
 import socket, sys
 leaks = []
@@ -1176,14 +1176,14 @@ scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-te
 systemctl stop anas-photos anas-shares anas-family anas-montage anas-workspace
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 systemctl start anas-montage
-montage_unavailable() {
+videocut_unavailable() {
   for _ in $(seq 1 50); do
-    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/montage/projects" | jq -r .error.code)" == montage_unavailable ]] && return 0
+    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -r .error.code)" == videocut_unavailable ]] && return 0
     sleep 0.2
   done
   return 1
 }
-check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
+check "on a read-only volume the montage center answers videocut_unavailable" videocut_unavailable
 systemctl stop anas-montage
 systemctl start anas-workspace
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -1221,7 +1221,7 @@ check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
 check "the montage center recovers on the writable volume" \
-  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/montage/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/videocut/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "the shared workspace recovers on the writable volume" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
@@ -1579,7 +1579,7 @@ ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25
 clip=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F file=@/tmp/clip.mp4 \
   "$api/api/v1/photos/libraries/$alice_library/uploads" | jq -r .id || true)
 project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-  -d "{\"requestKey\":\"system-test\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+  -d "{\"requestKey\":\"system-test\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
 check "a member makes a montage project of her video" test -n "$clip" -a -n "$project" -a "$project" != null
 # The grant socket lists the grants not revoked; a revoked one is gone.
 project_grant_listed() {
@@ -1589,9 +1589,9 @@ project_grant_listed() {
 }
 check "the photo library holds the project's grant" project_grant_listed
 check "another member's project is not found" \
-  test "$(status_of -b /tmp/owner.jar "$api/api/v1/montage/projects/$project")" = 404
+  test "$(status_of -b /tmp/owner.jar "$api/api/v1/videocut/projects/$project")" = 404
 check "deleting the project answers 204" \
-  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/montage/projects/$project")" = 204
+  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/videocut/projects/$project")" = 204
 check "the video stays in the photo library" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/assets/$clip")" = 200
 # The montage service revokes it right after answering the deletion.
@@ -2457,10 +2457,10 @@ track_of() { # JAR CSRF TITLE -> the track's ID once the library is scanned
 alice_track=$(track_of /tmp/alice.jar "$alice_csrf" "Song of alice" || true)
 owner_track=$(track_of /tmp/owner.jar "$owner_csrf" "Song of owner" || true)
 song_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-  -d "{\"requestKey\":\"system-test-song\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+  -d "{\"requestKey\":\"system-test-song\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
 put_song() { # JAR CSRF TRACK -> status
   status_of -X PUT -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d "{\"trackId\":\"$3\"}" \
-    "$api/api/v1/montage/projects/$song_project/song"
+    "$api/api/v1/videocut/projects/$song_project/song"
 }
 # A track that is not there answers 404 to anyone, so the refusal below says
 # something only once the owner has played this track by its ID himself.
@@ -2471,12 +2471,12 @@ check "a member copies her own song into the montage center" test "$(put_song /t
 check "the copy is the montage service's alone, named by its content" \
   bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-montage' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
 check "the song waits for allin1, which is not installed" \
-  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects/$song_project/song" | jq -r .state)" = analyzing
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$song_project/song" | jq -r .state)" = analyzing
 check "she listens to the copy with Range" \
-  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/montage/projects/$song_project/song/audio")" = 206
+  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/videocut/projects/$song_project/song/audio")" = 206
 check "the montage account cannot read her space" denied a-nas-montage ls "$data/spaces/private/alice"
 check "deleting the project removes the copy no project uses" \
-  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/montage/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
+  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/videocut/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
 
 # A probe in the FFmpeg worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'

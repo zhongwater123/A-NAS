@@ -70,7 +70,7 @@ func request(socket, token string) (int, string, error) {
 	client := http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}, Timeout: 5 * time.Second}
-	request, _ := http.NewRequest(http.MethodGet, "http://montage/api/v1/montage/projects", nil)
+	request, _ := http.NewRequest(http.MethodGet, "http://montage/api/v1/videocut/projects", nil)
 	if token != "" {
 		request.Header.Set(serviceproxy.SessionHeader, token)
 	}
@@ -140,7 +140,7 @@ func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 	// The data volume goes read-only: the service answers unavailable, and
 	// serves again once it is back.
 	usable.Store(false)
-	if body := waitFor(http.StatusServiceUnavailable); !strings.Contains(body, "montage_unavailable") {
+	if body := waitFor(http.StatusServiceUnavailable); !strings.Contains(body, "videocut_unavailable") {
 		t.Fatalf("unavailable store = %s", body)
 	}
 	usable.Store(true)

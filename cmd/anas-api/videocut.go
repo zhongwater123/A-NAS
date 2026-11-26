@@ -63,7 +63,7 @@ func planner(answers string) app.Planner {
 }
 
 // configuredVideoCut returns the montage API, nil while ANAS_MONTAGE_ENABLED
-// is off: then /api/v1/montage is not mounted and the desktop shows no
+// is off: then /api/v1/videocut is not mounted and the desktop shows no
 // entry. A NAS forwards it to the montage service; development serves it in
 // this process from a directory on the development volume, with the grants
 // of the photo library in this process, and keeps the store as the service

@@ -1,11 +1,11 @@
-/api/v1/montage:
+/api/v1/videocut:
   get:
     operationId: getVideoCut
     summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_MONTAGE_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
     responses:
       "204": { description: The montage center is on }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects:
+/api/v1/videocut/projects:
   get:
     operationId: listVideoCutProjects
     summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_MONTAGE_ENABLED is on; otherwise the path answers 404"
@@ -39,7 +39,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}:
+/api/v1/videocut/projects/{projectId}:
   get:
     operationId: getVideoCutProject
     summary: "One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found"
@@ -79,7 +79,7 @@
     responses:
       "204": { description: Deleted }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}/assets:
+/api/v1/videocut/projects/{projectId}/assets:
   post:
     operationId: addVideoCutProjectAssets
     summary: "Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew"
@@ -103,7 +103,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}/song:
+/api/v1/videocut/projects/{projectId}/song:
   put:
     operationId: putVideoCutSong
     summary: "Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again"
@@ -134,7 +134,7 @@
       "200": { description: The song, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutSong" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}/song/audio:
+/api/v1/videocut/projects/{projectId}/song/audio:
   get:
     operationId: getVideoCutSongAudio
     description: >-
@@ -153,7 +153,7 @@
       "416": { description: The range is outside the song. }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}/generate:
+/api/v1/videocut/projects/{projectId}/generate:
   post:
     operationId: generateVideoCutFilm
     summary: "Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing"
@@ -174,7 +174,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}:
+/api/v1/videocut/jobs/{jobId}:
   get:
     operationId: getVideoCutJob
     summary: "One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found"
@@ -182,7 +182,7 @@
     responses:
       "200": { description: The job, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutJob" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}/cancel:
+/api/v1/videocut/jobs/{jobId}/cancel:
   post:
     operationId: cancelVideoCutJob
     summary: "Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome"
@@ -191,7 +191,7 @@
       "200": { description: The job, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutJob" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}/drop-assets:
+/api/v1/videocut/jobs/{jobId}/drop-assets:
   post:
     operationId: dropVideoCutJobAssets
     summary: "Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing"
@@ -212,7 +212,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}/retry-analysis:
+/api/v1/videocut/jobs/{jobId}/retry-analysis:
   post:
     operationId: retryVideoCutJobAnalysis
     summary: "Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing"
@@ -222,7 +222,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}/retry:
+/api/v1/videocut/jobs/{jobId}/retry:
   post:
     operationId: retryVideoCutJob
     summary: "Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed"
@@ -231,7 +231,7 @@
       "200": { description: The job, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutJob" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/jobs/{jobId}/replan:
+/api/v1/videocut/jobs/{jobId}/replan:
   post:
     operationId: replanVideoCutJob
     summary: "Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project's latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing"
@@ -241,13 +241,13 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/notices:
+/api/v1/videocut/notices:
   get:
     operationId: listVideoCutNotices
     summary: "The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day"
     responses:
       "200": { description: "The notices, newest first", content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutNotices" } } } }
-/api/v1/montage/hero:
+/api/v1/videocut/hero:
   get:
     operationId: getVideoCutHero
     description: >-
@@ -262,7 +262,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "416": { description: The range is outside the film. }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/hero/poster:
+/api/v1/videocut/hero/poster:
   get:
     operationId: getVideoCutHeroPoster
     description: The background film's poster (hero/hero.jpg); 404 without one.
@@ -270,7 +270,7 @@
       "200": { description: The poster, content: { image/jpeg: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/versions/{versionId}/confirm:
+/api/v1/videocut/versions/{versionId}/confirm:
   post:
     operationId: confirmVideoCutVersion
     summary: "Choose this version as the project's film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later"
@@ -278,7 +278,7 @@
     responses:
       "200": { description: The project, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProject" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/versions/{versionId}/outline:
+/api/v1/videocut/versions/{versionId}/outline:
   get:
     operationId: getVideoCutVersionOutline
     summary: "The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409)"
@@ -287,7 +287,7 @@
       "200": { description: The version's outline, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutVersionOutline" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/versions/{versionId}/draft:
+/api/v1/videocut/versions/{versionId}/draft:
   get:
     operationId: getVideoCutVersionDraft
     summary: "The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version's videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found"
@@ -297,7 +297,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/drafts/{draftId}/ops:
+/api/v1/videocut/drafts/{draftId}/ops:
   post:
     operationId: editVideoCutDraft
     summary: "One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, a shot whose picture the plan described with nothing to search for (empty, or longer than a search) stays as it was and the message says how many did, and with no unlocked shot to search for the shuffle is edit_refused (422). Deleting a shot between two that could each take its slots reads their videos' analysis (photos_unavailable, 503; edit_refused, 422, while their windows are made again; analysis_changed, 409, once made with another model) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders"
@@ -320,7 +320,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/drafts/{draftId}/candidates:
+/api/v1/videocut/drafts/{draftId}/candidates:
   get:
     operationId: listVideoCutDraftCandidates
     summary: "The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle's does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos"
@@ -337,7 +337,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/versions/{versionId}/shots:
+/api/v1/videocut/versions/{versionId}/shots:
   get:
     operationId: getVideoCutVersionShots
     summary: "The version's shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film"
@@ -346,7 +346,7 @@
       "200": { description: The shot list, content: { text/csv: { schema: { type: string } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/drafts/{draftId}/shots:
+/api/v1/videocut/drafts/{draftId}/shots:
   get:
     operationId: getVideoCutDraftShots
     summary: "The draft's shot list, as the version's: a row a shot, the slots it covers, and for a shot that took a deleted shot's slots, which"
@@ -355,10 +355,10 @@
       "200": { description: The shot list, content: { text/csv: { schema: { type: string } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/projects/{projectId}/frames/{assetId}:
+/api/v1/videocut/projects/{projectId}/frames/{assetId}:
   get:
     operationId: getVideoCutFrame
-    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, montage_unavailable where the montage center has no media worker"
+    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where the montage center has no media worker"
     parameters:
       - { $ref: "../components/videocut.yaml#/parameters/VideoCutProjectID" }
       - { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }
@@ -369,7 +369,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/drafts/{draftId}/save:
+/api/v1/videocut/drafts/{draftId}/save:
   post:
     operationId: saveVideoCutDraft
     summary: "Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job, and a requestKey used for another draft or another kind of job is a conflict (409). A revision that was saved already answers 202 with the job that saved it, done and with its version, whatever the requestKey: no new job, and nothing is filled or rendered again. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model"
@@ -390,7 +390,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/drafts/{draftId}/song:
+/api/v1/videocut/drafts/{draftId}/song:
   get:
     operationId: getVideoCutDraftSong
     description: >-
@@ -409,7 +409,7 @@
       "416": { description: The range is outside the song. }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/montage/versions/{versionId}/recut:
+/api/v1/videocut/versions/{versionId}/recut:
   post:
     operationId: recutVideoCutVersion
     summary: "Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none"

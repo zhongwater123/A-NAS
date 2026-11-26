@@ -781,7 +781,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     let failed = false;
     server.use(
       http.untyped.get(
-        `${window.location.origin}/api/v1/montage`,
+        `${window.location.origin}/api/v1/videocut`,
         () => {
           failed = true;
           return HttpResponse.error();

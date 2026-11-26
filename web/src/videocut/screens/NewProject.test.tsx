@@ -34,9 +34,11 @@ function serve(seen: Seen, options: Parameters<typeof photosHandlers>[0] = {}) {
   server.use(
     ...photosHandlers(options),
     // The device keeps no film of its own for the home page.
-    http.get("/api/v1/montage/hero", ({ response }) => response(404).json(apiError("not_found", "resource not found"))),
-    http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
-    http.post("/api/v1/montage/projects", async ({ request, response }) => {
+    http.get("/api/v1/videocut/hero", ({ response }) =>
+      response(404).json(apiError("not_found", "resource not found")),
+    ),
+    http.get("/api/v1/videocut/projects", ({ response }) => response(200).json({ items: [] })),
+    http.post("/api/v1/videocut/projects", async ({ request, response }) => {
       seen.created = ((await request.json()) as { assetIds: string[] }).assetIds;
       return response(201).json({
         id: "project:new",

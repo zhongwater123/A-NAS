@@ -46,7 +46,7 @@ check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar 
 # not exist, so the montage center answers 404 once the Product Service has passed the request
 # on; without VNAS it passes it on with no grant.
 replan() { # JAR CSRF: the status of asking to plan a job again
-  status_of -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/montage/jobs/job:AAAAAAAAAAAAAAAAAAAAAAAA/replan" || true
+  status_of -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/videocut/jobs/job:AAAAAAAAAAAAAAAAAAAAAAAA/replan" || true
 }
 plans=/var/lib/a-nas-host/assistant/plans
 check "without VNAS a planning request reaches the montage center, and leaves no planning grant" \
@@ -637,15 +637,15 @@ if "$real_runtime"; then
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     echo "INFO montage planning: left out with the real compute Worker, which the seeded cards are not for"
   else
-    montage_job() { curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/jobs/$plan_job" || true; }
+    montage_job() { curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/jobs/$plan_job" || true; }
     plan_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-      -d "{\"requestKey\":\"system-test-plan\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/montage/projects" | jq -r .id || true)
+      -d "{\"requestKey\":\"system-test-plan\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
     check "she makes a montage project of her video and her song" \
       test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-        -d "{\"trackId\":\"$alice_track\"}" "$api/api/v1/montage/projects/$plan_project/song")" = 200
-    plan_name=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/montage/projects/$plan_project" | jq -r .name || true)
+        -d "{\"trackId\":\"$alice_track\"}" "$api/api/v1/videocut/projects/$plan_project/song")" = 200
+    plan_name=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$plan_project" | jq -r .name || true)
     plan_job=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-      -d '{"requestKey":"system-test-plan"}' "$api/api/v1/montage/projects/$plan_project/generate" | jq -r .id || true)
+      -d '{"requestKey":"system-test-plan"}' "$api/api/v1/videocut/projects/$plan_project/generate" | jq -r .id || true)
     check "she starts it, which registers her planning grant on the way" \
       bash -c "[[ -n '$plan_job' && '$plan_job' != null ]] && jq -e '(.issuedAt | fromdateiso8601) > (now - 120)' '$plans/alice' >/dev/null"
     systemctl stop anas-montage-assistant.socket anas-montage.service || true

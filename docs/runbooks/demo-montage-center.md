@@ -58,7 +58,7 @@
    - 演示成员的“音乐”文件夹里放好《Symphony》；
    - 本机有品杰一组的 11 段视频，用来在剪辑中心里上传；
    - **主页背景（可选）**：把原型的背景片放到这台设备上，主页就播它，和原型一样；不放时主页没有背景片。
-     - **谁能看到**：这个文件是设备级的，`GET /api/v1/montage/hero` 把它给这台设备上每一位登录的成员，不只是放它的人。片子是用户的私人素材：只在这台设备的成员都可以看它时才放，演示完按“回滚或恢复”删掉。
+     - **谁能看到**：这个文件是设备级的，`GET /api/v1/videocut/hero` 把它给这台设备上每一位登录的成员，不只是放它的人。片子是用户的私人素材：只在这台设备的成员都可以看它时才放，演示完按“回滚或恢复”删掉。
      - 仓库是公开的，所以它只放在设备上，不进仓库也不进软件包。从开发机 C（Mac）拷到 NAS 后，以 root：
      ```bash
      install -d -o a-nas-montage -g a-nas-montage -m 0750 /srv/a-nas/data/montage/hero
@@ -74,7 +74,7 @@
    6. 两个方案都存完后，“成片”里并排显示方案一、方案二，各自播放、下载；在相册的个人图库里能找到“<项目名> v1.mp4”与“<项目名> v2.mp4”。
    - 一轮规划交回了方案一、没有交回方案二时，方案一照常存进相册，项目页显示“VNAS 没有交回方案二的规划，重新规划？”。点“重新规划”后，新的一轮只规划方案二；记下出现过这种情况。
    - 等待规划时，项目页写明在等什么：“VNAS 正在规划”，或“VNAS 暂时连不上，N 分钟后再试”“规划出错，1 分钟后再试一次”。规划连续出错两次，任务停下并显示“规划出错：<原文>”，点“重新规划”再来；记下原文。
-   - 每一步以 root 记下用时与峰值内存，写进 #561。两个方案各渲染一次，分开记：任务接口 `GET /api/v1/montage/jobs/<任务 ID>` 的 `steps` 里有每一步的 `startedAt` 与 `finishedAt`，方案一是 `pick` 到 `save`，方案二是 `pick-2` 到 `save-2`。
+   - 每一步以 root 记下用时与峰值内存，写进 #561。两个方案各渲染一次，分开记：任务接口 `GET /api/v1/videocut/jobs/<任务 ID>` 的 `steps` 里有每一步的 `startedAt` 与 `finishedAt`，方案一是 `pick` 到 `save`，方案二是 `pick-2` 到 `save-2`。
      ```bash
      journalctl -u anas-montage -u anas-photos -u anas-montage-compute -u anas-montage-music --since today
      systemctl show -p MemoryPeak anas-montage-music anas-montage-compute anas-ai 'anas-assistant-plan@<账号>'

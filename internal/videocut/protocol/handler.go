@@ -1,4 +1,4 @@
-// Package protocol exposes 剪辑中心 under /api/v1/montage. It does not
+// Package protocol exposes 剪辑中心 under /api/v1/videocut. It does not
 // authenticate: the montage service, or the Product Service in development,
 // wraps it so that every request carries the signed-in user and the session
 // token (accounts.WithUser, accounts.WithSessionToken), and writes have
@@ -19,11 +19,11 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-const PathPrefix = "/api/v1/montage"
+const PathPrefix = "/api/v1/videocut"
 
 // Unavailable is the error code while the montage store cannot be used, as
 // when the data volume is offline or read-only.
-const Unavailable = "montage_unavailable"
+const Unavailable = "videocut_unavailable"
 
 type handler struct {
 	store  *app.Store
@@ -33,7 +33,7 @@ type handler struct {
 
 type route func(http.ResponseWriter, *http.Request, accounts.User)
 
-// New returns the montage API. A nil store answers 503 montage_unavailable.
+// New returns the montage API. A nil store answers 503 videocut_unavailable.
 func New(store *app.Store, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()

@@ -47,7 +47,7 @@ describe("the montage center's notices on the desktop", () => {
   });
 
   it("shows them once on this device and opens the montage center", async () => {
-    server.use(http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [...notices] })));
+    server.use(http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [...notices] })));
     const opened = vi.fn();
     const { unmount } = render(<VideoCutNotices onOpen={opened} />);
     expect(await screen.findByText("「海边」在等 VNAS 规划")).toBeInTheDocument();
@@ -77,8 +77,8 @@ describe("the montage center's notices on the desktop", () => {
     ]);
     const replanned: string[] = [];
     server.use(
-      http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [failed] })),
-      http.post("/api/v1/montage/jobs/{jobId}/replan", ({ params, response }) => {
+      http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [failed] })),
+      http.post("/api/v1/videocut/jobs/{jobId}/replan", ({ params, response }) => {
         replanned.push(params.jobId);
         return response(200).json({
           id: params.jobId,
@@ -102,7 +102,7 @@ describe("the montage center's notices on the desktop", () => {
   it("tells again when the reason a job waits changes", async () => {
     let detail: string | undefined;
     server.use(
-      http.get("/api/v1/montage/notices", ({ response }) =>
+      http.get("/api/v1/videocut/notices", ({ response }) =>
         response(200).json({ items: [detail ? { ...notices[0], detail } : notices[0]] }),
       ),
     );
@@ -117,7 +117,7 @@ describe("the montage center's notices on the desktop", () => {
   it("asks nothing while the page is hidden, and asks once it shows again", async () => {
     let asked = 0;
     server.use(
-      http.get("/api/v1/montage/notices", ({ response }) => {
+      http.get("/api/v1/videocut/notices", ({ response }) => {
         asked++;
         return response(200).json({ items: [notices[1]] });
       }),
@@ -140,7 +140,7 @@ describe("the montage center's notices on the desktop", () => {
     });
     let asked = 0;
     server.use(
-      http.get("/api/v1/montage/notices", async ({ response }) => {
+      http.get("/api/v1/videocut/notices", async ({ response }) => {
         if (++asked === 1) {
           await held;
           return response(200).json({ items: [notices[0]] });

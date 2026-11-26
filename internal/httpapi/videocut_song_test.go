@@ -181,8 +181,8 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		}
 	}
 	var project domain.ProjectDetail
-	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","assetIds":["`+video+`"]}`, nil, http.StatusCreated).Body, &project)
-	path := "/api/v1/montage/projects/" + project.ID
+	decode(t, owner.do(http.MethodPost, "/api/v1/videocut/projects", `{"requestKey":"k1","assetIds":["`+video+`"]}`, nil, http.StatusCreated).Body, &project)
+	path := "/api/v1/videocut/projects/" + project.ID
 
 	owner.do(http.MethodGet, path+"/song", "", nil, http.StatusNotFound)
 	// Bob's track is not the owner's to copy, and answers as a missing one.

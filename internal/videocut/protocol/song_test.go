@@ -69,7 +69,7 @@ func TestCopySongAnswersWhatTheLibraryKnowsWithoutCopying(t *testing.T) {
 			next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
 			handler := protocol.CopySong(tracks{t: t, track: c.track, opens: c.opens}, next, nil)
 			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodPut, "/api/v1/montage/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
+			request := httptest.NewRequest(http.MethodPut, "/api/v1/videocut/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
 			request.Header.Set("Content-Type", "application/json")
 			handler(recorder, request, accounts.Session{User: accounts.User{ID: c.user}})
 			if recorder.Code != c.want || !strings.Contains(recorder.Body.String(), `"`+c.code+`"`) || reached {
@@ -92,7 +92,7 @@ func TestCopySongStreamsTheTrackWithWhatItIs(t *testing.T) {
 	library := tracks{t: t, track: music.Track{ID: "t", Title: "Lossless", Format: "ape", Transcode: true, DurationMs: 60_000}}
 	handler := protocol.CopySong(library, serviceproxy.Local(next), nil)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPut, "/api/v1/montage/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/videocut/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(protocol.SongHeader, "forged")
 	handler(recorder, request, accounts.Session{User: accounts.User{ID: "user:alice"}})
@@ -118,7 +118,7 @@ func TestCopySongCutsALongTitleToFitItsHeader(t *testing.T) {
 	library := tracks{t: t, track: music.Track{ID: "t", Title: strings.Repeat("长", 1500), Format: "mp3", DurationMs: 60_000}}
 	handler := protocol.CopySong(library, serviceproxy.Local(next), nil)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPut, "/api/v1/montage/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/videocut/projects/p/song", strings.NewReader(`{"trackId":"t"}`))
 	request.Header.Set("Content-Type", "application/json")
 	handler(recorder, request, accounts.Session{User: accounts.User{ID: "user:alice"}})
 	var source domain.SongSource

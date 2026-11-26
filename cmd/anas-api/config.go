@@ -86,7 +86,7 @@ type Config struct {
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
-	// VideoCutEnabled mounts /api/v1/montage, 剪辑中心 (ADR 0038). It stays off
+	// VideoCutEnabled mounts /api/v1/videocut, 剪辑中心 (ADR 0038). It stays off
 	// until the first film can be made end to end; while off the desktop
 	// shows no entry, and hiding the entry alone would not stop the API.
 	VideoCutEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`

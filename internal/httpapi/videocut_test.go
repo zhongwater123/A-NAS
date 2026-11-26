@@ -106,17 +106,17 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	owner := f.signIn("/api/v1/setup/admin", "owner", "correct horse battery staple", "", http.StatusCreated)
 	owner.do(http.MethodPost, "/api/v1/users", `{"username":"bob","password":"bob password for testing"}`, nil, http.StatusCreated)
 	bob := f.signIn("/api/v1/session", "bob", "bob password for testing", "172.18.45.21", http.StatusOK)
-	owner.do(http.MethodGet, "/api/v1/montage", "", nil, http.StatusNoContent)
+	owner.do(http.MethodGet, "/api/v1/videocut", "", nil, http.StatusNoContent)
 	if served != 0 {
 		t.Fatal("the montage center was asked whether it is on")
 	}
-	response := owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK)
+	response := owner.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusOK)
 	if body := strings.TrimSpace(response.Body.String()); body != `{"items":[]}` {
 		t.Fatalf("projects = %s", body)
 	}
 	anonymous := &contractClient{t: t, handler: handler}
-	anonymous.do(http.MethodGet, "/api/v1/montage", "", nil, http.StatusUnauthorized)
-	anonymous.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusUnauthorized)
+	anonymous.do(http.MethodGet, "/api/v1/videocut", "", nil, http.StatusUnauthorized)
+	anonymous.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusUnauthorized)
 
 	// The owner's two videos, in the private library.
 	var me struct {
@@ -146,11 +146,11 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	}
 
 	var project domain.ProjectDetail
-	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects",
+	decode(t, owner.do(http.MethodPost, "/api/v1/videocut/projects",
 		`{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusCreated).Body, &project)
-	owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusOK)
-	bob.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","assetIds":["`+videos[0]+`"]}`, nil, http.StatusUnprocessableEntity)
-	path := "/api/v1/montage/projects/" + project.ID
+	owner.do(http.MethodPost, "/api/v1/videocut/projects", `{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusOK)
+	bob.do(http.MethodPost, "/api/v1/videocut/projects", `{"requestKey":"k1","assetIds":["`+videos[0]+`"]}`, nil, http.StatusUnprocessableEntity)
+	path := "/api/v1/videocut/projects/" + project.ID
 	bob.do(http.MethodGet, path, "", nil, http.StatusNotFound)
 	owner.do(http.MethodPost, path+"/assets", `{"requestKey":"k3","assetIds":["`+videos[1]+`"]}`, nil, http.StatusOK)
 	owner.do(http.MethodPatch, path, `{"name":"海边一日","chronological":false}`, nil, http.StatusOK)
@@ -159,7 +159,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 		t.Fatalf("project = %+v", project)
 	}
 	var page domain.ProjectPage
-	decode(t, owner.do(http.MethodGet, "/api/v1/montage/projects", "", nil, http.StatusOK).Body, &page)
+	decode(t, owner.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusOK).Body, &page)
 	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
 		t.Fatalf("projects = %+v", page)
 	}
@@ -180,7 +180,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)
 	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g2"}`, nil, http.StatusConflict)
 	bob.do(http.MethodPost, path+"/generate", `{"requestKey":"g3"}`, nil, http.StatusNotFound)
-	jobPath := "/api/v1/montage/jobs/" + job.ID
+	jobPath := "/api/v1/videocut/jobs/" + job.ID
 	// The requests that may lead to planning registered a grant behind the
 	// member's session first. While the broker cannot register one they
 	// answer assistant_unavailable, and the montage center is not asked.
@@ -191,8 +191,8 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	before := served
 	for route, body := range map[string]string{
 		path + "/generate": `{"requestKey":"g4"}`, jobPath + "/replan": "", jobPath + "/retry-analysis": "",
-		jobPath + "/drop-assets":                   `{"assetIds":["` + videos[1] + `"]}`,
-		"/api/v1/montage/versions/version:x/recut": `{"requestKey":"r1","change":"结尾留长一点"}`,
+		jobPath + "/drop-assets":                    `{"assetIds":["` + videos[1] + `"]}`,
+		"/api/v1/videocut/versions/version:x/recut": `{"requestKey":"r1","change":"结尾留长一点"}`,
 	} {
 		response := owner.do(http.MethodPost, route, body, nil, http.StatusServiceUnavailable)
 		if !strings.Contains(response.Body.String(), `"assistant_unavailable"`) {
@@ -216,7 +216,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	var notices struct {
 		Items []domain.Notice `json:"items"`
 	}
-	decode(t, owner.do(http.MethodGet, "/api/v1/montage/notices", "", nil, http.StatusOK).Body, &notices)
+	decode(t, owner.do(http.MethodGet, "/api/v1/videocut/notices", "", nil, http.StatusOK).Body, &notices)
 	if len(notices.Items) != 0 {
 		t.Fatalf("notices of a queued job = %+v", notices)
 	}
@@ -250,7 +250,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	off := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users, Logger: logger,
 	})
-	for _, path := range []string{"/api/v1/montage", "/api/v1/montage/projects"} {
+	for _, path := range []string{"/api/v1/videocut", "/api/v1/videocut/projects"} {
 		request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080"+path, nil)
 		request.AddCookie(owner.cookie)
 		request.Header.Set("X-Forwarded-For", owner.forwardedFor)

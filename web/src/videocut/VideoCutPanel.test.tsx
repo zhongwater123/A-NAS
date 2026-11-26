@@ -103,8 +103,10 @@ function serve(
 ) {
   server.use(
     // The device keeps no film of its own for the home page.
-    http.get("/api/v1/montage/hero", ({ response }) => response(404).json(apiError("not_found", "resource not found"))),
-    http.get("/api/v1/montage/projects", ({ response }) =>
+    http.get("/api/v1/videocut/hero", ({ response }) =>
+      response(404).json(apiError("not_found", "resource not found")),
+    ),
+    http.get("/api/v1/videocut/projects", ({ response }) =>
       response(200).json({
         items: [
           {
@@ -117,23 +119,23 @@ function serve(
         ],
       }),
     ),
-    http.get("/api/v1/montage/projects/{projectId}", ({ response }) => response(200).json(detail())),
-    http.get("/api/v1/montage/projects/{projectId}/song", ({ response }) =>
+    http.get("/api/v1/videocut/projects/{projectId}", ({ response }) => response(200).json(detail())),
+    http.get("/api/v1/videocut/projects/{projectId}/song", ({ response }) =>
       song ? response(200).json(song) : response(404).json(apiError("no_song", "the project has no song yet")),
     ),
-    http.patch("/api/v1/montage/projects/{projectId}", async ({ request, response }) => {
+    http.patch("/api/v1/videocut/projects/{projectId}", async ({ request, response }) => {
       const change = (await request.json()) as ProjectChange;
       seen.changes.push(change);
       return response(200).json({ ...detail(), ...change });
     }),
-    http.post("/api/v1/montage/projects/{projectId}/generate", ({ response }) => {
+    http.post("/api/v1/videocut/projects/{projectId}/generate", ({ response }) => {
       seen.generated++;
       return response(202).json(job("queued"));
     }),
     http.get("/api/v1/photos/assets/{assetId}", ({ response }) =>
       response(404).json(apiError("not_found", "the film is not served in this test")),
     ),
-    http.get("/api/v1/montage/jobs/{jobId}", ({ response }) => {
+    http.get("/api/v1/videocut/jobs/{jobId}", ({ response }) => {
       seen.polled++;
       return response(200).json(jobs());
     }),
@@ -148,7 +150,7 @@ function serve(
         ],
       }),
     ),
-    http.put("/api/v1/montage/projects/{projectId}/song", async ({ request, response }) => {
+    http.put("/api/v1/videocut/projects/{projectId}/song", async ({ request, response }) => {
       seen.chosen = ((await request.json()) as { trackId: string }).trackId;
       return response(200).json({
         id: "song:2",
@@ -159,15 +161,15 @@ function serve(
         state: "analyzing",
       });
     }),
-    http.post("/api/v1/montage/jobs/{jobId}/drop-assets", async ({ request, response }) => {
+    http.post("/api/v1/videocut/jobs/{jobId}/drop-assets", async ({ request, response }) => {
       seen.dropped = ((await request.json()) as { assetIds: string[] }).assetIds;
       return response(200).json(job("queued"));
     }),
-    http.post("/api/v1/montage/jobs/{jobId}/retry", ({ response }) => {
+    http.post("/api/v1/videocut/jobs/{jobId}/retry", ({ response }) => {
       seen.did.push("retry");
       return response(200).json(job("queued"));
     }),
-    http.post("/api/v1/montage/jobs/{jobId}/replan", ({ response }) => {
+    http.post("/api/v1/videocut/jobs/{jobId}/replan", ({ response }) => {
       seen.did.push("replan");
       return response(200).json(job("queued"));
     }),
@@ -451,7 +453,7 @@ describe("剪辑中心", () => {
       fresh(),
     );
     server.use(
-      http.post("/api/v1/montage/jobs/{jobId}/cancel", ({ response }) => {
+      http.post("/api/v1/videocut/jobs/{jobId}/cancel", ({ response }) => {
         // The film went to the photo library meanwhile.
         current = job("running", { step: "save" });
         return response(409).json(apiError("job_state", "the job cannot do this now"));
@@ -624,7 +626,7 @@ describe("剪辑中心", () => {
     );
     // The song went between the page's reading it and the click.
     server.use(
-      http.post("/api/v1/montage/projects/{projectId}/generate", ({ response }) =>
+      http.post("/api/v1/videocut/projects/{projectId}/generate", ({ response }) =>
         response(404).json(apiError("no_song", "the project has no song yet")),
       ),
     );
@@ -634,7 +636,7 @@ describe("剪辑中心", () => {
     expect(within(page).getByRole("button", { name: /配乐/ })).toBeInTheDocument();
     // The planning grant could not be registered: nothing was started, and the page says so.
     server.use(
-      http.post("/api/v1/montage/projects/{projectId}/generate", ({ response }) =>
+      http.post("/api/v1/videocut/projects/{projectId}/generate", ({ response }) =>
         response(503).json(apiError("assistant_unavailable", "the planning grant could not be registered")),
       ),
     );
@@ -646,7 +648,7 @@ describe("剪辑中心", () => {
   it("plays a song the NAS decodes from the excerpt's start, for as long as the excerpt lasts", () => {
     // That stream starts where it is asked to and cannot seek: the fragment counts from there.
     expect(excerptAudio("project:1", { ...symphony, transcode: true }, [60, 90])).toBe(
-      "/api/v1/montage/projects/project%3A1/song/audio?start=60.00#t=0,30.00",
+      "/api/v1/videocut/projects/project%3A1/song/audio?start=60.00#t=0,30.00",
     );
   });
 
@@ -673,7 +675,7 @@ describe("剪辑中心", () => {
     // What plays is the excerpt, from its start to its end, not the song from its beginning.
     expect(within(songs).getByLabelText("试听选段")).toHaveAttribute(
       "src",
-      "/api/v1/montage/projects/project%3A1/song/audio#t=60.00,90.00",
+      "/api/v1/videocut/projects/project%3A1/song/audio#t=60.00,90.00",
     );
     await userEvent.click(await within(songs).findByRole("button", { name: "用《Forever》（Keshi）配乐" }));
     await waitFor(() => expect(seen.chosen).toBe("file:forever"));
@@ -707,9 +709,9 @@ describe("剪辑中心", () => {
       fresh(),
     );
     server.use(
-      http.get("/api/v1/montage/projects/{projectId}", ({ response }) =>
+      http.get("/api/v1/videocut/projects/{projectId}", ({ response }) =>
         down
-          ? response(503).json(apiError("montage_unavailable", "the montage service is not running"))
+          ? response(503).json(apiError("videocut_unavailable", "the montage service is not running"))
           : response(200).json(project()),
       ),
     );
@@ -727,7 +729,7 @@ describe("剪辑中心", () => {
       () => job("queued"),
       fresh(),
     );
-    const listed = http.get("/api/v1/montage/projects", ({ response }) =>
+    const listed = http.get("/api/v1/videocut/projects", ({ response }) =>
       response(200).json({
         items: [
           {
@@ -760,7 +762,7 @@ describe("剪辑中心", () => {
     let asked = "";
     server.use(
       listed,
-      http.get("/api/v1/montage/hero", ({ request }) => {
+      http.get("/api/v1/videocut/hero", ({ request }) => {
         asked = request.headers.get("Range") ?? "";
         return new Response("f", {
           status: 206,
@@ -769,7 +771,7 @@ describe("剪辑中心", () => {
       }),
     );
     const second = render(<VideoCutPanel userId="user:alice" />);
-    await waitFor(() => expect(second.container.querySelector('video[src^="/api/v1/montage/hero"]')).not.toBeNull());
+    await waitFor(() => expect(second.container.querySelector('video[src^="/api/v1/videocut/hero"]')).not.toBeNull());
     expect(asked).toBe("bytes=0-0");
     expect(second.container.querySelectorAll("video")).toHaveLength(1);
     expect(played).toBe(0);
