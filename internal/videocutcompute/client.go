@@ -184,9 +184,12 @@ type Window struct {
 	End   float64 `json:"end"`
 }
 
-// Card is a card the Worker cut: its bounds in seconds, how many windows it
-// spans, the instants of its keyframes and the windows they came from.
-type Card struct {
+// CutCard is a card the Worker cut from one video's windows (Cards), before
+// anything describes it; the photo library keeps it. CatalogCard is the
+// other kind: a described card the catalog, the plan and the fill take.
+// CutCard gives its bounds in seconds, how many windows it spans, the
+// instants of its keyframes and the windows they came from.
+type CutCard struct {
 	ID      string    `json:"id"`
 	Start   float64   `json:"start"`
 	End     float64   `json:"end"`
@@ -197,7 +200,7 @@ type Card struct {
 
 // Cards cuts one video's cards from its windows' vectors (dimensions each)
 // and flat marks.
-func (c Client) Cards(ctx context.Context, key string, windows []Window, vectors []float32, dimensions int, flat []bool) ([]Card, error) {
+func (c Client) Cards(ctx context.Context, key string, windows []Window, vectors []float32, dimensions int, flat []bool) ([]CutCard, error) {
 	marks := make([]byte, len(flat))
 	for i, f := range flat {
 		if f {
@@ -205,7 +208,7 @@ func (c Client) Cards(ctx context.Context, key string, windows []Window, vectors
 		}
 	}
 	var answer struct {
-		Cards []Card `json:"cards"`
+		Cards []CutCard `json:"cards"`
 	}
 	err := c.Call(ctx, "cards", map[string]any{"key": key, "windows": windows}, []Array{
 		{Name: "vectors", Shape: []int{len(windows), dimensions}, Float32: vectors},

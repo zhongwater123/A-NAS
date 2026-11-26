@@ -42,9 +42,11 @@ const (
 	FrameRate   = 2
 )
 
-// CatalogCard is a card as the compute Worker's domain reads it (app.Card
-// before #670; Card in this package is the card the Worker cuts): its video,
-// its bounds, its keyframes and the reader's description (answer).
+// CatalogCard is a described card as the compute Worker's catalog, plan
+// and fill read it (app.Card before #670). CutCard is the other kind: a
+// card the Worker just cut, before anything describes it. CatalogCard
+// carries its video, its bounds, its keyframes and the reader's
+// description (answer).
 type CatalogCard struct {
 	ID     string          `json:"id"`
 	Video  string          `json:"video"`
