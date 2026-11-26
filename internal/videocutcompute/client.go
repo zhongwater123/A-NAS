@@ -188,7 +188,8 @@ type Window struct {
 // anything describes it; the photo library keeps it. CatalogCard is the
 // other kind: a described card the catalog, the plan and the fill take.
 // CutCard gives its bounds in seconds, how many windows it spans, the
-// instants of its keyframes and the windows they came from.
+// instants of its keyframes, the windows they came from and the beat of
+// each keyframe, counted from 1 (alike neighbours share one).
 type CutCard struct {
 	ID      string    `json:"id"`
 	Start   float64   `json:"start"`
@@ -196,6 +197,7 @@ type CutCard struct {
 	Windows int       `json:"windows"`
 	Times   []float64 `json:"times"`
 	Keys    []int     `json:"keys"`
+	Groups  []int     `json:"groups"`
 }
 
 // Cards cuts one video's cards from its windows' vectors (dimensions each)

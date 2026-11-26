@@ -13,7 +13,8 @@ descriptors; the Worker checks only their lengths. Answers are JSON.
 Operations:
   cards         windows of one video: "windows" [{start, end}] in seconds,
                 arrays vectors (float32, n × d) and flat (uint8, n); answers
-                the cards with their keyframe times (algo.cards.plan_cards).
+                the cards with their keyframe times and the beat of each
+                (algo.cards.plan_cards).
   quality_part  one part of a card's quality: "kind" shake (array frames,
                 uint8 m × 180 × 320) answers the moves between neighbours;
                 keyframe (array jpeg, the encoded keyframe) answers blocked
@@ -155,7 +156,7 @@ def op_cards(request, arrays):
     rows = [("v", float(w["start"]), float(w["end"])) for w in windows]
     index = cardrules.WindowIndex(videos={"v": {}}, rows=rows, frames=vectors.astype(np.float32), flat=flat.astype(bool))
     planned = cardrules.plan_cards(index, request.get("key", "card"))
-    return {"cards": [{k: c[k] for k in ("id", "start", "end", "windows", "times", "keys")} for c in planned]}
+    return {"cards": [{k: c[k] for k in ("id", "start", "end", "windows", "times", "keys", "groups")} for c in planned]}
 
 
 def op_quality_part(request, arrays):

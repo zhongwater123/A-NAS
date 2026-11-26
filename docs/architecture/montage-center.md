@@ -312,7 +312,7 @@ montage/
 | 派生 | 做什么 | 用到 |
 |---|---|---|
 | `montage-windows/v1` | 每 2 秒一个窗口，取窗口正中一帧，编码成向量 | FFmpeg `frames`，AI Worker `embed_image` |
-| `montage-cards/v1` | 按窗口向量切卡片，定关键帧时刻 | 剪辑计算 Worker `cards` |
+| `montage-cards/v1` | 按窗口向量切卡片，定关键帧时刻和每张关键帧的节拍 | 剪辑计算 Worker `cards` |
 | `montage-quality/v1` | 每张卡片的模糊、抖动、遮挡、失焦与不可用原因 | FFmpeg `frames`，计算 Worker `quality` |
 | `montage-describe/v1` | 每张画质合格的卡片的节拍、过程、场景、机位（第八版也只描述画质合格的卡片） | FFmpeg `frames`，AI Worker `describe_frames` |
 
@@ -348,7 +348,7 @@ montage/
 | 表 | 主要列 |
 |---|---|
 | `video_windows` | object_id、idx、start_ms、end_ms、flat、vector（BLOB，768 个 float32）、identity |
-| `video_cards` | object_id、card、start_ms、end_ms、keyframes（JSON：关键帧时刻）、identity |
+| `video_cards` | object_id、card、start_ms、end_ms、keyframes（JSON：关键帧时刻）、beats（JSON：每张关键帧的节拍，Catalog 第 23 步）、identity |
 | `video_card_quality` | object_id、card、result（JSON）、identity |
 | `video_card_descriptions` | object_id、card、result（JSON）、identity |
 | `montage_grants` | id、owner_user_id、project_id、created_at、revoked_at |
@@ -374,7 +374,8 @@ montage/
 
 ### 卡片与画质
 
-- **卡片**：调计算 Worker 的 `cards`，输入是窗口时间、是否纯色和向量，输出卡片与关键帧时刻。纯色阈值与第八版相同（`FLAT=8.0`），记在分析身份里。
+- **卡片**：调计算 Worker 的 `cards`，输入是窗口时间、是否纯色和向量，输出卡片、关键帧时刻和每张关键帧的节拍。纯色阈值与第八版相同（`FLAT=8.0`），记在分析身份里。
+  - **节拍**（2026-11-26，[#676](https://github.com/zhongwater123/A-NAS/issues/676)）：关键帧照旧取（不够 3 张就均匀补到 3 张），相邻两张关键帧所在窗口的向量相似度不低于 0.93 就合成一个节拍，记在切卡身份里（`beat=0.93`）。第八版一张关键帧一个节拍，人标 1052 个边界只有 38% 该分开；合并后必须改的错从 554 降到 131。补齐的关键帧照旧全给描述模型看，常拍到本来那张看不到的动作。
 - **画质**：每张卡片要三组帧：
   - 关键帧：宽 512 的 JPEG，质量与第八版相同。模糊值按第八版的标定对**编码后的 JPEG** 跑 blurdetect；遮挡由计算 Worker 从 JPEG 缩成 256×144 的灰度图计算。
   - 抖动：覆盖整张卡片的 320×180 灰度帧，每秒 10 帧。
@@ -391,7 +392,7 @@ montage/
   - 输入：一张卡片的 3–20 张关键帧，以及每张离卡片开头的秒数、分组布局、卡片时长与节拍数。
   - 关键帧放在同一条消息里，每张一个描述符，不需要偏移表，也就没有新的二进制解析。`internal/unixmsg` 与 Python 端的 `recv_fds` 改为按调用方给的上限收多个描述符（FFmpeg 2 个、AI 20 个），在 M7 补跨语言测试。
   - 体裁固定为第八版上传流程用的“旅行”（`TRAVEL`），记进分析身份。分析要跨项目、跨成员复用，所以不按项目改体裁。
-- **提示词**：不收调用方的提示词，模板固定在 Worker 里，版本记作 `montage-card/v1`。
+- **提示词**：不收调用方的提示词，模板固定在 Worker 里，版本记作 `montage-card/v1`（2026-11-26 按节拍分组写，升为 `montage-card/v2`，见[相册 AI](photo-ai.md)）。
   - 模板来自第八版 `domain/prompts.py` 的 `PROMPT` 与 `CAMERAS`，只加了一句：不要转写画面里的证件号、票号、车牌等号码（[决定](../decisions/2026-11-17-montage-center-first-version.md)第 11 项）。
 - **输出**：按第八版 `domain/describe.py` 的 Schema 校验，不合格记 `invalid_result`。
   - 第八版遇到重复时换重复惩罚、最多重问 3 次，这个重试放在操作内部。

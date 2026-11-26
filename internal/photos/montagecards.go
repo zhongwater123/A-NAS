@@ -24,7 +24,7 @@ import (
 const (
 	cardsDerivation   = "montage-cards/v1"
 	qualityDerivation = "montage-quality/v1"
-	cardsIdentity     = cardsDerivation + "|card=0.86,look=2,long=120,side=20|still=0.9,gap=12,fewest=3,most=20|flat=8"
+	cardsIdentity     = cardsDerivation + "|card=0.86,look=2,long=120,side=20|still=0.9,gap=12,fewest=3,most=20|beat=0.93|flat=8"
 	qualityIdentity   = qualityDerivation + "|key=w512q3,blurdetect|shake=320x180@10,30s|blocked=256x144|points=w1920,dark=60" +
 		"|rules=blur8.0,moving1.0,shake5.6,blocked0.25,points60"
 	keyframeWidth   = 512
@@ -46,6 +46,9 @@ type ComputedCard struct {
 	Start float64   `json:"start"`
 	End   float64   `json:"end"`
 	Times []float64 `json:"times"`
+	// Groups are each keyframe's beat, counted from 1: the description
+	// writes one beat for alike neighbouring keyframes (cardLayout).
+	Groups []int `json:"groups"`
 }
 
 // CardMeasures are a card's measures, keyframe by keyframe; a nil blur is a
@@ -256,8 +259,9 @@ func (s *Service) cutCards(ctx context.Context) (bool, error) {
 		}
 		for n, card := range cards {
 			times, _ := json.Marshal(card.Times)
-			if _, err := tx.ExecContext(ctx, "INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, identity) VALUES(?, ?, ?, ?, ?, ?)",
-				job.objectID, n+1, int(math.Round(card.Start*1000)), int(math.Round(card.End*1000)), string(times), version); err != nil {
+			groups, _ := json.Marshal(card.Groups)
+			if _, err := tx.ExecContext(ctx, "INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, beats, identity) VALUES(?, ?, ?, ?, ?, ?, ?)",
+				job.objectID, n+1, int(math.Round(card.Start*1000)), int(math.Round(card.End*1000)), string(times), string(groups), version); err != nil {
 				return err
 			}
 		}

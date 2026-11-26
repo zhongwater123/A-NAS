@@ -386,7 +386,7 @@ class WorkerTest(unittest.TestCase):
         request, frames = self.card(4)
         response = call(path, request, images=frames)
         self.assertTrue(response["ok"], response)
-        self.assertEqual((response["model"], response["template"]), (fake.model, "montage-card/v1"))
+        self.assertEqual((response["model"], response["template"]), (fake.model, "montage-card/v2"))
         description = response["description"]
         self.assertEqual([beat["frames"] for beat in description["beats"]], [[1, 1], [2, 2], [3, 3], [4, 4]])
         self.assertEqual(set(description), {"camera", "beats", "process", "summary", "scene"})

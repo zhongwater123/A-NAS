@@ -71,7 +71,7 @@ func (d *describingEmbedder) infoCount() int {
 }
 
 func newDescribingEmbedder() *describingEmbedder {
-	return &describingEmbedder{readingEmbedder: newReadingEmbedder(), template: "montage-card/v1"}
+	return &describingEmbedder{readingEmbedder: newReadingEmbedder(), template: "montage-card/v2"}
 }
 
 // numbersAnswer holds an ID number, a card number, a mobile number and a
@@ -155,10 +155,16 @@ func newDescribeFixtureWith(t *testing.T, reader string) describeFixture {
 	if want := map[bool]int{true: 2, false: 0}[reader != ""]; len(f.descriptions(t)) != want || f.embedder.calls() != want {
 		t.Fatalf("after the chain: %d descriptions, %d calls, want %d", len(f.descriptions(t)), f.embedder.calls(), want)
 	}
+	// The beats the compute Worker gave reach the description.
+	for _, layout := range f.embedder.layouts {
+		if !slices.Equal(layout.Groups, []int{1, 1, 2}) {
+			t.Fatalf("layout after the chain = %+v, want the compute Worker's beats", layout)
+		}
+	}
 	f.cards(t, []standInCard{
 		{start: 0, end: 20000, keyframes: []float64{1, 8, 15}, reasons: "[]"},
 		{start: 20000, end: 40000, keyframes: []float64{21, 30, 39}, reasons: `["模糊"]`},
-		{start: 40000, end: 70000, keyframes: []float64{41, 50, 60, 69.99}, reasons: "[]"},
+		{start: 40000, end: 70000, keyframes: []float64{41, 50, 60, 69.99}, groups: []int{1, 1, 2, 2}, reasons: "[]"},
 	})
 	return f
 }
@@ -166,6 +172,7 @@ func newDescribeFixtureWith(t *testing.T, reader string) describeFixture {
 type standInCard struct {
 	start, end int
 	keyframes  []float64
+	groups     []int // nil: cut before cards had beats
 	reasons    string
 }
 
@@ -189,7 +196,13 @@ func (f describeFixture) cards(t *testing.T, cards []standInCard) {
 	}
 	for i, card := range cards {
 		keyframes, _ := json.Marshal(card.keyframes)
-		if _, err := db.Exec("INSERT INTO video_cards VALUES(?, ?, ?, ?, ?, ?)", f.object, i, card.start, card.end, string(keyframes), cardsID); err != nil {
+		beats := ""
+		if card.groups != nil {
+			grouped, _ := json.Marshal(card.groups)
+			beats = string(grouped)
+		}
+		if _, err := db.Exec("INSERT INTO video_cards(object_id, card, start_ms, end_ms, keyframes, beats, identity) VALUES(?, ?, ?, ?, ?, ?, ?)",
+			f.object, i, card.start, card.end, string(keyframes), beats, cardsID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.Exec("INSERT INTO video_card_quality VALUES(?, ?, ?, ?)", f.object, i, `{"blur":0.1,"reasons":`+card.reasons+`}`, qualityID); err != nil {
@@ -266,11 +279,15 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 	if f.embedder.calls() != 2 || !slices.Equal(f.embedder.frames, []int{3, 4}) {
 		t.Fatalf("described %d cards with %v frames; the blurred card must be left out", f.embedder.calls(), f.embedder.frames)
 	}
-	// Seconds from the card's start, a beat a frame, the last frame before
-	// the video's end.
+	// Seconds from the card's start, the last frame before the video's
+	// end, in the beats the cards gave; a card without beats has a beat a
+	// frame.
 	last := f.embedder.layouts[1]
-	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.99}) || !slices.Equal(last.Groups, []int{1, 2, 3, 4}) || last.Duration != 30 {
+	if !slices.Equal(last.Offsets, []float64{1, 10, 20, 29.99}) || !slices.Equal(last.Groups, []int{1, 1, 2, 2}) || last.Duration != 30 {
 		t.Fatalf("layout = %+v", last)
+	}
+	if first := f.embedder.layouts[0]; !slices.Equal(first.Groups, []int{1, 2, 3}) {
+		t.Fatalf("layout without beats = %+v", first)
 	}
 	stored := f.descriptions(t)
 	if len(stored) != 2 || stored[0].card != 0 || stored[1].card != 2 {
@@ -286,7 +303,7 @@ func TestCardsThatPassedTheQualityCheckAreDescribedWithoutTheirNumbers(t *testin
 			t.Fatalf("the stored description lacks %q: %s", label, stored[0].result)
 		}
 	}
-	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v1,genre=TRAVEL,") || !strings.Contains(stored[0].identity, "|quality=montage-quality/v1") {
+	if !strings.HasPrefix(stored[0].identity, "reader-1|tpl=montage-card/v2,genre=TRAVEL,") || !strings.Contains(stored[0].identity, "|quality=montage-quality/v1") {
 		t.Fatalf("identity = %q", stored[0].identity)
 	}
 	if f.montageJobs(t) != 0 {
@@ -644,7 +661,7 @@ func TestCardsCutAgainAreDescribedAgain(t *testing.T) {
 func TestAnAnswerUnderAnotherTemplateFailsTheCardOnce(t *testing.T) {
 	f := newDescribeFixture(t)
 	f.embedder.dmu.Lock()
-	f.embedder.template = "montage-card/v2"
+	f.embedder.template = "montage-card/v1"
 	f.embedder.dmu.Unlock()
 	if rounds := processAI(t, f.service, f.embedder, f.gate); rounds != 2 || f.embedder.calls() != 2 {
 		t.Fatalf("%d rounds, %d descriptions; want one for each card", rounds, f.embedder.calls())

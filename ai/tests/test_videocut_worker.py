@@ -61,8 +61,19 @@ class ComputationTest(unittest.TestCase):
         windows = [{"start": 2 * i, "end": 2 * i + 2} for i in range(40)]
         answer = worker.op_cards({"windows": windows, "key": "v"}, {"vectors": vectors, "flat": flat})
         index = cardrules.WindowIndex({"v": {}}, [("v", 2.0 * i, 2.0 * i + 2) for i in range(40)], vectors, flat.astype(bool))
-        expected = [{k: c[k] for k in ("id", "start", "end", "windows", "times", "keys")} for c in cardrules.plan_cards(index, "v")]
+        expected = [{k: c[k] for k in ("id", "start", "end", "windows", "times", "keys", "groups")} for c in cardrules.plan_cards(index, "v")]
         self.assertEqual(answer["cards"], expected)
+
+    def test_alike_keyframes_share_a_beat(self):
+        a, b = np.array([1, 0], np.float32), np.array([0.6, 0.8], np.float32)
+        near = np.array([0.95, np.sqrt(1 - 0.95**2)], np.float32)  # 0.95 to a: alike, under BEAT apart from it
+        index = cardrules.WindowIndex({"v": {}}, [("v", 2.0 * i, 2.0 * i + 2) for i in range(4)], np.stack([a, near, b, b]),
+                                      np.zeros(4, bool))
+        self.assertEqual(cardrules.beats(index, [0, 1, 2, 3]), [1, 1, 2, 2])
+        # A short card's three even key frames fall in its one window: one beat.
+        short = cardrules.WindowIndex({"v": {}}, [("v", 0.0, 2.0)], np.stack([a]), np.zeros(1, bool))
+        (card,) = cardrules.plan_cards(short, "v")
+        self.assertEqual((len(card["times"]), card["groups"]), (3, [1, 1, 1]))
 
     def test_quality_reasons_follow_the_rules(self):
         poor = worker.op_quality({"blurs": [9.5, 9.0, 8.8], "blocked": [0.0, 0.1, 0.0], "points": [None, None, None],
