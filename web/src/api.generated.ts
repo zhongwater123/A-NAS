@@ -2618,7 +2618,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after montage.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
+        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after videocut.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
         post: operations["addVideoCutProjectAssets"];
         delete?: never;
         options?: never;

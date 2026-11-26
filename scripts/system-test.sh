@@ -105,8 +105,8 @@ if [[ "${1:-}" != --inside ]]; then
     "$legacy_product/usr/lib/systemd/system/sockets.target.wants/anas-videocut-compute.socket" \
     "$legacy_product/usr/lib/systemd/system/anas-videocut-compute.service"
   sed -i -e '/systemctl stop anas-videocut-assistant\.socket/d' -e 's/ anas-videocut-assistant\.socket//g' \
-    -e 's/ anas-videocut-planner\.service//g' -e '/anas-montage-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
-    -e 's/anas-videocut\.service//g' -e "s/ 'anas-videocut montage\/montage\.db montage'//" -e 's/ a-nas-videocut:31005//' \
+    -e 's/ anas-videocut-planner\.service//g' -e '/anas-videocut-claim/d' -e '/^# VNAS runs while the administrator/,/^fi$/d' \
+    -e 's/anas-videocut\.service//g' -e "s/ 'anas-videocut videocut\/videocut\.db videocut'//" -e 's/ a-nas-videocut:31005//' \
     -e 's/ anas-photos-grants\.socket//g' -e 's/ anas-videocut-compute\.\(socket\|service\)//g' \
     "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
   sed -i -e '/^Sockets=anas-photos-grants\.socket$/d' -e 's/ anas-photos-grants\.socket//g' \
@@ -1069,10 +1069,10 @@ check "nor in the Host Agent's log in Settings" \
 # ANAS_VIDEOCUT_ENABLED turns it on: then the Product Service forwards
 # /api/v1/videocut and the montage service confirms the session itself.
 check "montage store belongs to the montage service alone" \
-  test "$(stat -c '%a %U' "$data/montage")" = "700 a-nas-videocut"
-check "Product Service account cannot list the montage store" denied a-nas ls "$data/montage"
+  test "$(stat -c '%a %U' "$data/videocut")" = "700 a-nas-videocut"
+check "Product Service account cannot list the montage store" denied a-nas ls "$data/videocut"
 check "the montage socket is the service's, for the Product Service's group" \
-  test "$(stat -c '%a %U:%G' /run/a-nas-montage/montage.sock):$(stat -c '%a %G' /run/a-nas-montage)" = "660 a-nas-videocut:a-nas-videocut:750 a-nas-videocut"
+  test "$(stat -c '%a %U:%G' /run/a-nas-videocut/videocut.sock):$(stat -c '%a %G' /run/a-nas-videocut)" = "660 a-nas-videocut:a-nas-videocut:750 a-nas-videocut"
 check "the montage center is not served while its switch is off" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut"):$(status_of -b /tmp/alice.jar "$api/api/v1/videocut/projects")" = 404:404
 printf 'Environment=ANAS_VIDEOCUT_ENABLED=1\n' >> /etc/systemd/system/anas-api.service.d/system-test.conf
@@ -1444,7 +1444,7 @@ import socket
 from anas_ai import protocol
 
 # The templates the montage center fills, as installed: a recut's (#596) carries a change.
-INSTALLED = {os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")}
+INSTALLED = {os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/videocut-prompts/plan-v*.md")}
 
 
 def template(request):
@@ -1546,7 +1546,7 @@ request = {"op": "probe"} if probe else {
 body = json.dumps(request).encode()
 with socket.socket(socket.AF_UNIX) as conn:
     conn.settimeout(15)
-    conn.connect("/run/a-nas-montage-compute/compute.sock")
+    conn.connect("/run/a-nas-videocut-compute/compute.sock")
     conn.sendall(struct.pack(">I", len(body)) + body)
     with conn.makefile("rb") as stream:
         size, = struct.unpack(">I", stream.read(4))
@@ -1558,7 +1558,7 @@ else:
     assert answer["blur"] == 2.0 and answer["shake"] == 0.0 and answer["reasons"] == [], answer
 PY
 check "the compute socket is available to the photo service" \
-  test "$(stat -c '%a %G' /run/a-nas-montage-compute/compute.sock)" = "660 a-nas-photos"
+  test "$(stat -c '%a %G' /run/a-nas-videocut-compute/compute.sock)" = "660 a-nas-photos"
 check "the photo service can activate the compute worker" \
   runuser -u a-nas-photos -- python3 /usr/local/lib/montage-compute-client.py
 if [[ "${ANAS_SYSTEM_TEST_AI:-}" != real ]]; then
@@ -2469,14 +2469,14 @@ check "the owner plays his own song by its track ID" \
 check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
 check "a member copies her own song into the montage center" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
 check "the copy is the montage service's alone, named by its content" \
-  bash -c "test \"\$(stat -c '%a %U' $data/montage/songs/*/audio)\" = '600 a-nas-videocut' && cmp -s /tmp/alice-song.mp3 $data/montage/songs/*/audio"
+  bash -c "test \"\$(stat -c '%a %U' $data/videocut/songs/*/audio)\" = '600 a-nas-videocut' && cmp -s /tmp/alice-song.mp3 $data/videocut/songs/*/audio"
 check "the song waits for allin1, which is not installed" \
   test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$song_project/song" | jq -r .state)" = analyzing
 check "she listens to the copy with Range" \
   test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/videocut/projects/$song_project/song/audio")" = 206
 check "the montage account cannot read her space" denied a-nas-videocut ls "$data/spaces/private/alice"
 check "deleting the project removes the copy no project uses" \
-  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/videocut/projects/$song_project') == 204 ]] && ! compgen -G '$data/montage/songs/*/audio' >/dev/null"
+  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/videocut/projects/$song_project') == 204 ]] && ! compgen -G '$data/videocut/songs/*/audio' >/dev/null"
 
 # A probe in the FFmpeg worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'
@@ -3059,7 +3059,7 @@ check "a-nas-check passes after the rollback" quiet a-nas-check
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "the upgrade copied the montage database on the data volume" \
-  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
+  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/videocut/videocut.db')"
 check "and the workspace database" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/workspace/workspace.db')"
 check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
@@ -3107,7 +3107,7 @@ check "a rollback keeps the newer keyring" test "$(dpkg-query -W -f='${Version}'
 check "apt upgrades to this release again" reinstall upgrade-again "$version"
 check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
-  test "$(systemctl is-active anas-videocut):$(id -u a-nas-videocut):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
+  test "$(systemctl is-active anas-videocut):$(id -u a-nas-videocut):$(stat -c '%a %U' "$data/videocut"):$(stat -c '%a %G' /run/a-nas-videocut/videocut.sock)" = \
   "active:31005:700 a-nas-videocut:660 a-nas-videocut"
 check "after upgrading again the workspace service has its account, store and socket" \
   test "$(systemctl is-active anas-workspace):$(id -u a-nas-workspace):$(stat -c '%a %U' "$data/workspace"):$(stat -c '%a %G' /run/a-nas-workspace/workspace.sock)" = \
@@ -3115,7 +3115,7 @@ check "after upgrading again the workspace service has its account, store and so
 check "and the shared page is still there" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages/$workspace_page') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
-  test "$(systemctl is-active anas-videocut-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
+  test "$(systemctl is-active anas-videocut-assistant.socket):$(stat -c '%a %U' /run/a-nas-videocut-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the files are there after upgrading again" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "two copies of the databases stay, under the same names on both disks" \

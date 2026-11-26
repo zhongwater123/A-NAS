@@ -34,7 +34,7 @@ func TestPersistentJobRetriesKilledComputeProcess(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
-	socket := fmt.Sprintf("@a-nas-montage-job-kill-%d", os.Getpid())
+	socket := fmt.Sprintf("@a-nas-videocut-job-kill-%d", os.Getpid())
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 	if err != nil {
 		t.Fatal(err)

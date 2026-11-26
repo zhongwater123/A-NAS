@@ -34,12 +34,12 @@ func (a uidAccounts) ResolveAccountUID(_ context.Context, uid int) (accountid.Se
 // is open and unavailable while none is, and a store is not closed under a
 // call it is answering.
 func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
-	dir, err := os.MkdirTemp("", "montage-assistant")
+	dir, err := os.MkdirTemp("", "videocut-assistant")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	root := filepath.Join(dir, "montage")
+	root := filepath.Join(dir, "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestTheAssistantSocketFollowsTheStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, Config{Root: root, SocketPath: filepath.Join(dir, "montage.sock"), Sessions: sessions{}, Grants: noGrants{},
+		done <- Run(ctx, Config{Root: root, SocketPath: filepath.Join(dir, "videocut.sock"), Sessions: sessions{}, Grants: noGrants{},
 			Accounts: uidAccounts{os.Getuid(): {UserID: "user:alice", Username: "alice"}}, AssistantSocket: path, PlanMarkers: markers,
 			Logger: testLogger(), RetryInterval: 20 * time.Millisecond,
 			CheckStore: func(string) error {

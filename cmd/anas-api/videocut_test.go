@@ -18,12 +18,12 @@ import (
 // rows from a time it was on must not stay (ADR 0038).
 func TestDeletedAccountsLeaveTheVideoCutStoreWhateverTheSwitch(t *testing.T) {
 	// Unix socket paths are short; t.TempDir can exceed the limit.
-	dir, err := os.MkdirTemp("", "montage")
+	dir, err := os.MkdirTemp("", "videocut")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "montage.sock")
+	socket := filepath.Join(dir, "videocut.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

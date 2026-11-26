@@ -192,7 +192,7 @@ systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-
 # counts of those rounds and the receipts the rounds left in members' Hermes
 # homes have nothing left to read them.
 rm -rf -- /var/lib/anas-assistant-cron-waker
-if mountpoint -q /srv/a-nas/data; then rm -f -- /srv/a-nas/data/assistant/*/hermes/anas-montage-claim; fi
+if mountpoint -q /srv/a-nas/data; then rm -f -- /srv/a-nas/data/assistant/*/hermes/anas-videocut-claim; fi
 # The photo service's grant socket starts with it (its Wants=), in the gap
 # its restart leaves: systemd refuses to start a socket while the service it
 # activates runs, and the assistant's socket can start the photo service at

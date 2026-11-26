@@ -7,7 +7,7 @@ Documentation=https://github.com/zhongwater123/A-NAS
 # that answers connections one at a time (docs/architecture/photo-ai.md,
 # 剪辑中心的分析). The photo service and the montage service reach it through
 # the a-nas-photos group.
-ListenStream=/run/a-nas-montage-compute/compute.sock
+ListenStream=/run/a-nas-videocut-compute/compute.sock
 SocketUser=root
 SocketGroup=a-nas-photos
 SocketMode=0660

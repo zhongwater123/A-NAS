@@ -85,11 +85,11 @@ func request(socket, token string) (int, string, error) {
 
 func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 	dir := t.TempDir()
-	root := filepath.Join(dir, "montage")
+	root := filepath.Join(dir, "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(dir, "montage.sock")
+	socket := filepath.Join(dir, "videocut.sock")
 	var usable atomic.Bool
 	usable.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())

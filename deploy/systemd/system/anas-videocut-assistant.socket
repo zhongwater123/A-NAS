@@ -11,7 +11,7 @@ Description=A-NAS montage center socket for planning by members' VNAS
 # takes it (Sockets=).
 
 [Socket]
-ListenStream=/run/a-nas-montage-assistant/assistant.sock
+ListenStream=/run/a-nas-videocut-assistant/assistant.sock
 SocketMode=0666
 DirectoryMode=0700
 FileDescriptorName=assistant

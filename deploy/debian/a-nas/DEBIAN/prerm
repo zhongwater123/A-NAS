@@ -11,7 +11,7 @@
 # The montage center's socket for planning stops before the montage service,
 # each time: root's planner or a member's planning instance that connects to it
 # starts the service again (its Service=), which would then run on after the
-# rollback, or write montage.db while the next release's preinst copies it.
+# rollback, or write videocut.db while the next release's preinst copies it.
 # It starts again with the montage service (its Wants=). Removing the product
 # also stops the planner and the members' planning instances. The shared
 # workspace service (ADR 0040) stops on an upgrade for the montage service's

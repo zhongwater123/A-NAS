@@ -81,7 +81,7 @@ func configuredVideoCut(ctx context.Context, config Config, grants app.Grants, m
 		}
 		return videocut.Proxy(config.VideoCutSocket, logger), remove, func() {}, nil
 	}
-	root := filepath.Join(config.DataMount, "montage")
+	root := filepath.Join(config.DataMount, "videocut")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, nil, nil, err
 	}

@@ -77,11 +77,11 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
 	sessions := sessionDirectory(t, controlDB)
-	if err := os.Mkdir(filepath.Join(dir, "montage"), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "videocut"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	// Jobs are queued and polled here; no job runs.
-	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"),
+	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "videocut"),
 		app.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
 			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: external.FixedPlanner{}})
 	if err != nil {

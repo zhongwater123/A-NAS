@@ -900,11 +900,11 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	}
 	// The montage service came later (ADR 0038): a release before it has no
 	// unit to stop or start, which systemctl says with exit status 5. Any
-	// other failure may leave it writing montage.db, so nothing is restored.
+	// other failure may leave it writing videocut.db, so nothing is restored.
 	// It stops first: a request of its on the photo service's grant socket
 	// would start the photo service again. And before it its socket for
 	// members' scheduled tasks, through which a round of a member's tasks
-	// would start it again while montage.db is restored; the socket starts
+	// would start it again while videocut.db is restored; the socket starts
 	// again with the service.
 	// The shared workspace service (ADR 0040) came later still, and stops for
 	// the same reason.
@@ -923,10 +923,10 @@ rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
   /srv/a-nas/data/photos/catalog.db-wal /srv/a-nas/data/photos/catalog.db-shm \
   /srv/a-nas/data/shares/catalog.db-wal /srv/a-nas/data/shares/catalog.db-shm \
   /srv/a-nas/data/family/family.db-wal /srv/a-nas/data/family/family.db-shm \
-  /srv/a-nas/data/montage/montage.db-wal /srv/a-nas/data/montage/montage.db-shm \
+  /srv/a-nas/data/videocut/videocut.db-wal /srv/a-nas/data/videocut/videocut.db-shm \
   /srv/a-nas/data/workspace/workspace.db-wal /srv/a-nas/data/workspace/workspace.db-shm
 cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-for store in photos shares family montage workspace; do
+for store in photos shares family videocut workspace; do
   if [ -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]; then
     cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   fi

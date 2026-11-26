@@ -156,9 +156,9 @@ func (e *Executor) EnsureVideoCutStore(ctx context.Context) ([]string, error) {
 	}
 	e.materializeMu.Lock()
 	defer e.materializeMu.Unlock()
-	drifted, err := e.ensureOwnedStore(ctx, "montage", accountid.VideoCutServiceUser, accountid.VideoCutServiceUID)
+	drifted, err := e.ensureOwnedStore(ctx, "videocut", accountid.VideoCutServiceUser, accountid.VideoCutServiceUID)
 	if drifted {
-		return []string{filepath.Join(e.mountPoint, "montage")}, err
+		return []string{filepath.Join(e.mountPoint, "videocut")}, err
 	}
 	return nil, err
 }

@@ -190,7 +190,7 @@ type songFixture struct {
 
 func newSongFixture(t *testing.T) *songFixture {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "montage")
+	root := filepath.Join(t.TempDir(), "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}

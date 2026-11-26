@@ -22,7 +22,7 @@ func TestDatabaseStepsHaveWorkingDowns(t *testing.T) {
 // refuses a Down that leaves rows referring to rows no longer there.
 func TestGoingBackBeforeJobKindsForgetsEditsAndRecuts(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlitedb.Open(t.TempDir()+"/montage.db", sqlitedb.Options{})
+	db, err := sqlitedb.Open(t.TempDir()+"/videocut.db", sqlitedb.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

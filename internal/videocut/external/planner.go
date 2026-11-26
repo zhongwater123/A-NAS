@@ -37,7 +37,7 @@ func (p FixedPlanner) Shots(context.Context, domain.PlanInput) (json.RawMessage,
 	return p.read("shots.json")
 }
 
-// PlanMarkers keeps the planning markers in Dir (/run/a-nas-montage/plans):
+// PlanMarkers keeps the planning markers in Dir (/run/a-nas-videocut/plans):
 // one empty file per member whose job wants a round, named by the account.
 type PlanMarkers struct{ Dir string }
 

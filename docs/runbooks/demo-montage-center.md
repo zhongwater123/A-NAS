@@ -61,8 +61,8 @@
      - **谁能看到**：这个文件是设备级的，`GET /api/v1/videocut/hero` 把它给这台设备上每一位登录的成员，不只是放它的人。片子是用户的私人素材：只在这台设备的成员都可以看它时才放，演示完按“回滚或恢复”删掉。
      - 仓库是公开的，所以它只放在设备上，不进仓库也不进软件包。从开发机 C（Mac）拷到 NAS 后，以 root：
      ```bash
-     install -d -o a-nas-videocut -g a-nas-videocut -m 0750 /srv/a-nas/data/montage/hero
-     install -o a-nas-videocut -g a-nas-videocut -m 0640 hero.mp4 hero.jpg /srv/a-nas/data/montage/hero/
+     install -d -o a-nas-videocut -g a-nas-videocut -m 0750 /srv/a-nas/data/videocut/hero
+     install -o a-nas-videocut -g a-nas-videocut -m 0640 hero.mp4 hero.jpg /srv/a-nas/data/videocut/hero/
      ```
      源文件在开发机 C 的 `~/A-NAS-datasets/剪辑对比/剪辑原型（2026-11-11）/`。完成标准：剪辑中心主页的背景是雪峰、直升机、日照金山三个镜头。
 8. **演示**：
@@ -103,7 +103,7 @@
   systemctl daemon-reload && systemctl restart anas-api
   ```
   项目与成片都留着。成片在相册里，与剪辑中心无关。
-- **删掉主页背景片**（放过的话）：`rm -r /srv/a-nas/data/montage/hero`。主页不再有背景片。
+- **删掉主页背景片**（放过的话）：`rm -r /srv/a-nas/data/videocut/hero`。主页不再有背景片。
 - **卸掉配乐分析**：按[启用配乐分析](enable-montage-music.md)的“回滚或恢复”。
 - **退回上一版本**：“设置 → 系统更新 → 回到上一版本”，或按[部署 A-NAS 软件包](deploy-a-nas-packages.md)的“回滚或恢复”。
 

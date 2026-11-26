@@ -166,9 +166,9 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 原片、成片 | 相册：照片资产。上传的原片与成片在成员的个人图库，从相册选入的视频留在原来的图库 | 相册受管存储与 Catalog |
 | 项目授权 | 相册 | Catalog：`montage_grants`、`montage_grant_assets` |
 | 窗口向量、卡片、画质、卡片描述 | 相册：按内容对象，跨项目、跨成员复用 | Catalog（见“剪辑分析”）；窗口向量另同步到相册的 Qdrant |
-| 项目、批次、素材范围、任务、规划、时间线、版本与成片资产的对应 | 剪辑中心 | `montage/montage.db` |
-| 配乐的副本与分析 | 剪辑中心：成员选歌时经文件代理复制的一份；原文件仍在成员的空间里，由音乐功能索引 | `montage/songs/<sha256>/`，没有项目再用时删除 |
-| 渲染中间文件 | 剪辑中心 | `montage/tmp/<job-id>/`，任务结束时删除（见“清理”） |
+| 项目、批次、素材范围、任务、规划、时间线、版本与成片资产的对应 | 剪辑中心 | `videocut/videocut.db` |
+| 配乐的副本与分析 | 剪辑中心：成员选歌时经文件代理复制的一份；原文件仍在成员的空间里，由音乐功能索引 | `videocut/songs/<sha256>/`，没有项目再用时删除 |
+| 渲染中间文件 | 剪辑中心 | `videocut/tmp/<job-id>/`，任务结束时删除（见“清理”） |
 
 剪辑中心不保存原片、分析结果或成片的副本；卡片为什么归相册、怎样理解 #514 的“项目特定的卡片分组”，见 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 决定 2。
 
@@ -182,7 +182,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
     - `UMask=0077`、`RuntimeDirectoryMode=0750`；
     - `ReadWritePaths=/srv/a-nas/data`。实际能写哪里由子卷的属主与 ACL 决定，和家庭中心一样。
   - 资源：`MemoryMax=512M`、`CPUWeight=20`、`IOWeight=20`。重计算都在 Worker 和相册里，服务本身只管状态。
-- **入口**：anas-api 用 `mount("/api/v1/videocut", apiroute.Session, ...)` 把请求转到 `/run/a-nas-montage/montage.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-montage-sessions/montage.sock`，确认来人是谁。
+- **入口**：anas-api 用 `mount("/api/v1/videocut", apiroute.Session, ...)` 把请求转到 `/run/a-nas-videocut/videocut.sock`。转发时去掉 Cookie、CSRF 与 Authorization 头，换成 `X-A-NAS-Session`；`X-A-NAS-Assistant` 由 anas-api 自己设置（见“规划授权”）。服务拿这个会话去问 Host Agent 的会话查询套接字 `/run/a-nas-videocut-sessions/videocut.sock`，确认来人是谁。
 - **开关**：环境变量 `ANAS_VIDEOCUT_ENABLED`，M10 之前默认关闭。关闭时产品服务不挂载 `/api/v1/videocut`，桌面不显示入口。网页入口只是外观，隐藏它挡不住接口，所以开关放在服务端；先例是 `ANAS_PHOTO_ASSISTANT_LOOKUP`。
 - **存储**：Host Agent 建 `montage/` 子卷，权限 0700，属主 `a-nas-videocut`，每 15 分钟修复一次漂移。
   - 数据卷离线或只读时，整个服务回答 503 `videocut_unavailable`，不在系统盘建替代目录。
@@ -200,11 +200,11 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 | 区域 | 要改的地方 |
 |---|---|
-| 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-videocut`（否则连不上 0750 的 `/run/a-nas-montage`） |
-| 包脚本 | preinst 检查 UID 31005 冲突、备份 `montage.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
-| 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `montage service ready`）；`make ops-check` |
+| 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-videocut`（否则连不上 0750 的 `/run/a-nas-videocut`） |
+| 包脚本 | preinst 检查 UID 31005 冲突、备份 `videocut.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
+| 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `videocut service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
-| anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("montage")`） |
+| anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("videocut")`） |
 | Host Agent | 会话查询、`EnsureVideoCutStore` 与卷上的调用、身份常量 |
 | 路由 | `httpapi/product.go`、`routes.go` |
 | 日志 | 服务端白名单、`api/components/logs.yaml` 的枚举、网页的日志列表、[日志规格](../specs/logs.md) |
@@ -215,7 +215,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 
 ## 剪辑中心的数据
 
-数据库是 SQLite 的 `montage/montage.db`，使用 WAL 与 `synchronous=FULL`（掉电后已提交的事务也在），迁移版本记在 `user_version`。所有表都带 `owner_user_id`，按成员隔离。
+数据库是 SQLite 的 `videocut/videocut.db`，使用 WAL 与 `synchronous=FULL`（掉电后已提交的事务也在），迁移版本记在 `user_version`。所有表都带 `owner_user_id`，按成员隔离。
 
 | 表 | 主要列 | 说明 |
 |---|---|---|
@@ -239,7 +239,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 子卷里的文件：
 ```text
 montage/
-  montage.db
+  videocut.db
   songs/<sha256>/audio      （成员选歌时复制的一份，见“配乐”）
   tmp/<job-id>/             （渲染中间文件与待存回的成片，按任务分目录）
 ```
@@ -247,9 +247,9 @@ montage/
 **清理**
 - 删除项目：先取消任务，再删掉项目、版本记录、修改稿与规划，撤销相册授权；不动相册里的原片和成片（#514）。
 - `tmp/<job-id>/` 在任务结束（完成、失败或取消）时删除；服务启动时只删掉已结束任务的目录。渲染步骤记为完成、目录里的文件却不见了时，渲染步骤视为没完成，重新渲染。
-- 删除账号：`ForgetStep("montage")` 清掉这位成员的全部行。相册在自己的账号删除步骤里清掉这位成员的授权。相册那一步先执行，所以剪辑中心的撤销必须幂等。
+- 删除账号：`ForgetStep("videocut")` 清掉这位成员的全部行。相册在自己的账号删除步骤里清掉这位成员的授权。相册那一步先执行，所以剪辑中心的撤销必须幂等。
 - 配乐副本：删除项目、删除账号之后，回收已经没有任何 `songs` 行引用的 `songs/<sha256>/` 目录。`songs` 行在当前项目、未结束的任务或任何版本（经它的任务的 `settings_json`）还引用时保留：二次编辑的粗预览、存为新版本与重剪都用版本当时的歌（#596 起；在此之前项目换歌后，旧任务的歌会被回收）。同一份内容可能被几位成员共用，所以按引用回收；服务启动时也对一次账。
-- 启动时对账：`montage.db` 与相册的授权表可能被恢复到不同的时间点。剪辑中心启动时用 `list` 列出相册里自己的授权：剪辑中心有、相册没有的，项目标为素材缺失；相册有、剪辑中心不认识的，撤销。
+- 启动时对账：`videocut.db` 与相册的授权表可能被恢复到不同的时间点。剪辑中心启动时用 `list` 列出相册里自己的授权：剪辑中心有、相册没有的，项目标为素材缺失；相册有、剪辑中心不认识的，撤销。
 
 ## 项目授权
 
@@ -513,7 +513,7 @@ montage/
 
 **复制一份**
 - 成员选定一首时（会话还在），页面调 `PUT /projects/{id}/song`，带上歌曲编号。评审人建议在点“开始”时复制；这里提前到选歌时，因为试听要先有分析结果，两者都在成员在场时。
-- 这条请求在 anas-api 里有自己的处理：它用音乐功能播放时的同一条路径，经文件代理以成员身份打开文件，流式交给剪辑中心。剪辑中心按内容摘要存成 `montage/songs/<sha256>/audio`。
+- 这条请求在 anas-api 里有自己的处理：它用音乐功能播放时的同一条路径，经文件代理以成员身份打开文件，流式交给剪辑中心。剪辑中心按内容摘要存成 `videocut/songs/<sha256>/audio`。
 - 音乐功能读文件要成员在线的会话（[ADR 0018](../adr/0018-index-music-in-place-through-the-file-broker.md)），所以在成员在场时复制。剪辑中心离线时不用再读成员的空间，文件代理也不用加新的授权路径。
 - 文件大小与时长的上限见规格的默认规则，超出时回答 413 或 422。
 - 副本在没有项目再用、也没有进行中的任务用时删除。音乐库里的原文件不受影响，成员之后改动或删除它，也不影响已经选好的项目。
@@ -555,7 +555,7 @@ montage/
 - `ai/assistant/anas_montage_mcp.py`，配置照 `companion` 写全各个键：`trust: full`、`enabled: true`、`lazy: false`、`timeout: 120`、`tools.prompts/resources: false`（`ai/assistant/montage-mcp.yaml`）。`untrusted` 不行：每次调用都要审批，而后台对话里没有人能批准。
 - 只在规划进程的托管策略 `managed-plan/` 里，规划进程的工具组固定为 `montage,memory,skills`。成员平时的 VNAS、定时任务与整理单元都没有这个服务器，也不绑定剪辑套接字。
 - **云端看不到画面**：规划进程里没有看图、看视频、读文件、终端、相册与桌面的工具，工具只给文字与结构化数据（用户 2026-11-20 决定 3）。
-- 套接字：systemd 的 `anas-videocut-assistant.socket` 持有宿主机上的 `/run/a-nas-montage-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-montage/montage.sock`。
+- 套接字：systemd 的 `anas-videocut-assistant.socket` 持有宿主机上的 `/run/a-nas-videocut-assistant/assistant.sock`，权限 0666，所在目录只有 root 能进；只绑定进规划进程，在沙箱里是 `/run/anas-assistant-videocut/videocut.sock`。
 - 剪辑中心用 `SO_PEERCRED` 取得对端 UID，经 Host Agent 按 UID 认出在用的账号，只回答这位成员自己的任务。UID 0 的对端（规划发起方）用 `X-A-NAS-Account` 指明成员。
 - 套接字上有两类调用：MCP 服务器的工具（下表，`/v1/tools/*`），和规划发起方的 `claim`、`started`、`abandon`、`end`（`/v1/rounds/*`）。
 - 同一个 UID 在沙箱里还能用终端（成员平时的 VNAS），所以工具调用要带着进行中那一轮的 token，套接字还限制请求大小（80 KiB）与频率（每位成员每秒 5 次，突发 20 次）。
@@ -580,7 +580,7 @@ montage/
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次对话的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/montage-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__montage__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/videocut-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 后台对话里没有人回答审批，规划发起方对审批请求一律答拒绝。提示词仍要求不把描述写进记忆。
 
@@ -597,7 +597,7 @@ montage/
 
     | 文件代理的回答 | anas-api 怎么做 | 剪辑中心 |
     |---|---|---|
-    | 已登记 | 转发，带 `X-A-NAS-Assistant: on` | 把这个时间记进 `montage.db` 的 `plan_grants` |
+    | 已登记 | 转发，带 `X-A-NAS-Assistant: on` | 把这个时间记进 `videocut.db` 的 `plan_grants` |
     | 设备没有开启 VNAS、这个账号没有 VNAS | 转发，带 `X-A-NAS-Assistant: off` | 任务照常建，页面写明“VNAS 没有开启”；开启后点“重新规划” |
     | `unavailable`，或连不上文件代理 | 回答 503 `assistant_unavailable`，不转发 | 页面提示稍后再试 |
 
@@ -610,7 +610,7 @@ montage/
   - 产品服务只能为正在登录的成员登记授权，与 ADR 0024 决定 10 的威胁模型相同。
 
 **等待与提示**
-- 任务走到规划时进入 `waiting(vnas)`，剪辑中心写空文件 `/run/a-nas-montage/plans/<账号>`，表示这位成员有任务在等规划；没有任务在等、或最近一次登记已超过 7 天时删掉，页面直接给“重新规划”。记号在运行目录里，启动时按 `jobs` 表重建。
+- 任务走到规划时进入 `waiting(vnas)`，剪辑中心写空文件 `/run/a-nas-videocut/plans/<账号>`，表示这位成员有任务在等规划；没有任务在等、或最近一次登记已超过 7 天时删掉，页面直接给“重新规划”。记号在运行目录里，启动时按 `jobs` 表重建。
 - 一轮的时限：领取后 5 分钟没开始就作废；开始后距最后一次调用工具 20 分钟、或开始后 65 分钟仍没结束，就结束。等了 10 分钟还没被领取时，页面写“VNAS 还没有接手”，并给出“重新规划”。
 - 重试按原因等待，页面写明在等什么、几分钟后再试（规划会话的“重试”）。
 - 桌面外壳懒加载的 `VideoCutNotices` 照家庭中心的 `FamilyNotices` 做，只显示提示，不发起规划。内容见规格“本稿补充的默认规则”的桌面提示。
@@ -833,7 +833,7 @@ montage/
 **重剪的规划**
 - `POST /versions/{id}/recut` 加进 `protocol.PlanningRoutes`，成为第五条登记规划授权的请求，行为与另外四条相同（见“规划授权”）。
 - brief 多两项：`base` 是来源版本收下的大纲与镜头，`edit` 版本取它所来自的规划，手动改的镜头不带；`change` 是这句话。`base` 取两步规划交回的原文，带各部分与各画面的衔接（`link`）；上一次没找到的内容（`unmet`）不带，由新的一轮自己写。卡片号按视频在任务里的先后编号（`v{n}-{序号}`），重剪任务移除了视频、或视频重新分析过时，卡片重新编号，`base` 里的旧编号会指向别的画面。所以建任务时同时记下 `base` 用到的每张卡片在视频里的位置（`settings_json` 的 `recut.cards`：视频、起止与各节拍的时刻），到出 brief 时按这一次的目录对齐：同一个视频里同一位置的卡片还在，就换成它现在的编号；不在了（视频已移除，或重新切过、重新描述过），就从大纲各场的 `cards` 与各画面的 `beats` 里去掉，一场或一个画面一张都不剩时去掉这一项，模板写明这时照它的 `query`、`shows` 与 `link` 从这一次的卡片里重新挑，其余照 `base` 保留（[`recut.go`](../../internal/videocut/app/recut.go) 的 `alignBase`）。重剪要等素材分析做完才出 brief，所以正在分析的素材也按做完后的卡片对齐。
-- 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_videocut_worker.py`](../../ai/tests/test_videocut_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `montage-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
+- 模板 `plan-v3.md` 是 `plan-v2.md` 的重剪版：两步的规则与 v2 逐字相同（[`test_videocut_worker.py`](../../ai/tests/test_videocut_worker.py) 的 `test_the_recut_template_starts_from_base_and_changes_only_what_change_asks` 断言），去掉了出两版、换一种讲法的流程（只出一版），写明 `change` 只当作剪辑要求读，并加“重剪”一节的五条：`change` 没提到的部分、画面、卡片与节拍照 `base` 保留，顺序不变；要改的地方按规则重新安排，可以调整紧挨着的一两个画面；`design` 照 `base` 写，再加一句说明改了什么；要的内容卡片里找不到时照 `base` 保留并写进 `unmet`；`base` 里不合现在规则的地方照规则改。第二步的数据照旧等大纲交回后才给。规划发起方按领取回答里的模板名加载 `<模板>.md`，v2 与 v3 都随软件包装进 `videocut-prompts`，一个任务用哪个由剪辑中心按任务种类给出（生成 v2，重剪 v3）。
 - 这句话照“一句话要求”限 200 字：服务端只查它不为空、不超过 200 字（[`recut.go`](../../internal/videocut/app/recut.go)）。“不支持的要求”的词表只在网页里（[`words.ts`](../../web/src/videocut/lib/words.ts) 的 `limitsOf`，写要求的页面在输入框下提示，不拦着继续），而重剪还没有网页入口，所以现在没有哪一处拿这句话对词表。[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 7 项要它也过词表，这一条还没做，随新界面的 ADR 定在哪一侧做（[#632](https://github.com/zhongwater123/A-NAS/issues/632)）。
 
 **缩略图**：`GET /projects/{id}/frames/{assetId}?t=<毫秒>`

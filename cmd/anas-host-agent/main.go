@@ -114,7 +114,7 @@ type config struct {
 	FamilySessionGroup    string `env:"ANAS_FAMILY_SESSION_GROUP"`
 	FamilySessionSocket   string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
 	VideoCutSessionGroup  string `env:"ANAS_VIDEOCUT_SESSION_GROUP"`
-	VideoCutSessionSocket string `env:"ANAS_VIDEOCUT_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	VideoCutSessionSocket string `env:"ANAS_VIDEOCUT_SESSION_SOCKET" envDefault:"/run/a-nas-videocut-sessions/videocut.sock"`
 	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
 	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
@@ -289,7 +289,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopFamilyLookup()
-	stopVideoCutLookup, err := serveServiceSessionLookup("montage", config.VideoCutSessionGroup, config.VideoCutSessionSocket, sessions,
+	stopVideoCutLookup, err := serveServiceSessionLookup("videocut", config.VideoCutSessionGroup, config.VideoCutSessionSocket, sessions,
 		config.VideoCutAssistantLookup == "1", "", logger)
 	if err != nil {
 		return err

@@ -115,7 +115,7 @@ func (c Client) Call(ctx context.Context, op string, request any, arrays []Array
 		if err != nil {
 			return fmt.Errorf("%w: %v", ErrRefused, err)
 		}
-		file, err := unixmsg.SealedFile("anas-montage-"+array.Name, data)
+		file, err := unixmsg.SealedFile("anas-videocut-"+array.Name, data)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrFailed, err)
 		}

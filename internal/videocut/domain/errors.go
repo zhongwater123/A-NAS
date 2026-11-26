@@ -86,7 +86,7 @@ var (
 	// another kind, on another project or with other videos.
 	ErrConflict = errors.New("the request key was used for another request")
 	// ErrGrantRevoked: the photo library revoked the project's grant, as
-	// when montage.db was restored to before the project's deletion; the
+	// when videocut.db was restored to before the project's deletion; the
 	// project can take no more videos.
 	ErrGrantRevoked = errors.New("the project's grant was revoked")
 	// ErrPhotosUnavailable: the photo library did not answer, or cannot now.

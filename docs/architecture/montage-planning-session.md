@@ -23,7 +23,7 @@
 - 由 `scripts/lib/assistant-units.sh` 从 `anas-assistant@.service` 生成，与定时任务、整理单元同法：同样的挂载（同它们一样不绑定伙伴的套接字，没有窗口）、同一个 Hermes 主目录（记忆、技能、对话记录共用）、同一个私有网络与模型桥（`JoinsNamespaceOf=anas-assistant-net@%i.service`），端口换成 9120（`ANAS_ASSISTANT_CHANNEL=plan`，`assistant-start.sh`）。生成时核对每处替换都生效，模板变了在打包时失败。
 - **工具在进程级固定**：`HERMES_TUI_TOOLSETS=montage,memory,skills`。`hermes serve` 不能按单次对话收窄工具，工具组整个进程一致，所以只能用一个单独的进程。实测模型只拿到 `memory`、`skill_manage`、`skill_view`、`skills_list` 与剪辑的 4 个工具。
 - **自己的托管策略**：`managed-plan/` = 普通托管策略加上剪辑的 MCP 服务器（`montage-mcp.yaml`），把 `skills.creation_nudge_interval` 设为 1，每次规划结束都复盘。Host Agent 按它写 `members/<账号>/config-plan.yaml`，单元绑定成 Hermes 的 `config.yaml`。原来的 `managed-cron/` 与 `config-cron.yaml` 只为规划而有，一并去掉，定时任务单元回到普通策略。
-- **只有它绑定剪辑套接字**（`/run/a-nas-montage-assistant/assistant.sock` → 沙箱内 `/run/anas-assistant-montage/montage.sock`）；成员平时的 VNAS、定时任务与整理单元都不绑定。
+- **只有它绑定剪辑套接字**（`/run/a-nas-videocut-assistant/assistant.sock` → 沙箱内 `/run/anas-assistant-videocut/videocut.sock`）；成员平时的 VNAS、定时任务与整理单元都不绑定。
 - **自己的入口**：`anas-assistant-planapi@.socket`（`/run/a-nas-assistant-plan/<账号>.sock`，root 0600）与 `anas-assistant-planapi@.service`（`systemd-socket-proxyd --exit-idle-time=45s 127.0.0.1:9120`），由 `anas-assistant-api@` 的两个单元生成。连接来了才起进程，没有连接 45 秒后退出（`StopWhenUnneeded=yes`）。Host Agent 与 `anas-assistant-api@.socket` 一样为每个有 VNAS 的成员启用这个套接字；账号停用时连同 `anas-assistant-plan@` 一起屏蔽，删掉密钥时停下。
 - 与成员平时的 VNAS 可以同时运行；两个进程同时写同一主目录的记忆与技能，实测没有丢失。
 
@@ -31,7 +31,7 @@
 
 root 的长驻服务（`ai/assistant/montage-planner.py`），取代唤醒服务里的规划部分（`cron-waker.py` 只留成员的定时任务）。用 AI 助手运行环境的 Python（有 `websockets`）；与模型网关、唤醒服务一样只在保存了密钥时运行，Host Agent 随密钥启停。每 15 秒看一次。
 
-1. **找要规划的**：剪辑服务的记号（`/run/a-nas-montage/plans/<账号>`，只读）、规划授权（只认 root 所有、他人不可写的文件）、账号在用且有 VNAS。全机同一时间只规划一个。
+1. **找要规划的**：剪辑服务的记号（`/run/a-nas-videocut/plans/<账号>`，只读）、规划授权（只认 root 所有、他人不可写的文件）、账号在用且有 VNAS。全机同一时间只规划一个。
 2. **领取一轮**：在剪辑服务的助手套接字上 `POST /v1/rounds/claim`。规划发起方以 root 连接，请求带 `X-A-NAS-Account: <账号>`；剪辑服务只对 UID 0 的对端认这个头（套接字目录只有 root 进得去，沙箱里绑定的对端都是成员 UID），其余对端照旧按 UID 认成员。
 3. **开对话**：先确认模型网关应答（`GET /v1/models`，不花 token），连 `/run/a-nas-assistant-plan/<账号>.sock`，用 Hermes 自己的登录（`/auth/password-login`，密码是 Host Agent 写的实例密钥，`/var/lib/a-nas-host/assistant/tokens/<账号>.env`，只认 root 所有的文件），再走 `/api/ws` 的 JSON-RPC：`client.capabilities {server_requests: true}`、`session.create`、`session.title`（“剪辑规划 · <项目名>”，项目名随领取的回答带来）。然后报 `POST /v1/rounds/<轮次>/started`，`runRef` 是对话的存储编号（`stored_session_id`）；记下开始后才 `prompt.submit`（固定模板 `ai/anas_videocut/prompts/<模板>.md`，只填检查过的轮次、任务编号、token 与目标秒数），没记下开始（这一轮已作废或任务取消了）就不提交，模型不会被调用。
 4. **等它结束**：一直连着，收事件直到这次提问的 `message.complete`，至多 60 分钟（超时先 `session.interrupt`）；Hermes 发来的审批请求一律答 `{"choice": "deny"}`（实测不应答也是拒绝，这里明确拒绝），别的服务器请求答“不处理”。报完结果后再连着，等后台复盘的 `review.summary`，至多 150 秒（复盘在断开约 20 秒后会被回收）。连接断了、进程崩溃或超时，都算这一轮结束，按结果报告。

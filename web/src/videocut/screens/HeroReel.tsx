@@ -10,7 +10,7 @@ const stillOnly = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // HeroReel is the hero's background, as the prototype's hero film: the
-// device's own film when it keeps one (montage/hero/hero.mp4, never in the
+// device's own film when it keeps one (videocut/hero/hero.mp4, never in the
 // software: the repository is public), and nothing otherwise. It no longer
 // plays the member's own videos: each of them came from the photo library
 // every few seconds, which kept the library in use for as long as the window

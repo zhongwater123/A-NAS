@@ -39,15 +39,15 @@ import sys
 import time
 from datetime import datetime
 
-MARKERS = os.environ.get("ANAS_VIDEOCUT_PLAN_MARKERS", "/run/a-nas-montage/plans")
+MARKERS = os.environ.get("ANAS_VIDEOCUT_PLAN_MARKERS", "/run/a-nas-videocut/plans")
 GRANTS = os.environ.get("ANAS_ASSISTANT_PLAN_DIR", "/var/lib/a-nas-host/assistant/plans")
 TOKENS = os.environ.get("ANAS_ASSISTANT_TOKEN_DIR", "/var/lib/a-nas-host/assistant/tokens")
 STATE = os.environ.get("ANAS_VIDEOCUT_PLANNER_STATE", "/var/lib/anas-videocut-planner/state.json")
-MONTAGE = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-montage-assistant/assistant.sock")
+MONTAGE = os.environ.get("ANAS_VIDEOCUT_ASSISTANT_SOCKET", "/run/a-nas-videocut-assistant/assistant.sock")
 PLAN_SOCKETS = os.environ.get("ANAS_ASSISTANT_PLAN_SOCKETS", "/run/a-nas-assistant-plan")
 MODEL = os.environ.get("ANAS_ASSISTANT_MODEL_SOCKET", "/run/anas-assistant-gw/model.sock")
 HOST_SOCKET = os.environ.get("ANAS_HOST_AGENT_SOCKET", "/run/a-nas/host-agent.sock")
-PROMPTS = os.environ.get("ANAS_VIDEOCUT_PROMPTS", "/usr/lib/a-nas/assistant/montage-prompts")
+PROMPTS = os.environ.get("ANAS_VIDEOCUT_PROMPTS", "/usr/lib/a-nas/assistant/videocut-prompts")
 INTERVAL = int(os.environ.get("ANAS_VIDEOCUT_PLANNER_INTERVAL", "15"))
 
 ACCOUNT = re.compile(r"[a-z_][a-z0-9_-]{0,31}")

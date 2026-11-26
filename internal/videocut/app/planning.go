@@ -19,7 +19,7 @@ import (
 
 // Planning by the member's own VNAS (docs/architecture/montage-planning-session.md):
 // a job that comes to planning waits for VNAS and leaves a marker,
-// /run/a-nas-montage/plans/<account>; root's planner claims a round here,
+// /run/a-nas-videocut/plans/<account>; root's planner claims a round here,
 // holds it as one conversation with the member's planning instance, and
 // reports that it started and how it ended, or that it never started and
 // why (ai/assistant/montage-planner.py). The model reads the

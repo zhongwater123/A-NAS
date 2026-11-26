@@ -126,7 +126,7 @@ class PlannerTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.root = root
         paths = {"MARKERS": root / "markers", "GRANTS": root / "grants", "TOKENS": root / "tokens",
-                 "STATE": root / "state" / "state.json", "MONTAGE": root / "montage.sock",
+                 "STATE": root / "state" / "state.json", "MONTAGE": root / "videocut.sock",
                  "PLAN_SOCKETS": root / "plan", "PROMPTS": root / "prompts", "MODEL": root / "model.sock"}
         for name, path in paths.items():
             self.addCleanup(setattr, planner, name, getattr(planner, name))
@@ -141,7 +141,7 @@ class PlannerTests(unittest.TestCase):
         self.claim = {"roundId": ROUND, "jobId": JOB, "attemptToken": TOKEN, "template": "plan-v2", "targetSeconds": 12,
                       "project": "海边"}
         self.started_status = 204
-        self.montage_server, self.montage_calls = serve(str(root / "montage.sock"), self.montage)
+        self.montage_server, self.montage_calls = serve(str(root / "videocut.sock"), self.montage)
         self.addCleanup(self.montage_server.server_close)
         self.addCleanup(self.montage_server.shutdown)
         self.login_status = 200

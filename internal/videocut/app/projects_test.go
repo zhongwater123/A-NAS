@@ -291,7 +291,7 @@ func openStore(t *testing.T, root string, grants app.Grants, now func() time.Tim
 
 func newStore(t *testing.T) (*app.Store, *library, string) {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "montage")
+	root := filepath.Join(t.TempDir(), "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 
 func TestARevocationThePhotoLibraryMissedIsTriedAgain(t *testing.T) {
 	ctx := context.Background()
-	root := filepath.Join(t.TempDir(), "montage")
+	root := filepath.Join(t.TempDir(), "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -742,7 +742,7 @@ func TestAProjectWhoseGrantWentAway(t *testing.T) {
 	}
 }
 
-// montage.db restored to before an addition that registered a project's
+// videocut.db restored to before an addition that registered a project's
 // grant again: reconciling makes that grant the project's.
 func TestReconcilingFindsAGrantRegisteredAgain(t *testing.T) {
 	ctx := context.Background()

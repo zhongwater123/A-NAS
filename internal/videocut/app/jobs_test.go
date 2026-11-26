@@ -457,7 +457,7 @@ func (e *jobEnv) open(t *testing.T) {
 
 func newJobEnv(t *testing.T) *jobEnv {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "montage")
+	root := filepath.Join(t.TempDir(), "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1437,7 +1437,7 @@ func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
 	if _, err := env.store.OpenHero("poster"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a poster the device does not have = %v", err)
 	}
-	if _, err := env.store.OpenHero("../montage.db"); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := env.store.OpenHero("../videocut.db"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another file = %v", err)
 	}
 }

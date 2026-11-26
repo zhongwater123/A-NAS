@@ -26,7 +26,7 @@ NoNewPrivileges=true
 # The montage service's planning markers, the File Broker's planning grants and the
 # instances' secrets in the Host Agent's own state, which only root reads; a grant counts only
 # as root's own file there (montage-planner.py). The sockets it connects to are root's.
-ReadOnlyPaths=-/run/a-nas-montage -/var/lib/a-nas-host/assistant/plans -/var/lib/a-nas-host/assistant/tokens
+ReadOnlyPaths=-/run/a-nas-videocut -/var/lib/a-nas-host/assistant/plans -/var/lib/a-nas-host/assistant/tokens
 
 [Install]
 WantedBy=multi-user.target

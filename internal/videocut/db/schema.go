@@ -8,7 +8,7 @@ import (
 )
 
 // DatabaseName is the store's database file.
-const DatabaseName = "montage.db"
+const DatabaseName = "videocut.db"
 
 // schema grows a step per change (sqlitedb.Schema); every step has a Down,
 // so that an older release takes the database back.

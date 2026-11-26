@@ -30,7 +30,7 @@ from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAn
 
 from anas_window_call import UnixHTTP
 
-SOCKET = "/run/anas-assistant-montage/montage.sock"
+SOCKET = "/run/anas-assistant-videocut/videocut.sock"
 # The montage center keeps each brief once it is built and checks an answer without the compute Worker; only
 # the second step's brief, asked for before the job came to that step, may wait behind the Worker's other
 # work. Hermes gives up after 120 s.

@@ -154,7 +154,7 @@ check "without the bind, the sandbox's path is the empty mount point" \
 # skills; her ordinary instance, scheduled tasks and curator have none of it. Outside a bind
 # the socket is root's alone, and root is answered only for the account it names: that is the
 # planner, which hands the planning to her planning instance.
-montage_socket=/run/a-nas-montage-assistant/assistant.sock
+montage_socket=/run/a-nas-videocut-assistant/assistant.sock
 check "the montage service holds its socket for planning" systemctl is-active --quiet anas-videocut-assistant.socket
 check "the montage center's socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" "$montage_socket"
@@ -168,7 +168,7 @@ check "and answers root for the account it names: alice has nothing to plan yet"
   test "$(montage_claim 'X-A-NAS-Account: alice')" = 409
 check "an account that is not in use is refused" test "$(montage_claim 'X-A-NAS-Account: nobody')" = 401
 check "a member's planning instance binds the montage center's socket" \
-  grep -Fq "$montage_socket:/run/anas-assistant-montage/montage.sock" <<<"$(binds anas-assistant-plan@alice.service)"
+  grep -Fq "$montage_socket:/run/anas-assistant-videocut/videocut.sock" <<<"$(binds anas-assistant-plan@alice.service)"
 for unit in anas-assistant@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service; do
   check "$unit does not bind the montage center's socket" \
     test -n "$(binds "$unit")" -a "$(grep -cF "$montage_socket" <<<"$(binds "$unit")")" = 0
@@ -192,7 +192,7 @@ check "her scheduled tasks are back on the ordinary policy" \
 check "her planning instance has a socket of its own, root's alone" \
   test "$(stat -c '%a %U' /run/a-nas-assistant-plan/alice.sock 2>/dev/null)" = "600 root"
 check "root's planner runs while the key is saved" systemctl is-active --quiet anas-videocut-planner.service
-check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/montage-prompts/plan-v2.md
+check "the prompt templates of planning are installed" test -s /usr/lib/a-nas/assistant/videocut-prompts/plan-v2.md
 # The units bind it into each sandbox. To drive it as alice from outside one, the test binds
 # it at the sandbox's path on the host too.
 mount --bind /run/a-nas/assistant-changes.sock /run/anas-change-agent/agent.sock || true
@@ -650,7 +650,7 @@ if "$real_runtime"; then
       bash -c "[[ -n '$plan_job' && '$plan_job' != null ]] && jq -e '(.issuedAt | fromdateiso8601) > (now - 120)' '$plans/alice' >/dev/null"
     systemctl stop anas-videocut-assistant.socket anas-videocut.service || true
     seeded=$(setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups \
-      python3 /spike/montage-plan-seed.py "$data/montage/montage.db" "$plan_job" "$clip" 2>&1 || true)
+      python3 /spike/montage-plan-seed.py "$data/videocut/videocut.db" "$plan_job" "$clip" 2>&1 || true)
     systemctl start anas-videocut.service anas-videocut-assistant.socket || true
     check "the test gives her job a catalog and her song an analysis" grep -q '^seeded ' <<<"$seeded"
     echo "INFO montage planning: $seeded"
@@ -694,7 +694,7 @@ if "$real_runtime"; then
       test -n "$(find "$data/assistant/alice/hermes/skills" -path '*/montage-planning-notes/SKILL.md' 2>/dev/null)"
     check "the planner counted the round on her grant" \
       jq -e '[.counts | to_entries[] | select(.key | startswith("alice|")) | .value] == [1]' /var/lib/anas-videocut-planner/state.json
-    check "no marker is left for her" test ! -e /run/a-nas-montage/plans/alice
+    check "no marker is left for her" test ! -e /run/a-nas-videocut/plans/alice
     for _ in $(seq 1 90); do systemctl is-active --quiet anas-assistant-plan@alice.service || break; sleep 2; done
     check "her planning instance stops once the planner has left it" \
       test "$(systemctl is-active anas-assistant-plan@alice.service || true)" != active

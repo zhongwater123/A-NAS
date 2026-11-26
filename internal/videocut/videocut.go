@@ -131,7 +131,7 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer stopAssistant()
 	return storeservice.Run(ctx, storeservice.Config[*servedStore]{
-		Name: "montage", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
+		Name: "videocut", Root: config.Root, SocketPath: config.SocketPath, Sessions: config.Sessions,
 		Unavailable: protocol.Unavailable,
 		Open: func(ctx context.Context, root string) (*servedStore, error) {
 			store, err := app.Open(ctx, root, app.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute,

@@ -1104,7 +1104,7 @@ func TestRestoringTheDatabasesTakesTheVideoCutServiceAlong(t *testing.T) {
 		t.Fatal(err)
 	}
 	restore := slices.IndexFunc(host.calls, func(call string) bool {
-		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage")
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family videocut")
 	})
 	socket := slices.Index(host.calls, "systemctl stop anas-videocut-assistant.socket")
 	montage := slices.Index(host.calls, "systemctl stop anas-videocut")
@@ -1156,7 +1156,7 @@ func TestRestoringTheDatabasesTakesTheWorkspaceServiceAlong(t *testing.T) {
 		t.Fatal(err)
 	}
 	restore := slices.IndexFunc(host.calls, func(call string) bool {
-		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage workspace;") &&
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family videocut workspace;") &&
 			strings.Contains(call, "/srv/a-nas/data/workspace/workspace.db-wal")
 	})
 	stopped := slices.Index(host.calls, "systemctl stop anas-workspace")

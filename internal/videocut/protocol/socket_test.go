@@ -34,7 +34,7 @@ func (a uidAccounts) ResolveAccountUID(_ context.Context, uid int) (accountid.Se
 // The assistant socket knows the member by the peer's UID alone, and its
 // directory must keep everyone else out.
 func TestTheAssistantSocketKnowsTheMemberByUID(t *testing.T) {
-	dir, err := os.MkdirTemp("", "montage-assistant")
+	dir, err := os.MkdirTemp("", "videocut-assistant")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestTheAssistantSocketKnowsTheMemberByUID(t *testing.T) {
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o666 {
 		t.Fatalf("socket %v, %v", info, err)
 	}
-	root := filepath.Join(t.TempDir(), "montage")
+	root := filepath.Join(t.TempDir(), "videocut")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatal(err)
 	}

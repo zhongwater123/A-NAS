@@ -104,10 +104,10 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = photoService.Close() })
-	if err := os.Mkdir(filepath.Join(dir, "montage"), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, "videocut"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"), app.Options{
+	videoCutStore, err := app.Open(t.Context(), filepath.Join(dir, "videocut"), app.Options{
 		Grants: photoservice.LocalGrants(photoService, sessionDirectory(t, controlDB), nil, logger),
 		Media:  songMedia{}, Music: songStructure{}, Compute: songExcerpt{}, Logger: logger,
 	})
@@ -240,7 +240,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatalf("song back on the default start = %+v", song.Selection)
 	}
 	owner.do(http.MethodDelete, path, "", nil, http.StatusNoContent)
-	entries, _ := os.ReadDir(filepath.Join(dir, "montage", "songs"))
+	entries, _ := os.ReadDir(filepath.Join(dir, "videocut", "songs"))
 	for _, entry := range entries {
 		if entry.Name() != ".incoming" {
 			t.Fatalf("copies after the project went: %v", entries)

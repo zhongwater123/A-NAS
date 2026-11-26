@@ -210,9 +210,9 @@ git diff deploy/upstream/packages.json
   ls /var/backups/a-nas /srv/a-nas/data/.a-nas-backups
   rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
     /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm} \
-    /srv/a-nas/data/montage/montage.db-{wal,shm} /srv/a-nas/data/workspace/workspace.db-{wal,shm}
+    /srv/a-nas/data/videocut/videocut.db-{wal,shm} /srv/a-nas/data/workspace/workspace.db-{wal,shm}
   cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-  for store in photos shares family montage workspace; do
+  for store in photos shares family videocut workspace; do
     [[ ! -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]] || cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   done
   systemctl start anas-host-agent anas-photos anas-shares anas-family anas-api

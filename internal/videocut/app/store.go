@@ -1,5 +1,5 @@
 // Package app keeps the montage center's records (剪辑中心, ADR 0038):
-// projects, plans, timelines and jobs, in montage.db on the montage store.
+// projects, plans, timelines and jobs, in videocut.db on the montage store.
 // The videos, their analysis and the films stay in the photo library.
 package app
 

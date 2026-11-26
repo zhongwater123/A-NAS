@@ -61,7 +61,7 @@ derive_assistant_units() {
     -e "s#HERMES_MANAGED_DIR=$lib/managed\\b#HERMES_MANAGED_DIR=$lib/managed-plan#" \
     -e 's#members/%i/config.yaml:#members/%i/config-plan.yaml:#' \
     -e 's#wait-port.sh 9119#wait-port.sh 9120#' \
-    -e '\#anas-assistant-photos/photos.sock#a BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' \
+    -e '\#anas-assistant-photos/photos.sock#a BindReadOnlyPaths=-/run/a-nas-videocut-assistant/assistant.sock:/run/anas-assistant-videocut/videocut.sock' \
     "$units/anas-assistant@.service" >"$units/anas-assistant-plan@.service"
   sed -e 's#^Description=.*#Description=A-NAS assistant planning socket for %i#' \
     -e 's#/run/a-nas-assistant/#/run/a-nas-assistant-plan/#' \
@@ -73,7 +73,7 @@ derive_assistant_units() {
   # A template that changed under these edits fails here, not on the device.
   local unit line
   for unit in plan@.service:HERMES_TUI_TOOLSETS=montage,memory,skills plan@.service:HERMES_MANAGED_DIR=$lib/managed-plan \
-    plan@.service:members/%i/config-plan.yaml: plan@.service:'wait-port.sh 9120' plan@.service:a-nas-montage-assistant/assistant.sock \
+    plan@.service:members/%i/config-plan.yaml: plan@.service:'wait-port.sh 9120' plan@.service:a-nas-videocut-assistant/assistant.sock \
     planapi@.socket:ListenStream=/run/a-nas-assistant-plan/%i.sock planapi@.service:anas-assistant-plan@%i.service \
     planapi@.service:127.0.0.1:9120; do
     line=${unit#*:}
@@ -88,7 +88,7 @@ derive_assistant_units() {
     fi
   done
   if grep -q 'a-nas-companion-assistant\|members/%i/config.yaml:' "$units/anas-assistant-plan@.service" ||
-    grep -q 'a-nas-montage-assistant' "$units/anas-assistant-cron@.service" "$units/anas-assistant-curator@.service"; then
+    grep -q 'a-nas-videocut-assistant' "$units/anas-assistant-cron@.service" "$units/anas-assistant-curator@.service"; then
     echo "a unit made from anas-assistant@.service binds what it must not" >&2
     return 1
   fi

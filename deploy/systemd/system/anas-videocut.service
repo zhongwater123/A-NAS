@@ -13,16 +13,16 @@ Group=a-nas-videocut
 # API and the AI worker, as for the family service (ADR 0038, consequences).
 SupplementaryGroups=a-nas-photos
 ExecStart=/usr/lib/a-nas/anas-api videocut-service
-Environment=ANAS_VIDEOCUT_ROOT=/srv/a-nas/data/montage
-Environment=ANAS_VIDEOCUT_SOCKET=/run/a-nas-montage/montage.sock
-Environment=ANAS_VIDEOCUT_SESSION_SOCKET=/run/a-nas-montage-sessions/montage.sock
+Environment=ANAS_VIDEOCUT_ROOT=/srv/a-nas/data/videocut
+Environment=ANAS_VIDEOCUT_SOCKET=/run/a-nas-videocut/videocut.sock
+Environment=ANAS_VIDEOCUT_SESSION_SOCKET=/run/a-nas-videocut-sessions/videocut.sock
 Environment=ANAS_PHOTOS_GRANT_SOCKET=/run/a-nas-photos-grants/grants.sock
 # Members' planning instances plan with VNAS through a socket systemd holds
 # (anas-videocut-assistant.socket), which root's planner also claims rounds on;
 # the planner reads who has a job to plan from the markers in
-# /run/a-nas-montage/plans (docs/architecture/montage-planning-session.md).
+# /run/a-nas-videocut/plans (docs/architecture/montage-planning-session.md).
 Sockets=anas-videocut-assistant.socket
-RuntimeDirectory=a-nas-montage
+RuntimeDirectory=a-nas-videocut
 RuntimeDirectoryMode=0750
 UMask=0077
 Restart=on-failure

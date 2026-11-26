@@ -178,7 +178,7 @@ fi
 # its "ready" and "unavailable" lines since it started tells.
 if mountpoint -q /srv/a-nas/data; then
   for store in 'anas-photos photos/catalog.db photo' 'anas-shares shares/catalog.db member-share' \
-    'anas-family family/family.db family' 'anas-videocut montage/montage.db montage' \
+    'anas-family family/family.db family' 'anas-videocut videocut/videocut.db videocut' \
     'anas-workspace workspace/workspace.db workspace'; do
     read -r unit database name <<<"$store"
     if [[ ! -f "/srv/a-nas/data/$database" ]]; then

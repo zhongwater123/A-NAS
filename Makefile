@@ -249,9 +249,9 @@ ops-check:
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api videocut-service' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-videocut.service
-	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-videocut.service
+	grep -Fqx 'RuntimeDirectory=a-nas-videocut' deploy/systemd/system/anas-videocut.service
 	grep -Fqx 'Environment=ANAS_VIDEOCUT_SESSION_GROUP=a-nas-videocut' deploy/systemd/system/anas-host-agent.service
-	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
+	grep -Fq '"/run/a-nas-videocut/videocut.sock"' cmd/anas-api/config.go
 	grep -Fqx 'u a-nas-videocut 31005 "A-NAS VideoCut service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-workspace' deploy/systemd/system/anas-workspace.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api workspace-service' deploy/systemd/system/anas-workspace.service
@@ -279,7 +279,7 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-workspace-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-videocut-sessions a-nas-workspace-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
@@ -289,16 +289,16 @@ ops-check:
 	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-videocut-compute.socket
+	grep -Fqx 'ListenStream=/run/a-nas-videocut-compute/compute.sock' deploy/systemd/system/anas-videocut-compute.socket
 	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
 	@# the members' planning instances alone, and stopped before the montage service it would start again.
-	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-videocut-assistant.socket
+	grep -Fqx 'ListenStream=/run/a-nas-videocut-assistant/assistant.sock' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'Sockets=anas-videocut-assistant.socket' deploy/systemd/system/anas-videocut.service
-	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
-	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	test "$$(grep -c 'videocut-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
+	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-videocut-assistant/assistant.sock:/run/anas-assistant-videocut/videocut.sock' scripts/lib/assistant-units.sh
 	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-videocut-planner.service
 	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-videocut-planner.service

@@ -688,7 +688,7 @@ func (s *Store) unfinished(ctx context.Context) bool {
 }
 
 // reconcile brings the projects in line with the photo library's grants:
-// montage.db and the Catalog may have been restored to different times, and
+// videocut.db and the Catalog may have been restored to different times, and
 // a request may have stopped half way. Member by member, under the member's
 // lock, so that no registration is half done while it looks:
 //   - a grant no project holds is queued for revocation;
