@@ -47,9 +47,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	state := draft.state
 	// A revision saved before is that version: its job answers, rather than
 	// a new one that fills and renders again to find the same film.
-	var saved string
-	err = s.db.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
-		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, draft.revision).Scan(&saved)
+	saved, err := s.db.SavedEditJob(ctx, draftID, draft.revision)
 	switch {
 	case err == nil:
 		job, err := s.Job(ctx, owner, saved)

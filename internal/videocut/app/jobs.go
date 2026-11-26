@@ -68,22 +68,11 @@ const (
 	KindRecut    = "recut"
 )
 
-// versionColumns are what versionsOf scans, of versions v.
-var versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
-	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
-		AND f.name = ` + planStepSQL("fill", "v.plan") + ` AND f.result_json IS NOT NULL),
-	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision,
-	CASE WHEN v.kind = 'recut' THEN IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change')
-		FROM jobs WHERE id = v.job_id), '') ELSE '' END`
-
-func scanVersion(rows interface{ Scan(...any) error }) (domain.Version, error) {
-	var version domain.Version
-	var created string
-	var revision sql.NullInt64
-	if err := rows.Scan(&version.ID, &version.Number, &version.JobID, &version.Plan, &version.FilmAssetID, &created, &version.Editable,
-		&version.Kind, &version.SourceVersionID, &version.SourceNumber, &revision, &version.Change); err != nil {
-		return domain.Version{}, err
-	}
+// versionOf is a version as the domain reads it.
+func versionOf(row db.VersionRow) domain.Version {
+	version := domain.Version{ID: row.ID, Number: row.Number, JobID: row.JobID, Plan: row.Plan, FilmAssetID: row.FilmAssetID, Editable: row.Editable,
+		Kind: row.Kind, SourceVersionID: row.SourceVersionID, SourceNumber: row.SourceNumber, Change: row.Change}
+	created, revision := row.Created, row.DraftRevision
 	if revision.Valid {
 		n := int(revision.Int64)
 		version.DraftRevision = &n
@@ -91,7 +80,7 @@ func scanVersion(rows interface{ Scan(...any) error }) (domain.Version, error) {
 	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
 		version.CreatedAt = *at
 	}
-	return version, nil
+	return version
 }
 
 func scanTime(value sql.NullString) *time.Time {
@@ -339,20 +328,15 @@ func (s *Store) missingOf(ctx context.Context, jobID string) ([]string, error) {
 
 // versionsOf lists the versions whose column is value, ordered by order.
 func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]domain.Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+versionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
+	kept, err := s.db.Versions(ctx, column, value, order)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	versions := []domain.Version{}
-	for rows.Next() {
-		version, err := scanVersion(rows)
-		if err != nil {
-			return nil, err
-		}
-		versions = append(versions, version)
+	for _, row := range kept {
+		versions = append(versions, versionOf(row))
 	}
-	return versions, rows.Err()
+	return versions, nil
 }
 
 // Cancel stops owner's job: a queued or waiting one at once, a running one

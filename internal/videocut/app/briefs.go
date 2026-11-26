@@ -210,7 +210,7 @@ func (s *Store) shotsTaken(ctx context.Context, call roundCall, plan int) (bool,
 // the model hands in the next. A 方案 saved is settled, also when the job's
 // inputs changed since and its answers are under other keys (runSteps).
 func (s *Store) currentPlan(ctx context.Context, call roundCall) (int, error) {
-	saved, err := s.savedPlans(ctx, s.db, call.jobID)
+	saved, err := s.db.SavedPlans(ctx, call.jobID)
 	if err != nil {
 		return 0, err
 	}

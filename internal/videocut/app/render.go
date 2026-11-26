@@ -682,7 +682,8 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 			return nil, &saveRefusal{jobGrantError(err, nil)}
 		}
 	}
-	now := sqlitedb.FormatTime(s.now())
+	at := s.now()
+	now := sqlitedb.FormatTime(at)
 	// The version keeps its timeline, which editing it reads (#596). A save
 	// replayed after a restart has not loaded the fill: its version has
 	// its job's fill to read instead.
@@ -697,11 +698,7 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// An edit's version is an edit of the version it came from, at the
 		// draft's revision; a generate job's was planned.
-		if _, err := tx.ExecContext(ctx, `INSERT INTO versions(id, project_id, number, job_id, plan, version_key, film_asset_id, created_at, timeline_json,
-				kind, source_version_id, draft_revision)
-			SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE kind WHEN 'generate' THEN 'plan' ELSE kind END, source_version_id, draft_revision
-			FROM jobs WHERE id = ? ON CONFLICT (version_key) DO NOTHING`,
-			newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, now, timeline, run.id); err != nil {
+		if err := tx.AddVersion(ctx, newID("version"), run.projectID, number, run.id, max(run.plan, 1), versionKey, assetID, at, timeline); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE steps SET state = 'done', result_json = ?, finished_at = ? WHERE job_id = ? AND name = ?",

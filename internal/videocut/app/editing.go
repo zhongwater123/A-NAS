@@ -164,8 +164,8 @@ func (src *editSource) scenes() []domain.SceneCount {
 func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (domain.ProjectDetail, error) {
 	var projectID string
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
-		err := tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
-			WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`, versionID, owner).Scan(&projectID)
+		var err error
+		projectID, err = tx.VersionProject(ctx, owner, versionID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ErrNotFound
 		}

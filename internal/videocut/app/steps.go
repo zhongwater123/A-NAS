@@ -100,12 +100,6 @@ func planStep(name string, plan int) string {
 	return fmt.Sprintf("%s-%d", name, plan)
 }
 
-// planStepSQL is planStep as SQL, for a step's plain name and the column
-// that holds the 方案 (TestPlanStepsAreNamedAlikeInSQL).
-func planStepSQL(name, column string) string {
-	return "CASE WHEN " + column + " <= 1 THEN '" + name + "' ELSE '" + name + "-' || " + column + " END"
-}
-
 // planOf is a step's plain name and the 方案 it belongs to.
 func planOf(name string) (string, int) {
 	base, number, found := strings.Cut(name, "-")
@@ -208,24 +202,6 @@ func (s *Store) stepNames(kind string, plans int) []string {
 	return names
 }
 
-// savedPlans are the job's 方案 whose films are saved.
-func (s *Store) savedPlans(ctx context.Context, q queryer, jobID string) (map[int]bool, error) {
-	rows, err := q.QueryContext(ctx, "SELECT plan FROM versions WHERE job_id = ?", jobID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	saved := map[int]bool{}
-	for rows.Next() {
-		var plan int
-		if err := rows.Scan(&plan); err != nil {
-			return nil, err
-		}
-		saved[plan] = true
-	}
-	return saved, rows.Err()
-}
-
 // runSteps runs job from its first step not done. A 方案 whose film is saved
 // is settled: the film is in the member's library whatever became of the
 // job's videos since, so its steps are neither done again nor made stale by
@@ -242,13 +218,14 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	if saving {
 		// The 方案 being saved is the first without a version: a version is
 		// recorded in the transaction that releases the fence.
-		if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", job.id).Scan(&run.plan); err != nil {
+		var err error
+		if run.plan, err = s.db.NextUnsavedPlan(ctx, job.id); err != nil {
 			return err
 		}
 		var rendered string
 		var key string
 		save := planStep("save", run.plan)
-		err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
+		err = s.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
 			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
 			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, planStep("render", run.plan), save, job.id).Scan(&run.grantID, &rendered, &key)
 		if err != nil {
@@ -268,7 +245,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	if err := s.loadRun(ctx, run); err != nil {
 		return err
 	}
-	saved, err := s.savedPlans(ctx, s.db, job.id)
+	saved, err := s.db.SavedPlans(ctx, job.id)
 	if err != nil {
 		return err
 	}

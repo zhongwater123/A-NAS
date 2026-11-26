@@ -137,11 +137,9 @@ type editSource struct {
 // before versions kept their timeline takes its job's fill, and keeps it.
 func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*editSource, error) {
 	src := &editSource{versionID: versionID}
-	var timeline sql.NullString
-	var grantID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
-		FROM versions v JOIN projects p ON p.id = v.project_id WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`,
-		versionID, owner).Scan(&src.projectID, &src.number, &src.jobID, &src.plan, &timeline, &grantID)
+	row, err := s.db.VersionSource(ctx, owner, versionID)
+	src.projectID, src.number, src.jobID, src.plan = row.ProjectID, row.Number, row.JobID, row.Plan
+	timeline, grantID := row.Timeline, row.GrantID
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
@@ -221,7 +219,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		if err != nil {
 			return nil, err
 		}
-		if _, err := s.db.ExecContext(ctx, "UPDATE versions SET timeline_json = ? WHERE id = ? AND timeline_json IS NULL", string(encoded), versionID); err != nil {
+		if err := s.db.KeepVersionTimeline(ctx, versionID, string(encoded)); err != nil {
 			return nil, err
 		}
 	}
@@ -282,16 +280,7 @@ func (s *Store) loadPlan(ctx context.Context, jobID string, plan int) (keptPlan,
 // keep this. Times are written fixed-width (sqlitedb.FormatTime): they
 // compare as text.
 func (s *Store) redoneSince(ctx context.Context, jobID string, plan int) (bool, error) {
-	names := plannedFrom(plan)
-	args := []any{jobID, plan}
-	for _, name := range names {
-		args = append(args, name)
-	}
-	var redone bool
-	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
-		WHERE v.job_id = ? AND v.plan = ? AND s.finished_at > v.created_at AND s.name IN (`+sqlitedb.Placeholders(len(names))+`))`,
-		args...).Scan(&redone)
-	return redone, err
+	return s.db.RedoneSince(ctx, jobID, plan, plannedFrom(plan))
 }
 
 // doneResults are what the named steps of a job kept when they were done,

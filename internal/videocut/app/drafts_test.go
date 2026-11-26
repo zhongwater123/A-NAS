@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -892,7 +893,7 @@ func TestPlanStepsAreNamedAlikeInSQL(t *testing.T) {
 	env := newEditEnv(t)
 	for plan := range 4 {
 		var name string
-		if err := env.store.db.QueryRowContext(t.Context(), "SELECT "+planStepSQL("fill", "p")+" FROM (SELECT ? AS p)", plan).Scan(&name); err != nil {
+		if err := env.store.db.QueryRowContext(t.Context(), "SELECT "+db.PlanStepSQL("fill", "p")+" FROM (SELECT ? AS p)", plan).Scan(&name); err != nil {
 			t.Fatal(err)
 		}
 		if name != planStep("fill", plan) {
