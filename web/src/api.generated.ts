@@ -2555,7 +2555,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage": {
+    "/api/v1/videocut": {
         parameters: {
             query?: never;
             header?: never;
@@ -2572,7 +2572,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects": {
+    "/api/v1/videocut/projects": {
         parameters: {
             query?: never;
             header?: never;
@@ -2590,7 +2590,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}": {
+    "/api/v1/videocut/projects/{projectId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2609,7 +2609,7 @@ export interface paths {
         patch: operations["updateVideoCutProject"];
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}/assets": {
+    "/api/v1/videocut/projects/{projectId}/assets": {
         parameters: {
             query?: never;
             header?: never;
@@ -2626,7 +2626,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}/generate": {
+    "/api/v1/videocut/projects/{projectId}/generate": {
         parameters: {
             query?: never;
             header?: never;
@@ -2643,7 +2643,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}": {
+    "/api/v1/videocut/jobs/{jobId}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2660,7 +2660,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}/cancel": {
+    "/api/v1/videocut/jobs/{jobId}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -2677,7 +2677,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}/drop-assets": {
+    "/api/v1/videocut/jobs/{jobId}/drop-assets": {
         parameters: {
             query?: never;
             header?: never;
@@ -2694,7 +2694,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}/retry-analysis": {
+    "/api/v1/videocut/jobs/{jobId}/retry-analysis": {
         parameters: {
             query?: never;
             header?: never;
@@ -2711,7 +2711,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}/retry": {
+    "/api/v1/videocut/jobs/{jobId}/retry": {
         parameters: {
             query?: never;
             header?: never;
@@ -2728,7 +2728,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/jobs/{jobId}/replan": {
+    "/api/v1/videocut/jobs/{jobId}/replan": {
         parameters: {
             query?: never;
             header?: never;
@@ -2745,7 +2745,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/notices": {
+    "/api/v1/videocut/notices": {
         parameters: {
             query?: never;
             header?: never;
@@ -2762,7 +2762,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}/song": {
+    "/api/v1/videocut/projects/{projectId}/song": {
         parameters: {
             query?: never;
             header?: never;
@@ -2780,7 +2780,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}/song/audio": {
+    "/api/v1/videocut/projects/{projectId}/song/audio": {
         parameters: {
             query?: never;
             header?: never;
@@ -2797,7 +2797,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/hero": {
+    "/api/v1/videocut/hero": {
         parameters: {
             query?: never;
             header?: never;
@@ -2814,7 +2814,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/hero/poster": {
+    "/api/v1/videocut/hero/poster": {
         parameters: {
             query?: never;
             header?: never;
@@ -2831,7 +2831,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/versions/{versionId}/confirm": {
+    "/api/v1/videocut/versions/{versionId}/confirm": {
         parameters: {
             query?: never;
             header?: never;
@@ -2848,7 +2848,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/versions/{versionId}/recut": {
+    "/api/v1/videocut/versions/{versionId}/recut": {
         parameters: {
             query?: never;
             header?: never;
@@ -2865,7 +2865,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/versions/{versionId}/outline": {
+    "/api/v1/videocut/versions/{versionId}/outline": {
         parameters: {
             query?: never;
             header?: never;
@@ -2882,7 +2882,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/versions/{versionId}/draft": {
+    "/api/v1/videocut/versions/{versionId}/draft": {
         parameters: {
             query?: never;
             header?: never;
@@ -2899,7 +2899,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/drafts/{draftId}/ops": {
+    "/api/v1/videocut/drafts/{draftId}/ops": {
         parameters: {
             query?: never;
             header?: never;
@@ -2916,7 +2916,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/drafts/{draftId}/save": {
+    "/api/v1/videocut/drafts/{draftId}/save": {
         parameters: {
             query?: never;
             header?: never;
@@ -2933,7 +2933,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/drafts/{draftId}/song": {
+    "/api/v1/videocut/drafts/{draftId}/song": {
         parameters: {
             query?: never;
             header?: never;
@@ -2950,7 +2950,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/drafts/{draftId}/candidates": {
+    "/api/v1/videocut/drafts/{draftId}/candidates": {
         parameters: {
             query?: never;
             header?: never;
@@ -2967,7 +2967,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/versions/{versionId}/shots": {
+    "/api/v1/videocut/versions/{versionId}/shots": {
         parameters: {
             query?: never;
             header?: never;
@@ -2984,7 +2984,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/drafts/{draftId}/shots": {
+    "/api/v1/videocut/drafts/{draftId}/shots": {
         parameters: {
             query?: never;
             header?: never;
@@ -3001,14 +3001,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/montage/projects/{projectId}/frames/{assetId}": {
+    "/api/v1/videocut/projects/{projectId}/frames/{assetId}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, montage_unavailable where the montage center has no media worker */
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where the montage center has no media worker */
         get: operations["getVideoCutFrame"];
         put?: never;
         post?: never;
