@@ -8,11 +8,19 @@ import (
 // SelectionLife is how long a member's selection stays what their agent sees.
 const SelectionLife = 30 * time.Minute
 
+// ViewingLife is how long a page stays what a member's desktop shows unless
+// the desktop says so again: it does every minute while the page is open, so
+// a tab closed without a word is forgotten soon.
+const ViewingLife = 3 * time.Minute
+
 // Viewing is the page and version a member's desktop shows.
 type Viewing struct {
 	PageID  string
 	Version int
-	Since   time.Time
+	// Since is when the desktop began to show this version; Seen is when it
+	// last said it still does.
+	Since time.Time
+	Seen  time.Time
 }
 
 // Rect is an element's box in the page's viewport, in CSS pixels.
@@ -61,15 +69,39 @@ func (s *Store) SetViewing(accountID, pageID string, version int) {
 	if s.live.viewing == nil {
 		s.live.viewing = map[string]Viewing{}
 	}
-	s.live.viewing[accountID] = Viewing{PageID: pageID, Version: version, Since: s.now()}
+	now := s.now()
+	viewing := s.live.viewing[accountID]
+	if viewing.PageID != pageID || viewing.Version != version || now.Sub(viewing.Seen) >= ViewingLife {
+		viewing = Viewing{PageID: pageID, Version: version, Since: now}
+	}
+	viewing.Seen = now
+	s.live.viewing[accountID] = viewing
 }
 
-// Viewing returns what accountID's desktop last said it shows.
+// ClearViewing forgets that accountID's desktop shows pageID; what it says
+// of another page stays.
+func (s *Store) ClearViewing(accountID, pageID string) {
+	s.live.mu.Lock()
+	defer s.live.mu.Unlock()
+	if s.live.viewing[accountID].PageID == pageID {
+		delete(s.live.viewing, accountID)
+	}
+}
+
+// Viewing returns what accountID's desktop last said it shows, while it said
+// so within ViewingLife.
 func (s *Store) Viewing(accountID string) (Viewing, bool) {
 	s.live.mu.Lock()
 	defer s.live.mu.Unlock()
 	viewing, ok := s.live.viewing[accountID]
-	return viewing, ok
+	if !ok {
+		return Viewing{}, false
+	}
+	if s.now().Sub(viewing.Seen) >= ViewingLife {
+		delete(s.live.viewing, accountID)
+		return Viewing{}, false
+	}
+	return viewing, true
 }
 
 // SetSelection records the element accountID picked; it replaces the one

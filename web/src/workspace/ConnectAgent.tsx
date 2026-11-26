@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, LoaderCircle, TriangleAlert } from "lucide-react";
 import { type FormEvent, type RefObject, useState } from "react";
 
@@ -6,7 +5,8 @@ import { errorText } from "../api/errorMessages";
 import { copyText } from "../lib/clipboard";
 import { namesDeviceByAddress } from "../lib/deviceHost";
 import { Modal } from "../ui/modal";
-import { type AgentKind, agentTokensKey, createAgentToken, listAgentTokens } from "./api";
+import { useAgentTokens } from "./agentTokens";
+import { type AgentKind, type AgentToken, createAgentToken } from "./api";
 import { kindLabel } from "./words";
 import styles from "./workspace.module.css";
 
@@ -32,9 +32,11 @@ type Created = { id: string; kind: AgentKind; command: string };
 // Codex to the workspace, with a token made for that agent and shown only
 // here, then waits for the agent's first call.
 export function ConnectAgent({
+  account,
   container,
   onClose,
 }: {
+  account: string;
   container: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
@@ -65,7 +67,7 @@ export function ConnectAgent({
   return (
     <Modal title="连接 agent" container={container} wide busy={busy} onClose={onClose}>
       {created ? (
-        <Command created={created} onClose={onClose} />
+        <Command account={account} created={created} onClose={onClose} />
       ) : (
         <form className={styles.wsForm} aria-label="连接 agent" onSubmit={(event) => void submit(event)}>
           <label className={styles.wsField}>
@@ -115,16 +117,11 @@ export function ConnectAgent({
   );
 }
 
-function Command({ created, onClose }: { created: Created; onClose: () => void }) {
+function Command({ account, created, onClose }: { account: string; created: Created; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   // The agent's first call marks the token used.
-  const tokens = useQuery({
-    queryKey: agentTokensKey,
-    queryFn: ({ signal }) => listAgentTokens(signal),
-    refetchInterval: (query) =>
-      query.state.data?.some((token) => token.id === created.id && token.lastUsedAt) ? false : 2_000,
-  });
-  const connected = tokens.data?.some((token) => token.id === created.id && token.lastUsedAt);
+  const used = (tokens?: AgentToken[]) => tokens?.some((token) => token.id === created.id && token.lastUsedAt) ?? false;
+  const connected = used(useAgentTokens(account, (tokens) => (used(tokens) ? false : 2_000)).data);
   const where = created.kind === "codex" ? "PowerShell" : "终端";
   return (
     <div className={styles.wsForm}>

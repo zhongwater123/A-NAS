@@ -93,15 +93,43 @@ func TestAPickedButtonNamesItsLinesAndItsRules(t *testing.T) {
 	if _, ok := workspace.Element(source, at+1); ok {
 		t.Fatal("an element starts inside a tag")
 	}
-	line, rule, ok := workspace.CSSRule(source, ".btn")
-	if !ok || line != 44 || !strings.HasPrefix(rule, ".btn { border: 0;") || !strings.HasSuffix(rule, "}") {
-		t.Fatalf("CSSRule(.btn) = %d %q %v", line, rule, ok)
+	rules := workspace.CSSRules(source, []string{".btn", ".btn-primary", ".nowhere"})
+	if rule := rules[".btn"]; rule.Line != 44 || !strings.HasPrefix(rule.Text, ".btn { border: 0;") || !strings.HasSuffix(rule.Text, "}") {
+		t.Fatalf("CSSRules(.btn) = %+v", rule)
 	}
-	if _, rule, ok := workspace.CSSRule(source, ".btn-primary"); !ok || !strings.Contains(rule, "var(--brand)") {
-		t.Fatalf("CSSRule(.btn-primary) = %q %v", rule, ok)
+	if rule, ok := rules[".btn-primary"]; !ok || !strings.Contains(rule.Text, "var(--brand)") {
+		t.Fatalf("CSSRules(.btn-primary) = %+v %v", rule, ok)
 	}
-	if _, _, ok := workspace.CSSRule(source, ".nowhere"); ok {
-		t.Fatal("a selector the page does not write was found")
+	if rule, ok := rules[".nowhere"]; ok {
+		t.Fatalf("a selector the page does not write was found: %+v", rule)
+	}
+}
+
+// A rule ends at its own closing brace, not at one in a string, a comment or
+// a nested rule, and is found as the browser writes its selector.
+func TestCSSRulesReadTheStyleSheetsAsCSS(t *testing.T) {
+	source := []byte(`<p>.label { not a rule }</p>
+<style>
+/* .label { } */
+.label { content: "}"; color: red; }
+@media (max-width: 600px) {
+  .a>.b,h1 { margin: 0 }
+}
+.card { color: blue; & .title { color: red } }
+</style>`)
+	rules := workspace.CSSRules(source, []string{".label", ".a > .b, h1", ".card", ".missing"})
+	want := map[string]workspace.CSSRuleSource{
+		".label":      {Line: 4, Text: `.label { content: "}"; color: red; }`},
+		".a > .b, h1": {Line: 6, Text: ".a>.b,h1 { margin: 0 }"},
+		".card":       {Line: 8, Text: ".card { color: blue; & .title { color: red } }"},
+	}
+	if len(rules) != len(want) {
+		t.Fatalf("CSSRules() = %+v", rules)
+	}
+	for selector, rule := range want {
+		if rules[selector] != rule {
+			t.Errorf("CSSRules(%q) = %+v, want %+v", selector, rules[selector], rule)
+		}
 	}
 }
 
@@ -170,7 +198,7 @@ func TestAgentsReadLongPagesInSegmentsWithInlineDataFolded(t *testing.T) {
 }
 
 func FuzzAnnotateKeepsTheSourceAndMarksOnlyTags(f *testing.F) {
-	for _, seed := range []string{"<!doctype html><p>a", "<ul><li>a<li>b</ul>", "<script>if (a<b) {}</script><p>", "<!-- <p> -->", "<a href='<p>'>x</a>", "<svg><path/></svg>", "<textarea><b></textarea>"} {
+	for _, seed := range []string{"<!doctype html><p>a", "<ul><li>a<li>b</ul>", "<script>if (a<b) {}</script><p>", "<!-- <p> -->", "<a href='<p>'>x</a>", "<svg><path/></svg>", "<textarea><b></textarea>", "<style>a { b: \"}\" } @media x { .b { } }</style>"} {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, source []byte) {
@@ -182,6 +210,11 @@ func FuzzAnnotateKeepsTheSourceAndMarksOnlyTags(f *testing.F) {
 		for start, end := range workspace.Spans(source) {
 			if start < 0 || end > len(source) || start >= end || source[start] != '<' {
 				t.Fatalf("span %d–%d in %q", start, end, source)
+			}
+		}
+		for selector, rule := range workspace.CSSRules(source, []string{"a", ".b", "p > a"}) {
+			if !bytes.Contains(source, []byte(rule.Text)) || rule.Line < 1 {
+				t.Fatalf("rule for %q is %+v, not the source's own", selector, rule)
 			}
 		}
 	})

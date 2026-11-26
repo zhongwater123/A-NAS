@@ -57,6 +57,8 @@ export const fileURL = (pageId: string, version: number) => `${versionPath(pageI
 export const reportViewing = (pageId: string, version: number) =>
   call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version } }));
 
+export const stopViewing = (pageId: string) => call(client.DELETE("/api/v1/workspace/viewing/{pageId}", page(pageId)));
+
 export const setSelection = (selection: WorkspaceSelection) =>
   call(client.PUT("/api/v1/workspace/selection", { body: selection }));
 
@@ -73,8 +75,7 @@ export const removeMember = (accountId: string) =>
   call(client.DELETE("/api/v1/workspace/admin/members/{accountId}", account(accountId)));
 
 // The account's agent tokens are the Product Service's own (ADR 0040);
-// 设置 → 我的账号 lists them too.
-export const agentTokensKey = ["workspace", "agent-tokens"] as const;
+// 设置 → 我的账号 lists them too, through ./agentTokens.
 export async function listAgentTokens(signal?: AbortSignal): Promise<AgentToken[]> {
   return (await call(client.GET("/api/v1/session/agent-tokens", { signal }))).items;
 }
