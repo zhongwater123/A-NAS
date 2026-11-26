@@ -1,10 +1,10 @@
 # 剪辑中心分支与公共代码
 
-更新时间：2026-11-26
+更新时间：2026-11-26（#669 之后只认 videocut）
 
 剪辑小组在长期分支 `videocut-center` 上开发剪辑中心，一个阶段做完后整体合回 `main`。本文写这期间的分支规则、怎么区分剪辑中心代码和公共代码，以及评审时的公共代码检查。根目录 [AGENTS.md](../../AGENTS.md) 在本分支上有一节指向这里；阶段合回 `main` 时，删除那一节和本文，或改写成合回后仍然适用的规则。
 
-分支名按 [#639](https://github.com/zhongwater123/A-NAS/issues/639) 的新名字 VideoCut 起；按那份规格重构之前，代码目录仍叫 `montage`。下面的类别表和检查命令同时认 `montage` 与 `videocut` 两套名字，重构前后都能用；重构完成、`git grep -i montage` 只剩规格允许的地方后，再删去 `montage` 那一套。
+分支名按 [#639](https://github.com/zhongwater123/A-NAS/issues/639) 的新名字 VideoCut 起。按那份规格重构之后（#669 改完运行时名字），剪辑中心的代码目录、文件名与运行时都叫 videocut，下面的类别表和检查命令只认 `videocut`；还叫旧名的只剩规格允许的地方（第二批的公共模块与历史文档）。
 
 剪辑中心以外的代码（下称公共代码）别人也在改：2026-11 以来，相册 `internal/photos` 有 49 次提交、系统测试脚本 `scripts/system-test.sh` 有 69 次，大部分不是剪辑中心的改动。公共代码的改动在分支上放久了，最后合并时会集中冲突，所以剪辑中心代码和公共代码分开提。
 
@@ -18,11 +18,11 @@
 
 ## 怎么判断是哪类代码
 
-按目录判断，不按文件名。比如 `internal/photos/montagecards.go` 文件名带 montage，但它在相册里，属于公共代码。
+按目录判断，不按文件名。比如 `internal/photos/` 里替剪辑中心切卡片、做分析的文件，虽然只为剪辑中心服务，但在相册里，属于公共代码。
 
 | 类别 | 范围 | 去向 |
 |---|---|---|
-| 剪辑中心代码 | 下面的 `<名>` 是 `montage` 或 `videocut`：`internal/<名>*`（现在是 `internal/videocut` 与 `internal/videocutcompute`）；`ai/anas_<名>*`；`web/src/<名>`；`deploy/<名>-*`；`api/paths/<名>.yaml`、`api/components/<名>.yaml`；`ai/tests/test_<名>_*.py`、`ai/eval/<名>_*.py`；`scripts/` 和 `docs/` 下文件名带 montage 或 videocut 的 | 合进 `videocut-center` |
+| 剪辑中心代码 | `internal/videocut*`（`internal/videocut` 与 `internal/videocutcompute`）；`ai/anas_videocut*`；`web/src/videocut`；`deploy/videocut-*`；`api/paths/videocut.yaml`、`api/components/videocut.yaml`；`ai/tests/test_videocut_*.py`、`ai/eval/videocut_*.py`；`scripts/` 和 `docs/` 下文件名带 videocut 的 | 合进 `videocut-center` |
 | 生成文件 | `api/openapi.bundle.yaml`、`web/src/api.generated.ts`、`web/src/api.validators.generated.ts`、`web/package-lock.json` | 不手工解决冲突：接口文件重新运行 `make api`，锁文件重新运行 `npm install` |
 | 公共代码：登记 | 其余文件里，只新增、不改已有行，而且只是把剪辑中心挂上去：比如 `api/openapi.yaml` 加路径引用、加一条路由、`web/package.json` 加依赖、系统测试加剪辑中心的检查 | 可以留在 `videocut-center`，阶段完成时一起合回 |
 | 公共代码：改动 | 其余文件里，改了已有的逻辑、数据表、接口或共用组件，或者新加了公共模块的逻辑：比如在相册里加一种分析任务、改 AI Worker、改相册的调度、改共用的播放器 | 尽快合进 `main`，见下一节 |
@@ -43,13 +43,14 @@
 
 ```bash
 base=origin/videocut-center
-montage='^(internal/(montage|videocut)[a-z]*/|ai/anas_(montage|videocut)[a-z_]*/|web/src/(montage|videocut)/|deploy/(montage|videocut)-[^/]+/|api/(paths|components)/(montage|videocut)\.yaml$|ai/tests/test_(montage|videocut)_[^/]*\.py$|ai/eval/(montage|videocut)_[^/]*\.py$|scripts/[^/]*(montage|videocut)[^/]*$|docs/.*(montage|videocut)[^/]*$)'
+videocut='^(internal/videocut[a-z]*/|ai/anas_videocut[a-z_]*/|web/src/videocut/|deploy/videocut-[^/]+/|api/(paths|components)/videocut\.yaml$|ai/tests/test_videocut_[^/]*\.py$|ai/eval/videocut_[^/]*\.py$|scripts/[^/]*videocut[^/]*$|docs/.*videocut[^/]*$)'
 generated='^(api/openapi\.bundle\.yaml|web/src/api(\.validators)?\.generated\.ts|web/package-lock\.json)$'
 git fetch -q origin
-git diff --numstat "$base"...HEAD | M="$montage" G="$generated" awk -F'\t' '$3 !~ ENVIRON["M"] && $3 !~ ENVIRON["G"] { print ($2 == 0 ? "只新增" : "改了已有行") "\t+" $1 "/-" $2 "\t" $3 }'
+git diff --no-renames --numstat "$base"...HEAD | V="$videocut" G="$generated" awk -F'\t' '$3 !~ ENVIRON["V"] && $3 !~ ENVIRON["G"] { print ($2 == 0 ? "只新增" : "改了已有行") "\t+" $1 "/-" $2 "\t" $3 }'
 ```
 
 - 没有输出：只改了剪辑中心代码和生成文件。
+- `--no-renames` 让搬家的文件按删掉的旧路径和新加的新路径各列一次。不加它时，`git diff` 把改名写成 `{旧 => 新}` 一条路径，哪条规则都对不上，剪辑中心里搬家的文件也会被列成公共代码。从公共代码搬进剪辑中心的，旧路径一侧列为“改了已有行”。
 - **改了已有行**：一定是公共代码的改动。
 - **只新增**：看内容。只是把剪辑中心挂上去的算登记；新加的公共逻辑（比如相册里新加的文件）仍算改动。
 
