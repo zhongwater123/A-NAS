@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -14,6 +15,8 @@ const (
 	FinishedStates = "'done', 'failed', 'cancelled'"
 	// ActiveStateQuery holds for a job not finished.
 	ActiveStateQuery = "state NOT IN (" + FinishedStates + ")"
+	// DueStates holds for a job that may run once due.
+	DueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
 )
 
 // --- planning (docs/architecture/montage-planning-session.md) ---
@@ -129,9 +132,18 @@ func (tx *Tx) NewPlanEpoch(ctx context.Context, jobID string) error {
 }
 
 // CancelRequested reports whether jobID is being cancelled.
+func (d *DB) CancelRequested(ctx context.Context, jobID string) (bool, error) {
+	return cancelRequested(ctx, d, jobID)
+}
+
+// CancelRequested is DB.CancelRequested inside the transaction.
 func (tx *Tx) CancelRequested(ctx context.Context, jobID string) (bool, error) {
+	return cancelRequested(ctx, tx, jobID)
+}
+
+func cancelRequested(ctx context.Context, q queryer, jobID string) (bool, error) {
 	var cancelled bool
-	err := tx.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
+	err := q.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
 	return cancelled, err
 }
 
@@ -148,4 +160,179 @@ func (tx *Tx) DueLateRoundJobs(ctx context.Context, at, claimed, started, called
 func (tx *Tx) MakeWaitingJobDue(ctx context.Context, jobID string, at time.Time) error {
 	_, err := tx.ExecContext(ctx, "UPDATE jobs SET not_before = ? WHERE id = ? AND state = 'waiting'", sqlitedb.FormatTime(at), jobID)
 	return err
+}
+
+// --- running (docs/architecture/montage-center.md, 持久任务) ---
+
+// CancelRequestedJobs cancels, at at, the jobs being cancelled that have
+// not ended.
+func (tx *Tx) CancelRequestedJobs(ctx context.Context, at time.Time) error {
+	now := sqlitedb.FormatTime(at)
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
+			WHERE cancel_requested = 1 AND `+ActiveStateQuery, now, now)
+	return err
+}
+
+// RequeueRunningJobs puts the jobs running back in the queue, due at at.
+func (tx *Tx) RequeueRunningJobs(ctx context.Context, at time.Time) error {
+	now := sqlitedb.FormatTime(at)
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
+			WHERE state = 'running'`, now, now)
+	return err
+}
+
+// JobActive reports whether jobID is a job that has not ended.
+func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
+	var active bool
+	err := d.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+ActiveStateQuery+")", jobID).Scan(&active)
+	return active, err
+}
+
+// NextNotBefore is when the first queued or waiting job is due, as kept
+// (not valid when none is).
+func (d *DB) NextNotBefore(ctx context.Context) (sql.NullString, error) {
+	var next sql.NullString
+	err := d.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+DueStates).Scan(&next)
+	return next, err
+}
+
+// DueJob is a job due at now as the runner takes it, its settings still
+// encoded.
+type DueJob struct {
+	ID, Owner, ProjectID, Kind, Settings string
+	Plans                                int
+}
+
+// DueJob is the job due first at now; sql.ErrNoRows when none is.
+func (tx *Tx) DueJob(ctx context.Context, now time.Time) (DueJob, error) {
+	var job DueJob
+	err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
+			WHERE `+DueStates+` AND not_before <= ?
+			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
+		Scan(&job.ID, &job.Owner, &job.ProjectID, &job.Kind, &job.Settings, &job.Plans)
+	return job, err
+}
+
+// FailInvalidJob fails jobID at at, as invalid, saying message.
+func (tx *Tx) FailInvalidJob(ctx context.Context, jobID, message string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+		message, sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID)
+	return err
+}
+
+// RunJob sets jobID running at at, its lease until leaseUntil.
+func (tx *Tx) RunJob(ctx context.Context, jobID string, leaseUntil, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'running', lease_until = ?, heartbeat_at = ?, updated_at = ? WHERE id = ?`,
+		sqlitedb.FormatTime(leaseUntil), sqlitedb.FormatTime(at), sqlitedb.FormatTime(at), jobID)
+	return err
+}
+
+// RenewLease renews jobID's lease until leaseUntil, at at, and says
+// whether the job is being cancelled and whether it is saving;
+// sql.ErrNoRows when the job is gone.
+func (d *DB) RenewLease(ctx context.Context, jobID string, leaseUntil, at time.Time) (requested, saving bool, err error) {
+	err = d.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
+		sqlitedb.FormatTime(leaseUntil), sqlitedb.FormatTime(at), jobID).Scan(&requested, &saving)
+	return requested, saving, err
+}
+
+// RunningJob is how jobID stands while it runs: its attempts, whether it
+// is being cancelled and whether it is saving; sql.ErrNoRows when it is
+// not running.
+func (tx *Tx) RunningJob(ctx context.Context, jobID string) (attempts int, cancelled, saving bool, err error) {
+	err = tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", jobID).Scan(&attempts, &cancelled, &saving)
+	return attempts, cancelled, saving, err
+}
+
+// JobSettlement is how a job's step left it, as settling records it. The
+// times are as kept (sqlitedb.FormatTime); Missing and FinishedAt are nil
+// for NULL.
+type JobSettlement struct {
+	State, WaitReason string
+	Attempts          int
+	ErrorClass, Error string
+	Missing           any
+	SaveStarted       bool
+	NotBefore         string
+	FinishedAt        any
+	UpdatedAt         string
+}
+
+// SettleJob records how jobID's step left it, its lease released.
+func (tx *Tx) SettleJob(ctx context.Context, jobID string, s JobSettlement) error {
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
+			missing_json = ?, save_started = ?, lease_until = NULL, not_before = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
+		s.State, s.WaitReason, s.Attempts, s.ErrorClass, s.Error, s.Missing, s.SaveStarted, s.NotBefore, s.FinishedAt, s.UpdatedAt, jobID)
+	return err
+}
+
+// SaveStarted reports whether jobID started saving a film and has not
+// heard back.
+func (d *DB) SaveStarted(ctx context.Context, jobID string) (bool, error) {
+	var saving bool
+	err := d.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", jobID).Scan(&saving)
+	return saving, err
+}
+
+// SaveReplay is what replaying jobID's interrupted save reads: its
+// project's grant, what its render step kept, and the input key of its
+// save step.
+func (d *DB) SaveReplay(ctx context.Context, jobID, renderStep, saveStep string) (grantID, rendered, key string, err error) {
+	err = d.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
+			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
+			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, renderStep, saveStep, jobID).Scan(&grantID, &rendered, &key)
+	return grantID, rendered, key, err
+}
+
+// JobGrant is the grant of jobID's project (not valid when none);
+// sql.ErrNoRows when there is no such job.
+func (d *DB) JobGrant(ctx context.Context, jobID string) (sql.NullString, error) {
+	var grantID sql.NullString
+	err := d.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
+		Scan(&grantID)
+	return grantID, err
+}
+
+// SetJobStep records that jobID is at step name, at at.
+func (tx *Tx) SetJobStep(ctx context.Context, jobID, name string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, "UPDATE jobs SET step = ?, wait_reason = '', updated_at = ? WHERE id = ?", name, sqlitedb.FormatTime(at), jobID)
+	return err
+}
+
+// ResetJobAttempts starts jobID's attempts from none, at at.
+func (tx *Tx) ResetJobAttempts(ctx context.Context, jobID string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, "UPDATE jobs SET attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?", sqlitedb.FormatTime(at), jobID)
+	return err
+}
+
+// StartSave raises jobID's save fence while it runs and is not being
+// cancelled; false when it did not.
+func (d *DB) StartSave(ctx context.Context, jobID string) (bool, error) {
+	started, err := d.ExecContext(ctx, "UPDATE jobs SET save_started = 1 WHERE id = ? AND cancel_requested = 0 AND state = 'running'", jobID)
+	if err != nil {
+		return false, err
+	}
+	n, err := started.RowsAffected()
+	return n > 0, err
+}
+
+// ReleaseSaveFence lowers jobID's save fence at at, its attempts from
+// none: the job goes on with its next 方案.
+func (tx *Tx) ReleaseSaveFence(ctx context.Context, jobID string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET save_started = 0, attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?`, sqlitedb.FormatTime(at), jobID)
+	return err
+}
+
+// FinishJob records jobID done at at, its save fence lowered.
+func (tx *Tx) FinishJob(ctx context.Context, jobID string, at time.Time) error {
+	now := sqlitedb.FormatTime(at)
+	_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', save_started = 0, missing_json = NULL, attempts = 0, error_class = '', error = '', wait_reason = '',
+			lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, now, now, jobID)
+	return err
+}
+
+// JobDraft is the draft an edit job saves and the draft's revision.
+func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revision int, err error) {
+	err = d.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
+	return draftID, revision, err
 }

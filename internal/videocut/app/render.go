@@ -20,7 +20,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -648,15 +647,11 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	defer func() { _ = film.Close() }()
 	// Once this update wins, cancellation cannot claim the job until the
 	// outcome of this version key is known, also across a restart.
-	started, err := s.db.ExecContext(ctx, "UPDATE jobs SET save_started = 1 WHERE id = ? AND cancel_requested = 0 AND state = 'running'", run.id)
+	started, err := s.db.StartSave(ctx, run.id)
 	if err != nil {
 		return nil, err
 	}
-	n, err := started.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if n == 0 {
+	if !started {
 		return nil, errCancelled
 	}
 	assetID, err := s.grants.SaveFilm(ctx, run.grantID, versionKey, filmName(name, number), film)
@@ -679,7 +674,6 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 	}
 	at := s.now()
-	now := sqlitedb.FormatTime(at)
 	// The version keeps its timeline, which editing it reads (#596). A save
 	// replayed after a restart has not loaded the fill: its version has
 	// its job's fill to read instead.
@@ -702,12 +696,9 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 		if !last {
 			// The next 方案 goes on: the fence is released, the job runs on.
-			_, err := tx.ExecContext(ctx, `UPDATE jobs SET save_started = 0, attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?`, now, run.id)
-			return err
+			return tx.ReleaseSaveFence(ctx, run.id, at)
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'done', save_started = 0, missing_json = NULL, attempts = 0, error_class = '', error = '', wait_reason = '',
-			lease_until = NULL, finished_at = ?, updated_at = ? WHERE id = ?`, now, now, run.id)
-		return err
+		return tx.FinishJob(ctx, run.id, at)
 	})
 	if err != nil {
 		return nil, err

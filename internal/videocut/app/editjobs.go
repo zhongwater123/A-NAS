@@ -133,9 +133,8 @@ func (s *Store) editSteps() []step {
 		return digest(run.keys[StepSource], fillVersion), nil
 	}, func(ctx context.Context, run *jobRun) (string, error) {
 		// The draft's revision and the render: retrying saves it once.
-		var draftID string
-		var revision int
-		if err := s.db.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", run.id).Scan(&draftID, &revision); err != nil {
+		draftID, revision, err := s.db.JobDraft(ctx, run.id)
+		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("%s|%d|%s", draftID, revision, run.keys["render"]), nil

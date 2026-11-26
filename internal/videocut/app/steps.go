@@ -19,7 +19,6 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
-	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
@@ -211,23 +210,20 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	run := &jobRun{claimed: job, keys: map[string]string{}}
 	// An interrupted save may already have committed in the photo library.
 	// Replay its exact version key before inspecting changeable upstream inputs.
-	var saving bool
-	if err := s.db.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", job.id).Scan(&saving); err != nil {
+	saving, err := s.db.SaveStarted(ctx, job.id)
+	if err != nil {
 		return err
 	}
 	if saving {
 		// The 方案 being saved is the first without a version: a version is
 		// recorded in the transaction that releases the fence.
-		var err error
 		if run.plan, err = s.db.NextUnsavedPlan(ctx, job.id); err != nil {
 			return err
 		}
 		var rendered string
 		var key string
 		save := planStep("save", run.plan)
-		err = s.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
-			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
-			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, planStep("render", run.plan), save, job.id).Scan(&run.grantID, &rendered, &key)
+		run.grantID, rendered, key, err = s.db.SaveReplay(ctx, job.id, planStep("render", run.plan), save)
 		if err != nil {
 			return err
 		}
@@ -347,9 +343,7 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 // jobGrant is the job's project grant and the job's videos. A project whose
 // grant is gone has all its videos missing.
 func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, error) {
-	var grantID sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
-		Scan(&grantID)
+	grantID, err := s.db.JobGrant(ctx, jobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil, domain.ErrNotFound
 	}
@@ -383,7 +377,6 @@ func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte
 func (s *Store) startStep(ctx context.Context, jobID string, st step, key string, later []step, saved map[int]bool) error {
 	name := st.name
 	at := s.now()
-	now := sqlitedb.FormatTime(at)
 	return s.db.Update(ctx, func(tx *db.Tx) error {
 		stored, err := tx.StepInputKey(ctx, jobID, name)
 		switch {
@@ -418,8 +411,7 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 				}
 			}
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE jobs SET step = ?, wait_reason = '', updated_at = ? WHERE id = ?", name, now, jobID)
-		return err
+		return tx.SetJobStep(ctx, jobID, name, at)
 	})
 }
 
@@ -427,13 +419,11 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 // from none.
 func (s *Store) finishStep(ctx context.Context, jobID, name string, result []byte) error {
 	at := s.now()
-	now := sqlitedb.FormatTime(at)
 	return s.db.Update(ctx, func(tx *db.Tx) error {
 		if err := tx.FinishStep(ctx, jobID, name, string(result), at); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE jobs SET attempts = 0, error_class = '', error = '', updated_at = ? WHERE id = ?", now, jobID)
-		return err
+		return tx.ResetJobAttempts(ctx, jobID, at)
 	})
 }
 

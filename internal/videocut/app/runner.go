@@ -23,7 +23,6 @@ import (
 // from its first step not done.
 
 const (
-	dueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
 	// heartbeat renews a running job's lease.
 	heartbeat = 30 * time.Second
 	// waitPoll is how often a job waiting for the photo library's
@@ -115,15 +114,12 @@ func (s *Store) cancelRunning(jobID string) {
 // RecoverJobs puts the jobs left running back in the queue and removes the
 // intermediate files of jobs that ended; it runs before RunJobs.
 func (s *Store) RecoverJobs(ctx context.Context) error {
-	now := sqlitedb.FormatTime(s.now())
+	now := s.now()
 	if err := s.db.Update(ctx, func(tx *db.Tx) error {
-		if _, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
-			WHERE cancel_requested = 1 AND `+db.ActiveStateQuery, now, now); err != nil {
+		if err := tx.CancelRequestedJobs(ctx, now); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = 'queued', lease_until = NULL, not_before = ?, updated_at = ?
-			WHERE state = 'running'`, now, now)
-		return err
+		return tx.RequeueRunningJobs(ctx, now)
 	}); err != nil {
 		return err
 	}
@@ -144,9 +140,8 @@ func (s *Store) removeEndedFiles(ctx context.Context) error {
 		return err
 	}
 	for _, entry := range entries {
-		var active bool
-		if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+db.ActiveStateQuery+")",
-			entry.Name()).Scan(&active); err != nil {
+		active, err := s.db.JobActive(ctx, entry.Name())
+		if err != nil {
 			return err
 		}
 		if !active {
@@ -197,8 +192,8 @@ func (s *Store) RunJobs(ctx context.Context) {
 
 // nextDue is how long until a queued or waiting job is due.
 func (s *Store) nextDue(ctx context.Context) time.Duration {
-	var next sql.NullString
-	if err := s.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next); err != nil || !next.Valid {
+	next, err := s.db.NextNotBefore(ctx)
+	if err != nil || !next.Valid {
 		return idlePoll
 	}
 	at := scanTime(next)
@@ -214,11 +209,9 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	found := false
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		now := s.now()
-		var settings string
-		err := tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
-			WHERE `+dueStates+` AND not_before <= ?
-			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
-			Scan(&job.id, &job.owner, &job.projectID, &job.kind, &settings, &job.plans)
+		due, err := tx.DueJob(ctx, now)
+		job.id, job.owner, job.projectID, job.kind, job.plans = due.ID, due.Owner, due.ProjectID, due.Kind, due.Plans
+		settings := due.Settings
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -226,14 +219,10 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 			return err
 		}
 		if err := json.Unmarshal([]byte(settings), &job.settings); err != nil {
-			_, err = tx.ExecContext(ctx, `UPDATE jobs SET state = 'failed', error_class = 'invalid', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-				"invalid job settings: "+err.Error(), sqlitedb.FormatTime(now), sqlitedb.FormatTime(now), job.id)
-			return err
+			return tx.FailInvalidJob(ctx, job.id, "invalid job settings: "+err.Error(), now)
 		}
 		found = true
-		_, err = tx.ExecContext(ctx, `UPDATE jobs SET state = 'running', lease_until = ?, heartbeat_at = ?, updated_at = ? WHERE id = ?`,
-			sqlitedb.FormatTime(now.Add(jobLease)), sqlitedb.FormatTime(now), sqlitedb.FormatTime(now), job.id)
-		return err
+		return tx.RunJob(ctx, job.id, now.Add(jobLease), now)
 	})
 	return job, found, err
 }
@@ -280,9 +269,7 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 			case <-ticker.C:
 			}
 			now := s.now()
-			var requested, saving bool
-			err := s.db.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
-				sqlitedb.FormatTime(now.Add(jobLease)), sqlitedb.FormatTime(now), job.id).Scan(&requested, &saving)
+			requested, saving, err := s.db.RenewLease(ctx, job.id, now.Add(jobLease), now)
 			switch {
 			case errors.Is(err, sql.ErrNoRows):
 				cancel(errCancelled) // the project went
@@ -320,13 +307,12 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 		return
 	}
 	dbErr := s.db.Update(ctx, func(tx *db.Tx) error {
-		var attempts int
-		var cancelled, saving bool
-		if err := tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", job.id).Scan(&attempts, &cancelled, &saving); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+		attempts, cancelled, saving, readErr := tx.RunningJob(ctx, job.id)
+		if readErr != nil {
+			if errors.Is(readErr, sql.ErrNoRows) {
 				return nil
 			}
-			return err
+			return readErr
 		}
 		now := s.now()
 		at := sqlitedb.FormatTime(now)
@@ -374,10 +360,8 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 				next = sqlitedb.FormatTime(now.Add(jobRetryDelay * time.Duration(attempts)))
 			}
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE jobs SET state = ?, wait_reason = ?, attempts = ?, error_class = ?, error = ?,
-			missing_json = ?, save_started = ?, lease_until = NULL, not_before = ?, finished_at = ?, updated_at = ? WHERE id = ?`,
-			state, reason, attempts, class, message, missing, saving, next, finished, at, job.id)
-		return err
+		return tx.SettleJob(ctx, job.id, db.JobSettlement{State: state, WaitReason: reason, Attempts: attempts, ErrorClass: class, Error: message,
+			Missing: missing, SaveStarted: saving, NotBefore: next, FinishedAt: finished, UpdatedAt: at})
 	})
 	if dbErr != nil {
 		s.logger.ErrorContext(ctx, "recording a montage job's step failed", "job", job.id, "error", dbErr)
@@ -391,13 +375,11 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 }
 
 func (s *Store) cancelRequested(ctx context.Context, jobID string) bool {
-	var requested bool
-	err := s.db.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&requested)
+	requested, err := s.db.CancelRequested(ctx, jobID)
 	return err == nil && requested
 }
 
 func (s *Store) finished(ctx context.Context, jobID string) bool {
-	var active bool
-	err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+db.ActiveStateQuery+")", jobID).Scan(&active)
+	active, err := s.db.JobActive(ctx, jobID)
 	return err == nil && !active
 }
