@@ -1,9 +1,14 @@
 import { call, client, rawBody } from "../api/client";
+import { requestKey } from "../api/requestKey";
 import type { components } from "../api.generated";
+import { isLocalConsole } from "../lib/localConsole";
 
 export type WorkspacePage = components["schemas"]["WorkspacePage"];
 export type WorkspacePageSummary = components["schemas"]["WorkspacePageSummary"];
 export type WorkspaceVersion = components["schemas"]["WorkspaceVersion"];
+export type WorkspaceVia = components["schemas"]["WorkspaceVia"];
+export type WorkspacePresence = components["schemas"]["WorkspacePresence"];
+export type WorkspaceAgentWork = components["schemas"]["WorkspaceAgentWork"];
 export type WorkspaceSelection = components["schemas"]["WorkspaceSelection"];
 export type WorkspaceMemberAccount = components["schemas"]["WorkspaceMemberAccount"];
 export type AgentToken = components["schemas"]["AgentToken"];
@@ -51,13 +56,36 @@ export function viewURL(pageId: string, version: number, options: { highlight?: 
   return `${versionPath(pageId, version)}/view${rest ? `?${rest}` : ""}`;
 }
 
+// tabURL is a page on its own in a browser tab (workspace.html, served at
+// /workspace/{pageId}); the device's own screen passes its flag on, so that
+// the tab offers a way back. tabName names that tab: opening the page again
+// returns to it.
+export function tabURL(pageId: string, localConsole = isLocalConsole()) {
+  return `/workspace/${encodeURIComponent(pageId)}${localConsole ? "?local-console=1" : ""}`;
+}
+export const tabName = (pageId: string) => `anas-workspace-${pageId}`;
+
 // fileURL downloads a version as the file it was saved as.
 export const fileURL = (pageId: string, version: number) => `${versionPath(pageId, version)}/file`;
 
-export const reportViewing = (pageId: string, version: number) =>
-  call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version } }));
+// thisTab names this browser tab to the service, which keeps the tabs a
+// member has open apart: the one used last is "this page" to their agent.
+const thisTab = (() => {
+  try {
+    return requestKey();
+  } catch {
+    return `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+})();
 
-export const stopViewing = (pageId: string) => call(client.DELETE("/api/v1/workspace/viewing/{pageId}", page(pageId)));
+// reportViewing says this tab shows a page's version; focused, that the
+// member is using it.
+export const reportViewing = (pageId: string, version: number, focused: boolean) =>
+  call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version, tab: thisTab, focused } }));
+
+// stopViewing takes it back; keepalive lets a closing tab send it.
+export const stopViewing = (keepalive = false) =>
+  call(client.DELETE("/api/v1/workspace/viewing/{tab}", { params: { path: { tab: thisTab } }, keepalive }));
 
 export const setSelection = (selection: WorkspaceSelection) =>
   call(client.PUT("/api/v1/workspace/selection", { body: selection }));

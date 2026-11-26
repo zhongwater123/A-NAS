@@ -2369,7 +2369,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions */
+        /** A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there */
         get: operations["getWorkspacePage"];
         put?: never;
         post?: never;
@@ -2450,7 +2450,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without */
+        /** The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. No tab name is 400 invalid_request */
         put: operations["setWorkspaceViewing"];
         post?: never;
         delete?: never;
@@ -2459,19 +2459,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspace/viewing/{pageId}": {
+    "/api/v1/workspace/viewing/{tab}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description The tab's name as it reported itself */
+                tab: string;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
         post?: never;
-        /** The caller's desktop no longer shows this page; what it said of another page stays */
+        /** This tab of the caller's closed or went to the background; the caller's other tabs stay */
         delete: operations["clearWorkspaceViewing"];
         options?: never;
         head?: never;
@@ -8880,6 +8881,31 @@ export interface components {
             /** Format: date-time */
             savedAt: string;
         };
+        WorkspaceViewer: {
+            member: components["schemas"]["WorkspacePerson"];
+            /** @description What the member's tab used last shows. */
+            version: number;
+            /**
+             * Format: date-time
+             * @description When the first of the member's tabs began to show the page.
+             */
+            since: string;
+        };
+        /** @description What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page. */
+        WorkspaceAgentWork: {
+            member: components["schemas"]["WorkspacePerson"];
+            via: components["schemas"]["WorkspaceVia"];
+            /** @enum {string} */
+            action: "read" | "download";
+            version: number;
+            /** Format: date-time */
+            at: string;
+        };
+        /** @description Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only. */
+        WorkspacePresence: {
+            viewers: components["schemas"]["WorkspaceViewer"][];
+            agents: components["schemas"]["WorkspaceAgentWork"][];
+        };
         WorkspacePageSummary: {
             id: string;
             title: string;
@@ -8887,6 +8913,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             latest: components["schemas"]["WorkspaceVersion"];
+            presence: components["schemas"]["WorkspacePresence"];
         };
         WorkspacePageList: {
             items: components["schemas"]["WorkspacePageSummary"][];
@@ -8900,6 +8927,7 @@ export interface components {
             latest: components["schemas"]["WorkspaceVersion"];
             /** @description Newest first */
             versions: components["schemas"]["WorkspaceVersion"][];
+            presence: components["schemas"]["WorkspacePresence"];
         };
         WorkspacePageChanged: {
             error: components["schemas"]["ErrorDetail"];
@@ -8908,6 +8936,10 @@ export interface components {
         WorkspaceViewing: {
             pageId: string;
             version: number;
+            /** @description A name the tab made for itself when it opened, random. */
+            tab: string;
+            /** @description Whether the tab has the focus: the tab focused last is the one the member uses. */
+            focused: boolean;
         };
         WorkspaceRect: {
             x: number;
@@ -9798,6 +9830,9 @@ export type WorkspaceAccess = components['schemas']['WorkspaceAccess'];
 export type WorkspacePerson = components['schemas']['WorkspacePerson'];
 export type WorkspaceVia = components['schemas']['WorkspaceVia'];
 export type WorkspaceVersion = components['schemas']['WorkspaceVersion'];
+export type WorkspaceViewer = components['schemas']['WorkspaceViewer'];
+export type WorkspaceAgentWork = components['schemas']['WorkspaceAgentWork'];
+export type WorkspacePresence = components['schemas']['WorkspacePresence'];
 export type WorkspacePageSummary = components['schemas']['WorkspacePageSummary'];
 export type WorkspacePageList = components['schemas']['WorkspacePageList'];
 export type WorkspacePage = components['schemas']['WorkspacePage'];
@@ -14761,6 +14796,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
         };
@@ -14772,7 +14808,8 @@ export interface operations {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description The tab's name as it reported itself */
+                tab: string;
             };
             cookie?: never;
         };

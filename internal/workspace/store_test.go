@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -295,7 +296,7 @@ func TestATransferLinkWorksOnceAndOnlyForTenMinutes(t *testing.T) {
 
 func TestASelectionIsTheMembersOwnForHalfAnHour(t *testing.T) {
 	f := newFixture(t)
-	f.store.SetViewing(f.alice.AccountID, "page_a", 2)
+	f.store.SetViewing(f.alice, "tab", "page_a", 2, true)
 	f.store.SetSelection(f.alice.AccountID, workspace.Selection{PageID: "page_a", Version: 2, At: 10, Tag: "button"})
 	if _, ok := f.store.Selection(f.bob.AccountID); ok {
 		t.Fatal("bob sees alice's selection")
@@ -309,31 +310,142 @@ func TestASelectionIsTheMembersOwnForHalfAnHour(t *testing.T) {
 	}
 }
 
-// What a member's desktop shows lasts while the desktop keeps saying so,
-// until it closes the page.
-func TestAMembersPageIsOpenWhileTheDesktopSaysSo(t *testing.T) {
+// A tab stays open while it keeps saying so, until it closes; closing one
+// tab leaves the member's others.
+func TestATabIsOpenWhileItSaysSo(t *testing.T) {
 	f := newFixture(t)
 	start := *f.now
-	f.store.SetViewing(f.alice.AccountID, "page_a", 2)
+	f.store.SetViewing(f.alice, "one", "page_a", 2, true)
 	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
-	f.store.SetViewing(f.alice.AccountID, "page_a", 2)
+	f.store.SetViewing(f.alice, "one", "page_a", 2, false)
 	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
 	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_a" || viewing.Version != 2 || !viewing.Since.Equal(start) {
 		t.Fatalf("Viewing() = %+v, %v", viewing, ok)
 	}
 	*f.now = f.now.Add(time.Second)
 	if viewing, ok := f.store.Viewing(f.alice.AccountID); ok {
-		t.Fatalf("a desktop that went quiet still shows %+v", viewing)
+		t.Fatalf("a tab that went quiet still shows %+v", viewing)
 	}
 
-	f.store.SetViewing(f.alice.AccountID, "page_b", 1)
-	f.store.ClearViewing(f.alice.AccountID, "page_a")
+	f.store.SetViewing(f.alice, "one", "page_a", 1, true)
+	f.store.SetViewing(f.alice, "two", "page_b", 1, false)
+	f.store.ClearViewing(f.alice.AccountID, "one")
 	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_b" {
-		t.Fatalf("closing another page = %+v, %v", viewing, ok)
+		t.Fatalf("closing another tab = %+v, %v", viewing, ok)
 	}
-	f.store.ClearViewing(f.alice.AccountID, "page_b")
+	f.store.ClearViewing(f.bob.AccountID, "two")
+	f.store.ClearViewing(f.alice.AccountID, "two")
 	if _, ok := f.store.Viewing(f.alice.AccountID); ok {
-		t.Fatal("a closed page is still open")
+		t.Fatal("a closed tab is still open")
+	}
+}
+
+// With several tabs open, "this page" is the one the member used last: a
+// background tab saying it is still open does not take over, and picking an
+// element counts as using its page (Codex review of #674).
+func TestThePageIsTheTabTheMemberUsedLast(t *testing.T) {
+	f := newFixture(t)
+	step := func() { *f.now = f.now.Add(10 * time.Second) }
+	viewing := func() string {
+		t.Helper()
+		v, ok := f.store.Viewing(f.alice.AccountID)
+		if !ok {
+			t.Fatal("no tab open")
+		}
+		return v.PageID
+	}
+	f.store.SetViewing(f.alice, "one", "page_a", 1, true)
+	step()
+	f.store.SetViewing(f.alice, "two", "page_b", 1, true)
+	if got := viewing(); got != "page_b" {
+		t.Fatalf("after switching tabs: %s", got)
+	}
+	step()
+	f.store.SetViewing(f.alice, "one", "page_a", 1, false)
+	if got := viewing(); got != "page_b" {
+		t.Fatalf("a background tab took over: %s", got)
+	}
+	step()
+	f.store.SetSelection(f.alice.AccountID, workspace.Selection{PageID: "page_a", Version: 1, Tag: "h1"})
+	if got := viewing(); got != "page_a" {
+		t.Fatalf("after picking on page_a: %s", got)
+	}
+	step()
+	f.store.SetViewing(f.alice, "two", "page_b", 1, true)
+	if got := viewing(); got != "page_b" {
+		t.Fatalf("after going back to page_b: %s", got)
+	}
+}
+
+// Everyone who may use the workspace sees who has a page open and whose
+// agent read or downloaded it lately, until that agent saves the page.
+func TestPresenceShowsWhoHasAPageOpenAndWhoseAgentIsAtWork(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	page, _ := f.store.CreatePage(ctx, f.alice, "a.html", []byte("<p>one</p><p>two</p>"), workspace.Web, "")
+	if presence := f.store.Presence(); len(presence) != 0 {
+		t.Fatalf("nobody has anything open: %+v", presence)
+	}
+	opened := *f.now
+	f.store.SetViewing(f.alice, "one", page.ID, 1, true)
+	*f.now = f.now.Add(time.Second)
+	f.store.SetViewing(f.bob, "phone", page.ID, 1, false)
+	*f.now = f.now.Add(time.Second)
+	f.store.SetViewing(f.alice, "two", "page_other", 1, true)
+
+	bobsAgent := workspace.Caller{Actor: f.bob, Via: claude("agent:b")}
+	f.store.AgentWorking(bobsAgent, page.ID, 1, workspace.AgentRead)
+	f.store.AgentWorking(workspace.Caller{Actor: f.alice, Via: workspace.Web}, page.ID, 1, workspace.AgentRead)
+
+	presence := f.store.Presence()[page.ID]
+	if len(presence.Viewers) != 2 || presence.Viewers[0].Member.Name != "Alice" || !presence.Viewers[0].Since.Equal(opened) ||
+		presence.Viewers[1].Member.Name != "bob" {
+		t.Fatalf("viewers = %+v", presence.Viewers)
+	}
+	if len(presence.Agents) != 1 || presence.Agents[0].Member.Name != "bob" || presence.Agents[0].Via.Name != "办公电脑" ||
+		presence.Agents[0].Action != workspace.AgentRead || presence.Agents[0].Version != 1 {
+		t.Fatalf("agents = %+v", presence.Agents)
+	}
+	if other := f.store.Presence()["page_other"]; len(other.Viewers) != 1 || len(other.Agents) != 0 {
+		t.Fatalf("the other page = %+v", other)
+	}
+
+	if _, err := f.store.EditPage(ctx, f.bob, page.ID, 1, []workspace.Edit{{OldText: "two", NewText: "2"}}, claude("agent:b"), "改成数字"); err != nil {
+		t.Fatal(err)
+	}
+	if agents := f.store.Presence()[page.ID].Agents; len(agents) != 0 {
+		t.Fatalf("an agent that saved is still at work: %+v", agents)
+	}
+
+	f.store.AgentWorking(bobsAgent, page.ID, 2, workspace.AgentDownload)
+	*f.now = f.now.Add(workspace.AgentLife)
+	if agents := f.store.Presence()[page.ID].Agents; len(agents) != 0 {
+		t.Fatalf("an agent quiet for %v is still at work: %+v", workspace.AgentLife, agents)
+	}
+
+	f.store.SetViewing(f.alice, "one", page.ID, 2, true)
+	f.store.AgentWorking(bobsAgent, page.ID, 2, workspace.AgentRead)
+	if err := f.store.DeletePage(ctx, f.alice, page.ID); err != nil {
+		t.Fatal(err)
+	}
+	if gone, ok := f.store.Presence()[page.ID]; ok {
+		t.Fatalf("a deleted page is still open: %+v", gone)
+	}
+}
+
+func TestAnAccountKeepsAtMostMaxTabs(t *testing.T) {
+	f := newFixture(t)
+	f.store.SetViewing(f.alice, "first", "page_a", 1, false)
+	for i := range workspace.MaxTabs {
+		*f.now = f.now.Add(time.Millisecond)
+		f.store.SetViewing(f.alice, fmt.Sprint("tab", i), "page_b", 1, false)
+	}
+	presence := f.store.Presence()
+	if _, ok := presence["page_a"]; ok {
+		t.Fatal("the quietest tab was kept past MaxTabs")
+	}
+	if len(presence["page_b"].Viewers) != 1 {
+		t.Fatalf("page_b = %+v", presence["page_b"])
 	}
 }
 
@@ -344,7 +456,8 @@ func TestADeletedAccountLeavesItsPagesUnderItsName(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, _ := f.store.CreatePage(ctx, f.alice, "a.html", []byte("<p>a"), workspace.Web, "")
-	f.store.SetViewing(f.alice.AccountID, page.ID, 1)
+	f.store.SetViewing(f.alice, "tab", page.ID, 1, true)
+	f.store.AgentWorking(workspace.Caller{Actor: f.alice, Via: claude("agent:a")}, page.ID, 1, workspace.AgentRead)
 	if err := f.store.RemoveAccount(ctx, f.alice.AccountID); err != nil {
 		t.Fatal(err)
 	}
@@ -353,6 +466,9 @@ func TestADeletedAccountLeavesItsPagesUnderItsName(t *testing.T) {
 	}
 	if _, ok := f.store.Viewing(f.alice.AccountID); ok {
 		t.Fatal("a deleted account is still looking at a page")
+	}
+	if presence, ok := f.store.Presence()[page.ID]; ok {
+		t.Fatalf("a deleted account is still present: %+v", presence)
 	}
 	if kept, err := f.store.Page(ctx, page.ID); err != nil || kept.CreatedBy.Name != "Alice" {
 		t.Fatalf("the page = %+v, %v", kept, err)

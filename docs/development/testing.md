@@ -8,7 +8,8 @@
 
 | 任务 | 执行步骤 |
 |---|---|
-| Windows/WSL 完整门禁 | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
+| 完整门禁、race 测试（默认） | [check-on-shared-server](../../.agents/skills/check-on-shared-server/SKILL.md) |
+| Windows/WSL 完整门禁（服务器连不上时） | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
 | macOS/Colima 检查与当前限制 | [macOS 环境](environments/macos.md#运行检查) |
 | Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
 | systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |

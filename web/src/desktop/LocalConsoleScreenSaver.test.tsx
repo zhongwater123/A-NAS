@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { localConsoleActive } from "../lib/localConsole";
 import { http, server } from "../test/server";
 import {
   defaultSleepAfterMinutes,
@@ -47,6 +48,19 @@ describe("local console screen saver", () => {
     expect(isLocalConsole("?local-console=1")).toBe(true);
     expect(isLocalConsole("?local-console=0")).toBe(false);
     expect(isLocalConsole("")).toBe(false);
+  });
+
+  it("counts use a page reports from inside a frame, but only input takes a cover away", async () => {
+    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} />);
+    await act(async () => undefined);
+    await idle(localConsoleScreenSaverIdleMs - 1_000);
+    act(() => localConsoleActive());
+    await idle(localConsoleScreenSaverIdleMs - 1_000);
+    expect(saver()).toBeNull();
+    await idle(1_000);
+    expect(saver()).not.toBeNull();
+    act(() => localConsoleActive());
+    expect(saver()).not.toBeNull();
   });
 
   it("selects one video uniformly from the pool", () => {

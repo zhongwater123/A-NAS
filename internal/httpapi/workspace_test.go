@@ -180,8 +180,26 @@ func TestTheWorkspaceKeepsToTheContract(t *testing.T) {
 		t.Fatalf("a version over an old one = %d %s", stale.Code, stale.Body.String())
 	}
 
-	if got := f.member.call(t, http.MethodPut, "/api/v1/workspace/viewing", `{"pageId":"`+page.ID+`","version":2}`); got.Code != http.StatusNoContent {
+	if got := f.member.call(t, http.MethodPut, "/api/v1/workspace/viewing", `{"pageId":"`+page.ID+`","version":2}`); got.Code != http.StatusBadRequest {
+		t.Fatalf("viewing without a tab = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.member.call(t, http.MethodPut, "/api/v1/workspace/viewing", `{"pageId":"`+page.ID+`","version":2,"tab":"tab-1","focused":true}`); got.Code != http.StatusNoContent {
 		t.Fatalf("viewing = %d %s", got.Code, got.Body.String())
+	}
+	// Everyone who may use the workspace sees who has the page open.
+	if got := f.owner.call(t, http.MethodGet, "/api/v1/workspace/pages/"+page.ID, ""); got.Code != http.StatusOK ||
+		!strings.Contains(got.Body.String(), `"presence":{"viewers":[{"member":{"id":"`+f.alice.ID+`"`) {
+		t.Fatalf("the page's presence = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.member.call(t, http.MethodDelete, "/api/v1/workspace/viewing/tab-1", ""); got.Code != http.StatusNoContent {
+		t.Fatalf("closing the tab = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.owner.call(t, http.MethodGet, "/api/v1/workspace/pages", ""); got.Code != http.StatusOK ||
+		!strings.Contains(got.Body.String(), `"presence":{"viewers":[],"agents":[]}`) {
+		t.Fatalf("the list after the tab closed = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.member.call(t, http.MethodPut, "/api/v1/workspace/viewing", `{"pageId":"`+page.ID+`","version":2,"tab":"tab-1","focused":true}`); got.Code != http.StatusNoContent {
+		t.Fatalf("viewing again = %d %s", got.Code, got.Body.String())
 	}
 	selection := `{"pageId":"` + page.ID + `","version":2,"at":0,"generated":false,"tag":"title","text":"v2","dom":"","rect":{"x":0,"y":0,"w":1,"h":1},"style":{},"rules":[],"image":"` + smallJPEG(t) + `"}`
 	if got := f.member.call(t, http.MethodPut, "/api/v1/workspace/selection", selection); got.Code != http.StatusNoContent {

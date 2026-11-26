@@ -29,6 +29,14 @@ export default defineConfig({
     // .vite/manifest.json says which files each chunk needs; the first-load
     // budget reads it (.size-limit.js).
     manifest: true,
+    rolldownOptions: {
+      // The desktop, and a shared page on its own in a browser tab, which
+      // loads none of the desktop (src/workspace/tab.tsx).
+      input: {
+        index: fileURLToPath(new URL("index.html", import.meta.url)),
+        workspace: fileURLToPath(new URL("workspace.html", import.meta.url)),
+      },
+    },
   },
   server: {
     host: "127.0.0.1",
