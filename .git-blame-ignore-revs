@@ -10,3 +10,12 @@ eeabfc204be5ba3995c2202bb27b682746fa2155
 70c4f48281f90d4e14b97f84c0d24953a71347e1
 # refactor(videocut): move ai/anas_montage to ai/anas_videocut (#667)
 712559eb1a4a2117e8f90247b577dbe692704da3
+
+# refactor(api): name the montage contract VideoCut (#668)
+d4b79f1b9516324a77b87ca808ff014863d26c80
+# build(api): regenerate the contract after the VideoCut names (#668)
+9fde4f442e5cc9d534afc82ac51747893921def3
+# refactor(web): follow the VideoCut contract names (#668)
+509b7bdb9d1113b5987c5e19ce01d672c910d5ef
+# refactor(go): name the montage identifiers VideoCut (#668)
+9da741a6c8a15d5f8e8ea343513749009cc4c76a
