@@ -48,7 +48,7 @@ func (s *Store) chosenIn(ctx context.Context, q queryer, owner, projectID string
 // ownSong is owner's song row.
 func (s *Store) ownSong(ctx context.Context, owner, songID string) (songRow, error) {
 	row, err := s.song(ctx, s.db, songID)
-	if err == nil && row.owner != owner {
+	if err == nil && row.Owner != owner {
 		err = domain.ErrNoSong
 	}
 	if errors.Is(err, domain.ErrNoSong) {
@@ -61,11 +61,11 @@ func (s *Store) ownSong(ctx context.Context, owner, songID string) (songRow, err
 // asking a worker to cut it. A completed step can therefore be reused
 // while the compute worker is unavailable.
 func (row songRow) excerptStart(start float64) (float64, error) {
-	switch row.state {
+	switch row.State {
 	case SongAnalyzing:
 		return 0, domain.ErrSongAnalyzing
 	case SongUnusable:
-		return 0, fmt.Errorf("%w: %s", domain.ErrSongUnusable, row.reason)
+		return 0, fmt.Errorf("%w: %s", domain.ErrSongUnusable, row.Reason)
 	}
 	st, selection := row.analysis.Structure, row.analysis.Selection
 	if st == nil || selection == nil || len(row.analysis.Music) == 0 {
@@ -98,7 +98,7 @@ func (row songRow) excerptStart(start float64) (float64, error) {
 const excerptVersion = "frames-even"
 
 func (row songRow) excerptKey(start float64) string {
-	sum := sha256.Sum256([]byte(row.sha + "\x00" + row.analysis.Structure.Model + "\x00" + row.version + "\x00" + strconv.FormatFloat(start, 'g', -1, 64) +
+	sum := sha256.Sum256([]byte(row.Sha + "\x00" + row.analysis.Structure.Model + "\x00" + row.Version + "\x00" + strconv.FormatFloat(start, 'g', -1, 64) +
 		"\x00" + excerptVersion))
 	return "song:" + hex.EncodeToString(sum[:])
 }
@@ -160,7 +160,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 			if s.compute == nil {
 				return domain.Excerpt{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 			}
-			loudness, err := domain.DecodeLoudness(row.loudness)
+			loudness, err := domain.DecodeLoudness(row.Loudness)
 			if err != nil {
 				return domain.Excerpt{}, err
 			}
@@ -177,7 +177,7 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		}
 		selection, music = &kept.Selection, kept.Music
 	}
-	music, err = domain.Named(music, row.title)
+	music, err = domain.Named(music, row.Title)
 	if err != nil {
 		return domain.Excerpt{}, err
 	}
@@ -191,5 +191,5 @@ func (s *Store) Audio(ctx context.Context, owner, songID string) (*os.File, erro
 	if err != nil {
 		return nil, err
 	}
-	return os.Open(s.songPath(row.sha))
+	return os.Open(s.songPath(row.Sha))
 }

@@ -195,15 +195,14 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		now := s.now()
 		due, err := tx.DueJob(ctx, now)
-		job.id, job.owner, job.projectID, job.kind, job.plans = due.ID, due.Owner, due.ProjectID, due.Kind, due.Plans
-		settings := due.Settings
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal([]byte(settings), &job.settings); err != nil {
+		job.id, job.owner, job.projectID, job.kind, job.plans = due.ID, due.Owner, due.ProjectID, due.Kind, due.Plans
+		if err := json.Unmarshal([]byte(due.Settings), &job.settings); err != nil {
 			return tx.FailInvalidJob(ctx, job.id, "invalid job settings: "+err.Error(), now)
 		}
 		found = true

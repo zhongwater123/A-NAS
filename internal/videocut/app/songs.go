@@ -94,11 +94,10 @@ type songAnalysis struct {
 	Music json.RawMessage `json:"music,omitempty"`
 }
 
+// songRow is a song row as kept, with its analysis decoded.
 type songRow struct {
-	id, owner, sha, title, contentType, state, reason, waiting, version string
-	duration                                                            float64
-	analysis                                                            songAnalysis
-	loudness                                                            []byte
+	db.SongRow
+	analysis songAnalysis
 }
 
 // keptSelection is what a project keeps of the excerpt from the start its
@@ -218,7 +217,7 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source dom
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	if row.State != "ready" {
+	if row.State != projectReady {
 		return domain.SongDetail{}, domain.ErrNotFound
 	}
 	if !utf8.ValidString(source.Title) || strings.ContainsRune(source.Title, 0) {
@@ -343,7 +342,7 @@ func (s *Store) ReclaimSongs(ctx context.Context) error {
 
 func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID string) (db.ProjectSong, error) {
 	state, song, err := q.ProjectSong(ctx, owner, projectID)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && state != "ready" {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && state != projectReady {
 		return db.ProjectSong{}, domain.ErrNotFound
 	}
 	if err != nil {
@@ -363,8 +362,7 @@ func (s *Store) song(ctx context.Context, q queryer, id string) (songRow, error)
 	if err != nil {
 		return songRow{}, err
 	}
-	row := songRow{id: kept.ID, owner: kept.Owner, sha: kept.Sha, title: kept.Title, contentType: kept.ContentType, state: kept.State,
-		reason: kept.Reason, waiting: kept.Waiting, version: kept.Version, duration: kept.Duration, loudness: kept.Loudness}
+	row := songRow{SongRow: kept}
 	if analysis := kept.Analysis; analysis.Valid {
 		if err := json.Unmarshal([]byte(analysis.String), &row.analysis); err != nil {
 			return songRow{}, fmt.Errorf("song %s: %w", id, err)
@@ -384,12 +382,12 @@ func (s *Store) Song(ctx context.Context, owner, projectID string) (domain.SongD
 	if err != nil {
 		return domain.SongDetail{}, err
 	}
-	detail := domain.SongDetail{ID: row.id, TrackID: chosen.TrackID.String, Title: row.title, Duration: row.duration, Transcode: row.contentType == "",
-		State: row.state, Reason: row.reason, Waiting: row.waiting}
+	detail := domain.SongDetail{ID: row.ID, TrackID: chosen.TrackID.String, Title: row.Title, Duration: row.Duration, Transcode: row.ContentType == "",
+		State: row.State, Reason: row.Reason, Waiting: row.Waiting}
 	if st := row.analysis.Structure; st != nil {
 		detail.Tempo, detail.Beats, detail.Downbeats, detail.Sections = st.BPM, st.Beats, st.Downbeats, st.Segments
 	}
-	if selection := row.analysis.Selection; selection != nil && row.state == SongReady {
+	if selection := row.analysis.Selection; selection != nil && row.State == SongReady {
 		start := selection.Excerpt[0]
 		detail.DefaultStart, detail.Selection = &start, selection
 		if chosen.Selection.Valid {
@@ -418,10 +416,10 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		return domain.SongDetail{}, err
 	}
 	st := row.analysis.Structure
-	if row.state != SongReady || st == nil || len(st.Downbeats) == 0 {
+	if row.State != SongReady || st == nil || len(st.Downbeats) == 0 {
 		return domain.SongDetail{}, domain.ErrSongNotReady
 	}
-	if math.IsNaN(at) || math.IsInf(at, 0) || at < 0 || at > row.duration {
+	if math.IsNaN(at) || math.IsInf(at, 0) || at < 0 || at > row.Duration {
 		return domain.SongDetail{}, domain.ErrInvalid
 	}
 	start := domain.Nearest(st.Downbeats, at)
@@ -433,7 +431,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		if s.compute == nil {
 			return domain.SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 		}
-		loudness, err := domain.DecodeLoudness(row.loudness)
+		loudness, err := domain.DecodeLoudness(row.Loudness)
 		if err != nil {
 			return domain.SongDetail{}, err
 		}
@@ -454,7 +452,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		}
 		keptStart, kept = start, string(encoded)
 	}
-	changed, err := s.db.SetSongStart(ctx, owner, projectID, row.id, keptStart, kept, s.now())
+	changed, err := s.db.SetSongStart(ctx, owner, projectID, row.ID, keptStart, kept, s.now())
 	if err != nil {
 		return domain.SongDetail{}, err
 	}

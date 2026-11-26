@@ -268,7 +268,7 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 		return revoke, err
 	}
 	if grantID != "" {
-		held, err := s.heldAssets(ctx, b.ProjectID, b.Assets)
+		held, err := s.db.HeldAssets(ctx, b.ProjectID, b.Assets)
 		if err != nil {
 			return "", err
 		}
@@ -280,11 +280,6 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 		}
 	}
 	return "", s.db.DeleteRegisteringBatch(ctx, b.ID)
-}
-
-// heldAssets reports which of ids the project holds.
-func (s *Store) heldAssets(ctx context.Context, projectID string, ids []string) (map[string]bool, error) {
-	return s.db.HeldAssets(ctx, projectID, ids)
 }
 
 // defaultName names a new project by its videos' dates, as "2026-08-02 至
@@ -643,15 +638,10 @@ func (s *Store) revoke(ctx context.Context, grantID string) {
 	_ = s.db.DeleteRevocation(ctx, grantID)
 }
 
-// dueRevocations lists the grants whose revocation is due.
-func (s *Store) dueRevocations(ctx context.Context) ([]string, error) {
-	return s.db.DueRevocations(ctx, s.now())
-}
-
 // RetryRevocations revokes the grants whose revocation is due: those the
 // photo library missed, and those reconciling queued.
 func (s *Store) RetryRevocations(ctx context.Context) error {
-	due, err := s.dueRevocations(ctx)
+	due, err := s.db.DueRevocations(ctx, s.now())
 	if err != nil {
 		return err
 	}
@@ -709,7 +699,7 @@ func (s *Store) reconcile(ctx context.Context) error {
 	for _, grant := range grants {
 		held[grant.OwnerUserID] = append(held[grant.OwnerUserID], grant)
 	}
-	owners, err := s.owners(ctx)
+	owners, err := s.db.ProjectOwners(ctx)
 	if err != nil {
 		return err
 	}
@@ -726,10 +716,6 @@ func (s *Store) reconcile(ctx context.Context) error {
 	s.seen = seen
 	s.reconciled.Store(true)
 	return nil
-}
-
-func (s *Store) owners(ctx context.Context) ([]string, error) {
-	return s.db.ProjectOwners(ctx)
 }
 
 func (s *Store) reconcileMember(ctx context.Context, owner string, grants []photos.Grant, seen map[string]bool, first bool) error {

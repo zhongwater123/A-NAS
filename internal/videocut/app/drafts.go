@@ -128,15 +128,15 @@ type editSource struct {
 func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*editSource, error) {
 	src := &editSource{versionID: versionID}
 	row, err := s.db.VersionSource(ctx, owner, versionID)
-	src.projectID, src.number, src.jobID, src.plan = row.ProjectID, row.Number, row.JobID, row.Plan
-	timeline, grantID := row.Timeline, row.GrantID
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	src.grantID = grantID.String
+	src.projectID, src.number, src.jobID, src.plan = row.ProjectID, row.Number, row.JobID, row.Plan
+	timeline := row.Timeline
+	src.grantID = row.GrantID.String
 	src.planJob, src.planNo = src.jobID, src.plan
 	settings, err := jobSettings(ctx, s.db, src.jobID)
 	if err != nil {
@@ -148,7 +148,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	if settings.SongID != "" {
 		// A song gone since is not heard at all (OpenDraftSongAudio).
 		if song, err := s.song(ctx, s.db, settings.SongID); err == nil {
-			src.songTranscode = song.contentType == ""
+			src.songTranscode = song.ContentType == ""
 		}
 	}
 	kept, ok, err := s.loadPlan(ctx, src.planJob, src.planNo)
@@ -161,7 +161,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	stored := timeline.Valid
 	if !stored {
 		fill := planStep("fill", src.plan)
-		own, err := s.doneResults(ctx, src.jobID, []string{fill})
+		own, err := s.db.DoneResults(ctx, src.jobID, []string{fill})
 		if err != nil {
 			return nil, err
 		}
@@ -239,7 +239,7 @@ type keptPlan struct {
 // 方案's version was saved (redoneSince).
 func (s *Store) loadPlan(ctx context.Context, jobID string, plan int) (keptPlan, bool, error) {
 	names := plannedFrom(plan)
-	results, err := s.doneResults(ctx, jobID, names)
+	results, err := s.db.DoneResults(ctx, jobID, names)
 	if err != nil {
 		return keptPlan{}, false, err
 	}
@@ -271,12 +271,6 @@ func (s *Store) loadPlan(ctx context.Context, jobID string, plan int) (keptPlan,
 // compare as text.
 func (s *Store) redoneSince(ctx context.Context, jobID string, plan int) (bool, error) {
 	return s.db.RedoneSince(ctx, jobID, plan, plannedFrom(plan))
-}
-
-// doneResults are what the named steps of a job kept when they were done,
-// by name; a step that is not done, or that kept nothing, is not among them.
-func (s *Store) doneResults(ctx context.Context, jobID string, names []string) (map[string][]byte, error) {
-	return s.db.DoneResults(ctx, jobID, names)
 }
 
 func (src *editSource) pictureKnown(part, picture int) bool {
@@ -580,14 +574,14 @@ type keptDraft struct {
 func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editSource) (*editSource, keptDraft, error) {
 	var draft keptDraft
 	row, err := s.db.Draft(ctx, owner, draftID)
-	versionID, stateJSON, updated := row.VersionID, row.Shots, row.Updated
-	draft.revision = row.Revision
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, keptDraft{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, keptDraft{}, err
 	}
+	versionID, stateJSON, updated := row.VersionID, row.Shots, row.Updated
+	draft.revision = row.Revision
 	if src == nil {
 		if src, err = s.versionSource(ctx, owner, versionID); err != nil {
 			return nil, keptDraft{}, err

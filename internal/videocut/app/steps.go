@@ -333,7 +333,7 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 	if err != nil {
 		return err
 	}
-	run.assets = append(run.assets, kept...)
+	run.assets = kept
 	if len(run.assets) != len(assets) {
 		return fmt.Errorf("job %s lists its videos twice", run.id)
 	}

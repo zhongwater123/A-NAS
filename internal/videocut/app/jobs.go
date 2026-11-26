@@ -113,7 +113,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if err != nil {
 			return err
 		}
-		if row.State != "ready" {
+		if row.State != projectReady {
 			return domain.ErrNotFound
 		}
 		if err := projectIdle(ctx, tx, projectID); err != nil {
@@ -133,7 +133,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 		if settings.SongID == "" {
 			return domain.ErrNoSong
 		}
-		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: projectID, requestKey: requestKey, kind: KindGenerate, settings: settings, plans: s.plans}); err != nil {
+		if jobID, err = s.queueJob(ctx, tx, settings, db.NewJob{Owner: owner, ProjectID: projectID, RequestKey: requestKey, Kind: KindGenerate, Plans: s.plans}); err != nil {
 			return err
 		}
 		created = true
@@ -177,26 +177,16 @@ func projectIdle(ctx context.Context, tx *db.Tx, projectID string) error {
 	return nil
 }
 
-// newJob is a job to queue: an edit names the version it came from, its
-// draft and the draft's revision; a recut the version.
-type newJob struct {
-	owner, projectID, requestKey, kind string
-	settings                           domain.JobSettings
-	plans                              int
-	sourceVersion, draft               sql.NullString
-	draftRevision                      sql.NullInt64
-}
-
-// queueJob writes a job, due now, and returns its ID.
-func (s *Store) queueJob(ctx context.Context, tx *db.Tx, job newJob) (string, error) {
-	encoded, err := json.Marshal(job.settings)
+// queueJob writes job, due now, with settings, and returns its ID: an
+// edit names the version it came from, its draft and the draft's revision;
+// a recut the version. job's ID and Settings are queueJob's to fill.
+func (s *Store) queueJob(ctx context.Context, tx *db.Tx, settings domain.JobSettings, job db.NewJob) (string, error) {
+	encoded, err := json.Marshal(settings)
 	if err != nil {
 		return "", err
 	}
-	id, now := newID("job"), s.now()
-	err = tx.AddJob(ctx, db.NewJob{ID: id, Owner: job.owner, ProjectID: job.projectID, RequestKey: job.requestKey, Settings: string(encoded),
-		Plans: job.plans, Kind: job.kind, SourceVersion: job.sourceVersion, Draft: job.draft, DraftRevision: job.draftRevision}, now)
-	return id, err
+	job.ID, job.Settings = newID("job"), string(encoded)
+	return job.ID, tx.AddJob(ctx, job, s.now())
 }
 
 // jobSettings are a job's settings as it was started with them.
@@ -236,19 +226,18 @@ func (s *Store) settingsOf(ctx context.Context, q queryer, row db.ProjectRow) (d
 // Job returns owner's job.
 func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error) {
 	row, err := s.db.Job(ctx, owner, jobID)
-	job := domain.Job{ID: row.ID, ProjectID: row.ProjectID, Kind: row.Kind, State: row.State}
-	step, reason, message, created, finished, plans := row.Step, row.WaitReason, row.Error, row.Created, row.Finished, row.Plans
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Job{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return domain.Job{}, err
 	}
-	job.Step, job.WaitReason, job.Error = step.String, reason.String, message.String
-	if at := scanTime(sql.NullString{String: created, Valid: true}); at != nil {
+	job := domain.Job{ID: row.ID, ProjectID: row.ProjectID, Kind: row.Kind, State: row.State,
+		Step: row.Step.String, WaitReason: row.WaitReason.String, Error: row.Error.String}
+	if at := scanTime(sql.NullString{String: row.Created, Valid: true}); at != nil {
 		job.CreatedAt = *at
 	}
-	job.FinishedAt = scanTime(finished)
+	job.FinishedAt = scanTime(row.Finished)
 	done := map[string]domain.Step{}
 	kept, err := s.db.JobSteps(ctx, jobID)
 	if err != nil {
@@ -264,7 +253,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 		done[st.Name] = st
 	}
 	// The steps of as many 方案 as the job started with.
-	for _, name := range s.stepNames(job.Kind, plans) {
+	for _, name := range s.stepNames(job.Kind, row.Plans) {
 		st, ok := done[name]
 		if !ok {
 			st = domain.Step{Name: name, State: "pending"}
@@ -311,7 +300,7 @@ func (s *Store) versionsOf(ctx context.Context, column, value, order string) ([]
 	if err != nil {
 		return nil, err
 	}
-	versions := []domain.Version{}
+	versions := make([]domain.Version, 0, len(kept))
 	for _, row := range kept {
 		versions = append(versions, versionOf(row))
 	}

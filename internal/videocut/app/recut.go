@@ -65,8 +65,8 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 		}
 		settings.ProjectName, settings.Edit = row.Name, nil
 		settings.Recut = &domain.RecutSettings{Change: change, Base: base, Cards: places}
-		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindRecut, settings: settings, plans: 1,
-			sourceVersion: sql.NullString{String: versionID, Valid: true}}); err != nil {
+		if jobID, err = s.queueJob(ctx, tx, settings, db.NewJob{Owner: owner, ProjectID: src.projectID, RequestKey: requestKey, Kind: KindRecut, Plans: 1,
+			SourceVersion: sql.NullString{String: versionID, Valid: true}}); err != nil {
 			return err
 		}
 		created = true

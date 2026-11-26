@@ -83,14 +83,14 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 	}
 	call := roundCall{jobID: jobID}
 	r, err := q.RoundStanding(ctx, owner, jobID, token)
-	call.roundID, call.pickKey, call.plans = r.ID, r.InputKey, r.Plans
-	state, epoch, current, cancelled, pickKey := r.State, r.Epoch, r.JobEpoch, r.Cancelled, r.PickKey
 	if errors.Is(err, sql.ErrNoRows) {
 		return roundCall{}, nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return roundCall{}, nil, err
 	}
+	call.roundID, call.pickKey, call.plans = r.ID, r.InputKey, r.Plans
+	state, epoch, current, cancelled, pickKey := r.State, r.Epoch, r.JobEpoch, r.Cancelled, r.PickKey
 	status := ""
 	switch {
 	case cancelled:

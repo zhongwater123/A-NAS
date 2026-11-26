@@ -98,9 +98,9 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		// An edit of a recut version is not a recut: its sentence and base
 		// stay with the version they planned.
 		settings.ProjectName, settings.Edit, settings.Recut = row.Name, &edit, nil
-		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: src.projectID, requestKey: requestKey, kind: KindEdit, settings: settings, plans: 1,
-			sourceVersion: sql.NullString{String: src.versionID, Valid: true}, draft: sql.NullString{String: draftID, Valid: true},
-			draftRevision: sql.NullInt64{Int64: int64(draft.revision), Valid: true}}); err != nil {
+		if jobID, err = s.queueJob(ctx, tx, settings, db.NewJob{Owner: owner, ProjectID: src.projectID, RequestKey: requestKey, Kind: KindEdit, Plans: 1,
+			SourceVersion: sql.NullString{String: src.versionID, Valid: true}, Draft: sql.NullString{String: draftID, Valid: true},
+			DraftRevision: sql.NullInt64{Int64: int64(draft.revision), Valid: true}}); err != nil {
 			return err
 		}
 		created = true
@@ -231,7 +231,7 @@ func (s *Store) openSong(ctx context.Context, songID string) (domain.SongAudio, 
 	if err != nil {
 		return domain.SongAudio{}, err
 	}
-	file, err := os.Open(s.songPath(row.sha))
+	file, err := os.Open(s.songPath(row.Sha))
 	if err != nil {
 		return domain.SongAudio{}, err
 	}
@@ -239,6 +239,6 @@ func (s *Store) openSong(ctx context.Context, songID string) (domain.SongAudio, 
 	if err != nil {
 		return domain.SongAudio{}, errors.Join(err, file.Close())
 	}
-	return domain.SongAudio{File: file, ContentType: row.contentType, ModifiedAt: info.ModTime(),
-		Song: domain.SongDetail{ID: row.id, Title: row.title, Duration: row.duration, Transcode: row.contentType == ""}}, nil
+	return domain.SongAudio{File: file, ContentType: row.ContentType, ModifiedAt: info.ModTime(),
+		Song: domain.SongDetail{ID: row.ID, Title: row.Title, Duration: row.Duration, Transcode: row.ContentType == ""}}, nil
 }
