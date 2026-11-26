@@ -1,7 +1,7 @@
 # 准备实验 NAS 的热点网卡
 
 状态：draft
-更新时间：2026-11-20
+更新时间：2026-11-26
 
 ## 目标与前提
 
@@ -27,6 +27,20 @@
 同一手机上传约 64 MB 的视频，用户估计热点用时约 20 秒（约 3.2 MB/s），日常 Wi-Fi 用时约 2 秒（约 32 MB/s）。热点上传前后无线接口 `rx_bytes` 从 `666243` 增至 `68524914`，有线默认出口仍为 `enp2s0`。对照结束后复查，试跑服务已停止，有线 `/healthz` 返回 200。两次用时均为一次目测，断网续传待实测。
 
 约 2 秒的对照结果来自手机可以访问 NAS 内网地址的测试条件。实际使用时，手机平时无法访问该地址，可在 NAS 附近加入直连热点临时上传。
+
+## 热点证书
+
+2026-11-26 实验 NAS 改用公共 CA 的证书，手机不用安装根证书。域名托管在 DNSPod，按下面的步骤由 Let's Encrypt 经 DNS-01 签发。
+
+1. 在自有域名下取一个热点专用的子域名 `<热点域名>`，在公网 DNS 加一条 A 记录指向热点地址 `192.168.173.1`。热点内由 NAS 自己的 DNS 解析；手机经移动网络的 DNS 查询时，也会回到热点。
+2. 在腾讯云 CAM 建一个只开编程访问的子用户，授予自定义策略，策略只含 `dnspod:DescribeRecordList`、`dnspod:DescribeRecordFilterList`、`dnspod:CreateRecord` 与 `dnspod:DeleteRecord`。root 把这个子用户的密钥写进 `/etc/a-nas/phone-hotspot-acme/tencentcloud.env`，写成 `TENCENTCLOUD_SECRET_ID=…` 与 `TENCENTCLOUD_SECRET_KEY=…` 两行，目录权限 `0700`，文件权限 `0600`。
+3. 从 Debian 安装 `acme.sh`（3.1.1），用它的 `dns_tencent`（腾讯云 API 3.0）签发：`acme.sh --home /var/lib/a-nas-hotspot-acme --server letsencrypt --issue --dns dns_tencent -d <热点域名> --keylength ec-256 --dnssleep 60 --renew-hook "/usr/local/sbin/a-nas-hotspot-cert install"`。`dns_tencent` 从环境变量 `Tencent_SecretId` 与 `Tencent_SecretKey` 读密钥，并在 `--home` 目录的 `account.conf` 另存一份（root，`0600`）。Debian 的 `lego` 4.9.1-2 用不了：它的构建去掉了 `tencentcloud`、`dnspod` 等大多数 DNS 服务商，`lego dnshelp` 却仍列出它们，运行时报 `unrecognized DNS provider`。
+4. root 专属的 `/usr/local/sbin/a-nas-hotspot-cert install` 先核对证书一天内不过期、私钥与证书匹配、证书链通到系统信任库，再写入 `/etc/a-nas/phone-hotspot/` 的 `domain`、`fullchain.pem` 与 `privkey.pem`（`0600`）。`a-nas-hotspot-cert.timer` 每天运行 `acme.sh --cron`，到期前 30 天续期后再执行 `install`；热点下次开启时加载新证书。
+5. 排错：acme.sh 3.1.1 查不到域名所在的区域时，不打印腾讯云返回的错误，只报 `Error adding TXT record`。这时逐个调用上面四个接口，看各自的错误码：`AuthFailure.SignatureFailure` 表示 SecretKey 不对，腾讯云的 SecretKey 是 32 位。
+
+核对：`openssl x509 -in /etc/a-nas/phone-hotspot/fullchain.pem -noout -subject -enddate`；`systemctl list-timers a-nas-hotspot-cert.timer`；`journalctl -u a-nas-hotspot-cert.service`。
+
+撤销：`systemctl disable --now a-nas-hotspot-cert.timer`；删除这两个单元、`/usr/local/sbin/a-nas-hotspot-cert`、`/var/lib/a-nas-hotspot-acme` 与 `/etc/a-nas/phone-hotspot-acme`；在 CAM 删除子用户的密钥。删除 `/etc/a-nas/phone-hotspot/` 后，热点会报证书不可用。
 
 ## 验证与回退
 
