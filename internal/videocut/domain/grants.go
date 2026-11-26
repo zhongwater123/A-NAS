@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
@@ -22,3 +23,7 @@ func GrantError(err error) error {
 	}
 	return fmt.Errorf("%w: %v", ErrPhotosUnavailable, err)
 }
+
+// AccountName is what the planner accepts as an account's name: the marker
+// is a file named by it.
+var AccountName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)

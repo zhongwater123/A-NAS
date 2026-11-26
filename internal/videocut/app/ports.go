@@ -17,6 +17,19 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
+// Markers are the planning markers: one per member whose job wants a round
+// of planning, which the planner's waker reads
+// (docs/architecture/montage-planning-session.md).
+type Markers interface {
+	// Leave leaves username's marker.
+	Leave(username string) error
+	// Has reports whether username has a marker.
+	Has(username string) bool
+	// Keep leaves the markers of the members in wanted and takes away the
+	// others.
+	Keep(wanted map[string]bool) error
+}
+
 // WindowSearch finds, among a grant's videos, the windows most like each of
 // texts: the photo library's searchWindows (#599), which its grants answer
 // (photosapi.Grants).

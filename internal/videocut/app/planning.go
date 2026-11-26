@@ -9,9 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -142,16 +139,12 @@ func pending(detail string) error {
 	return fmt.Errorf("%w%s%s", domain.ErrPlanPending, detailSeparator, detail)
 }
 
-// accountName is what the planner accepts as an account's name: the marker
-// is a file named by it.
-var accountName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
-
 // RegisterPlanGrant records that owner, signed in as username, just did
 // something that may need planning with a planning grant registered for
 // them (规划授权). The grant itself is the File Broker's; this only says
 // whether to leave markers.
 func (s *Store) RegisterPlanGrant(ctx context.Context, owner, username string) error {
-	if !accountName.MatchString(username) {
+	if !domain.AccountName.MatchString(username) {
 		return domain.ErrInvalid
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO plan_grants(owner_user_id, username, registered_at) VALUES(?, ?, ?)
@@ -415,25 +408,15 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 
 // --- markers ---
 
-func (s *Store) markerPath(username string) string { return filepath.Join(s.planMarkers, username) }
-
 func (s *Store) leaveMarker(username string) error {
-	if s.planMarkers == "" || !accountName.MatchString(username) {
+	if s.markers == nil {
 		return nil
 	}
-	file, err := os.OpenFile(s.markerPath(username), os.O_CREATE|os.O_WRONLY, 0o640)
-	if err != nil {
-		return err
-	}
-	return file.Close()
+	return s.markers.Leave(username)
 }
 
 func (s *Store) hasMarker(username string) bool {
-	if s.planMarkers == "" || !accountName.MatchString(username) {
-		return false
-	}
-	_, err := os.Stat(s.markerPath(username))
-	return err == nil
+	return s.markers != nil && s.markers.Has(username)
 }
 
 // wantsRound is what makes a job one a round may be claimed for: it came to
@@ -454,7 +437,7 @@ const keepsMarker = "j.plan_wanted = 1 AND j.cancel_requested = 0 AND (j.state =
 // round: at start, as the run directory is empty after a restart, and
 // whenever a job stops wanting one.
 func (s *Store) SyncMarkers(ctx context.Context) error {
-	if s.planMarkers == "" {
+	if s.markers == nil {
 		return nil
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
@@ -475,21 +458,7 @@ func (s *Store) SyncMarkers(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(s.planMarkers)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if !wanted[entry.Name()] {
-			_ = os.Remove(filepath.Join(s.planMarkers, entry.Name()))
-		}
-	}
-	for username := range wanted {
-		if err := s.leaveMarker(username); err != nil {
-			return err
-		}
-	}
-	return nil
+	return s.markers.Keep(wanted)
 }
 
 // syncMarkers is SyncMarkers for where a failure only delays: the planner

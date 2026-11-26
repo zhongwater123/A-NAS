@@ -430,9 +430,9 @@ type Store struct {
 	beat time.Duration
 	// admits is capacity.Admits, which tests replace.
 	admits func(path string, incoming int64) (bool, error)
-	// planMarkers is where the planning markers go, one empty file per
-	// member with a job wanting a round (/run/a-nas-montage/plans).
-	planMarkers string
+	// markers are the planning markers, one per member with a job wanting
+	// a round; nil leaves none.
+	markers Markers
 	// opened is when the store was opened: rounds that stopped short of
 	// planning before it do not hold a job back (retryWait).
 	opened time.Time
@@ -487,9 +487,10 @@ type Options struct {
 	// (#596); without it editing cannot search. videocut.go gives the
 	// grants' own search (WindowSearchOf).
 	WindowSearch WindowSearch
-	// PlanMarkers is the directory of planning markers the waker reads;
-	// without it no member's VNAS is asked to plan.
-	PlanMarkers string
+	// Markers are the planning markers the waker reads
+	// (external.PlanMarkers); without them no member's VNAS is asked to
+	// plan.
+	Markers Markers
 	// Plans is how many films, 方案, each job started makes: 0 is
 	// DefaultPlans, more than MaxPlans is refused.
 	Plans  int
@@ -518,13 +519,13 @@ func Open(ctx context.Context, root string, options Options) (*Store, error) {
 		now: options.Now, logger: options.Logger, wake: make(chan struct{}, 1),
 		jobCompute: options.JobCompute, editing: options.Editing, planner: options.Planner, search: options.WindowSearch, thumbnails: make(chan struct{}, MaxThumbnails),
 		jobWake: make(chan struct{}, 1), running: map[string]context.CancelCauseFunc{}, beat: heartbeat, admits: capacity.Admits,
-		planMarkers: options.PlanMarkers, plans: options.Plans}
+		markers: options.Markers, plans: options.Plans}
 	if store.plans == 0 {
 		store.plans = DefaultPlans
 	}
 	store.jobMusic = store
 	// Without a stand-in, the member's VNAS plans, where markers reach it.
-	if store.planner == nil && store.planMarkers != "" {
+	if store.planner == nil && store.markers != nil {
 		store.planner = store.VNASPlanner()
 	}
 	if store.now == nil {

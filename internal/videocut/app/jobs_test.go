@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -440,7 +441,7 @@ func (e *jobEnv) open(t *testing.T) {
 	t.Helper()
 	options := app.Options{Grants: e.lib, JobCompute: e.compute, Editing: e.editing, Now: e.clock.now, Plans: max(e.plans, 1)}
 	if e.markers != "" {
-		options.PlanMarkers = e.markers
+		options.Markers = external.PlanMarkers{Dir: e.markers}
 	} else {
 		options.Planner = e.planner
 	}

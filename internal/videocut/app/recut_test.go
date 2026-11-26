@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -116,7 +117,8 @@ func TestARecutOfAnEditedVersionLeavesTheHandEditsOut(t *testing.T) {
 func TestOnlyARecutTakesARound(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()
-	env.store.planMarkers = t.TempDir()
+	markers := t.TempDir()
+	env.store.markers = external.PlanMarkers{Dir: markers}
 	if err := env.store.RegisterPlanGrant(ctx, editOwner, "alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +150,7 @@ func TestOnlyARecutTakesARound(t *testing.T) {
 	if err := env.store.SyncMarkers(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(env.store.planMarkers, "alice")); err != nil {
+	if _, err := os.Stat(filepath.Join(markers, "alice")); err != nil {
 		t.Fatalf("the recut's marker: %v", err)
 	}
 	claim, err := env.store.ClaimRound(ctx, editOwner)

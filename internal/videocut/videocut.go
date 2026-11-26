@@ -113,10 +113,12 @@ func Run(ctx context.Context, config Config) error {
 	}
 	// The planning markers live in the service's runtime directory, where
 	// root's planner reads them; they come back from the jobs at start.
+	var markers app.Markers
 	if config.PlanMarkers != "" {
 		if err := os.MkdirAll(config.PlanMarkers, 0o750); err != nil {
 			return err
 		}
+		markers = external.PlanMarkers{Dir: config.PlanMarkers}
 	}
 	// Members' planning instances reach the montage center on its assistant
 	// socket, where their UID says who they are, and so does root's planner,
@@ -134,7 +136,7 @@ func Run(ctx context.Context, config Config) error {
 		Open: func(ctx context.Context, root string) (*servedStore, error) {
 			store, err := app.Open(ctx, root, app.Options{Grants: config.Grants, Media: config.Media, Music: config.Music, Compute: config.Compute,
 				JobCompute: config.JobCompute, Editing: config.Editing, Planner: config.Planner, WindowSearch: WindowSearchOf(config.Grants),
-				PlanMarkers: config.PlanMarkers, Logger: config.Logger})
+				Markers: markers, Logger: config.Logger})
 			if err != nil {
 				return nil, err
 			}

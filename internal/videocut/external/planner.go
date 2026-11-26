@@ -36,3 +36,51 @@ func (p FixedPlanner) Pick(context.Context, domain.PlanInput) (json.RawMessage, 
 func (p FixedPlanner) Shots(context.Context, domain.PlanInput) (json.RawMessage, error) {
 	return p.read("shots.json")
 }
+
+// PlanMarkers keeps the planning markers in Dir (/run/a-nas-montage/plans):
+// one empty file per member whose job wants a round, named by the account.
+type PlanMarkers struct{ Dir string }
+
+func (m PlanMarkers) path(username string) string { return filepath.Join(m.Dir, username) }
+
+// Leave leaves username's marker; a name the planner would not accept
+// leaves none.
+func (m PlanMarkers) Leave(username string) error {
+	if !domain.AccountName.MatchString(username) {
+		return nil
+	}
+	file, err := os.OpenFile(m.path(username), os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+// Has reports whether username has a marker.
+func (m PlanMarkers) Has(username string) bool {
+	if !domain.AccountName.MatchString(username) {
+		return false
+	}
+	_, err := os.Stat(m.path(username))
+	return err == nil
+}
+
+// Keep takes away the markers of members not in wanted and leaves those of
+// the members in it.
+func (m PlanMarkers) Keep(wanted map[string]bool) error {
+	entries, err := os.ReadDir(m.Dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !wanted[entry.Name()] {
+			_ = os.Remove(filepath.Join(m.Dir, entry.Name()))
+		}
+	}
+	for username := range wanted {
+		if err := m.Leave(username); err != nil {
+			return err
+		}
+	}
+	return nil
+}
