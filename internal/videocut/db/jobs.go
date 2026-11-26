@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -310,12 +311,23 @@ func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revisi
 
 // --- the member's requests and reads ---
 
-// KeyedJob is owner's job started with requestKey: its id, its kind and
-// what column holds for it; ErrNotFound when there is none.
-func (c *conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+// subjectColumns name, for each kind of job, the column that holds what
+// the job is for: the project generated, the draft saved, the version
+// recut.
+var subjectColumns = map[string]string{"generate": "project_id", "edit": "draft_id", "recut": "source_version_id"}
+
+// KeyedJob is owner's job started with requestKey, read for a request of
+// kind: its id, its own kind and what it holds in the column a job of kind
+// is for by (subjectColumns; "" for NULL); ErrNotFound when there is none.
+func (c *conn) KeyedJob(ctx context.Context, owner, requestKey, kind string) (id, priorKind, subject string, err error) {
+	column, ok := subjectColumns[kind]
+	if !ok {
+		return "", "", "", fmt.Errorf("no job of kind %q", kind)
+	}
+	var held sql.NullString
 	err = queryRow(ctx, c.q, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
-		Scan(&id, &kind, &subject)
-	return id, kind, subject, err
+		Scan(&id, &priorKind, &held)
+	return id, priorKind, held.String, err
 }
 
 // ProjectJobActive reports whether a job of projectID has not ended.

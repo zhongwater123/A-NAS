@@ -119,7 +119,7 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (db.Pr
 // queryer is the database or one transaction in it (db.DB, db.Tx).
 type queryer interface {
 	JobSettings(ctx context.Context, jobID string) (string, error)
-	KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error)
+	KeyedJob(ctx context.Context, owner, requestKey, kind string) (id, priorKind, subject string, err error)
 	PlanGrant(ctx context.Context, owner string) (username string, at time.Time, err error)
 	Project(ctx context.Context, owner, id string) (db.ProjectRow, error)
 	ProjectSong(ctx context.Context, owner, projectID string) (string, db.ProjectSong, error)

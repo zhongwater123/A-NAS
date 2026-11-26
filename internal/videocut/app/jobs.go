@@ -90,7 +90,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 	created := false
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		var err error
-		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindGenerate, "project_id", projectID); err != nil || jobID != "" {
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindGenerate, projectID); err != nil || jobID != "" {
 			return err
 		}
 		row, err := s.project(ctx, tx, owner, projectID)
@@ -133,16 +133,16 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 
 // keyedJob is the job owner started with requestKey, "" when there is none
 // yet. The key names one request: a job of another kind, or of another
-// subject (the project generated, the draft saved, the version recut, which
-// column holds), is another request's, ErrConflict.
-func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, subject string) (string, error) {
-	id, priorKind, prior, err := q.KeyedJob(ctx, owner, requestKey, column)
+// subject (the project generated, the draft saved, the version recut, as db
+// reads it for kind), is another request's, ErrConflict.
+func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, subject string) (string, error) {
+	id, priorKind, prior, err := q.KeyedJob(ctx, owner, requestKey, kind)
 	switch {
 	case errors.Is(err, db.ErrNotFound):
 		return "", nil
 	case err != nil:
 		return "", err
-	case priorKind != kind || prior.String != subject:
+	case priorKind != kind || prior != subject:
 		return "", domain.ErrConflict
 	}
 	return id, nil

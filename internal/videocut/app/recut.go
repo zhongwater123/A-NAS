@@ -29,7 +29,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	if !s.runsJobs() {
 		return domain.Job{}, false, domain.ErrJobsUnavailable
 	}
-	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindRecut, "source_version_id", versionID)
+	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindRecut, versionID)
 	if err != nil {
 		return domain.Job{}, false, err
 	}
@@ -49,7 +49,7 @@ func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, 
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// A retry with the same key may have made the job since the look above.
 		var err error
-		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindRecut, "source_version_id", versionID); err != nil || jobID != "" {
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindRecut, versionID); err != nil || jobID != "" {
 			return err
 		}
 		row, err := s.project(ctx, tx, owner, src.projectID)

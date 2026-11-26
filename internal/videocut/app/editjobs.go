@@ -31,7 +31,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 		return domain.Job{}, false, domain.ErrJobsUnavailable
 	}
 	// A request key used before answers its job, whatever became of the draft.
-	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindEdit, "draft_id", draftID)
+	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindEdit, draftID)
 	if err != nil {
 		return domain.Job{}, false, err
 	}
@@ -72,7 +72,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	err = s.db.Update(ctx, func(tx *db.Tx) error {
 		// A retry with the same key may have made the job since the look above.
 		var err error
-		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindEdit, "draft_id", draftID); err != nil || jobID != "" {
+		if jobID, err = keyedJob(ctx, tx, owner, requestKey, KindEdit, draftID); err != nil || jobID != "" {
 			return err
 		}
 		row, err := s.project(ctx, tx, owner, src.projectID)
