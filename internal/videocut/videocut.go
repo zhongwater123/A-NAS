@@ -125,7 +125,7 @@ func Run(ctx context.Context, config Config) error {
 	// naming the member. It answers with the store that is open, and
 	// unavailable while none is.
 	assistant := &protocol.AssistantGate{}
-	stopAssistant, err := listenAssistant(ctx, config, assistant)
+	stopAssistant, err := protocol.ListenAssistant(ctx, config.Accounts, config.AssistantSocket, config.Logger, assistant)
 	if err != nil {
 		return err
 	}

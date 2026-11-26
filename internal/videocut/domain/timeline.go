@@ -18,14 +18,14 @@ const (
 )
 
 const (
-	// NarrowBy: a video narrower than 16:9 by more than this is shown on a
+	// narrowBy: a video narrower than 16:9 by more than this is shown on a
 	// blurred background (app.renderClip), and counts as 竖.
-	NarrowBy = 0.01
+	narrowBy = 0.01
 )
 
 // Narrow reports whether a video is narrower than the film.
 func Narrow(width, height int) bool {
-	return width > 0 && height > 0 && float64(width)/float64(height) < 16.0/9.0-NarrowBy
+	return width > 0 && height > 0 && float64(width)/float64(height) < 16.0/9.0-narrowBy
 }
 
 // ClipFrames is how many frames of the film a shot takes.

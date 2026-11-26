@@ -17,7 +17,7 @@ import (
 )
 
 // What a job asks of its project's song: the store is the jobs' Music
-// (pipeline.go).
+// (ports.go).
 
 // DefaultStart stands for the excerpt the eighth version's rule picks: a
 // project whose member never dragged the start follows it, also when the

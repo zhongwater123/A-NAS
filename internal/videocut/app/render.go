@@ -35,6 +35,8 @@ const (
 	durationTolerance = 0.1
 	filmFile          = "film.mp4"
 	segmentsFile      = "segments.ts"
+	// endingFade fades the last shot to black, in frames (one second).
+	endingFade = domain.FilmRate
 )
 
 // --- fill ---

@@ -68,8 +68,6 @@ var (
 	ErrNoPlanWanted = errors.New("no job waits for planning")
 	// ErrRoundOver: the round was abandoned, ended or timed out.
 	ErrRoundOver = errors.New("this round is over")
-	// ErrJobCancelled: the job was cancelled; the round should stop.
-	ErrJobCancelled = errors.New("the job was cancelled")
 )
 
 var (
