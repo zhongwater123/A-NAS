@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -623,7 +624,7 @@ func TestSongsAnEarlierVersionRefusedAreAnalysedAgain(t *testing.T) {
 
 func openDB(t *testing.T, root string) *sql.DB {
 	t.Helper()
-	db, err := sqlitedb.Open(filepath.Join(root, app.DatabaseName), sqlitedb.Options{})
+	db, err := sqlitedb.Open(filepath.Join(root, db.DatabaseName), sqlitedb.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

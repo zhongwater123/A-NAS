@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 )
 
 func TestTheStoreOpensDurablyAndListsNothingYet(t *testing.T) {
@@ -16,7 +16,7 @@ func TestTheStoreOpensDurablyAndListsNothingYet(t *testing.T) {
 	if err != nil || page.Items == nil || len(page.Items) != 0 {
 		t.Fatalf("Projects() = %+v, %v; want an empty list", page, err)
 	}
-	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, app.DatabaseName))
+	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, db.DatabaseName))
 	if err != nil {
 		t.Fatal(err)
 	}

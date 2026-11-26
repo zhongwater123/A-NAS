@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
@@ -461,7 +462,7 @@ func TestARevocationThePhotoLibraryMissedIsTriedAgain(t *testing.T) {
 	if err := store.DeleteProject(ctx, "user:alice", project.ID); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, app.DatabaseName))
+	db, err := sqlitedb.OpenReadOnly(filepath.Join(root, db.DatabaseName))
 	if err != nil {
 		t.Fatal(err)
 	}
