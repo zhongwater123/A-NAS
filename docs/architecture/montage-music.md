@@ -156,14 +156,14 @@
 - 手册：[在实验 NAS 上启用配乐分析](../runbooks/enable-montage-music.md)
 - 代码：
   - 选歌、副本与回收、试听、起点：[`internal/videocut/protocol/song.go`](../../internal/videocut/protocol/song.go)、[`internal/videocut/app/songs.go`](../../internal/videocut/app/songs.go)
-  - 分析、等待与失败：[`internal/videocut/app/analysis.go`](../../internal/videocut/app/analysis.go)、[`internal/videocut/app/workers.go`](../../internal/videocut/app/workers.go)
+  - 分析、等待与失败：[`internal/videocut/app/analysis.go`](../../internal/videocut/app/analysis.go)、[`internal/videocut/external/music.go`](../../internal/videocut/external/music.go)
   - 任务取选段：[`internal/videocut/app/jobmusic.go`](../../internal/videocut/app/jobmusic.go)
   - 选段：[`ai/anas_videocut/ops/music.py`](../../ai/anas_videocut/ops/music.py)、[`ai/anas_videocut/algo/music.py`](../../ai/anas_videocut/algo/music.py)、[`internal/videocutcompute/music.go`](../../internal/videocutcompute/music.go)
   - 配乐分析 Worker 与单元：[`ai/anas_montage_music/worker.py`](../../ai/anas_montage_music/worker.py)、[`deploy/montage-music/`](../../deploy/montage-music/anas-montage-music.service)
   - 运行环境与打包：[`scripts/build-montage-music-runtime.sh`](../../scripts/build-montage-music-runtime.sh)、[`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)、[`scripts/build-packages.sh`](../../scripts/build-packages.sh)
   - 仓库与软件包不含歌曲的检查：[`scripts/check-no-songs.sh`](../../scripts/check-no-songs.sh)
 - 测试：
-  - Go：[`internal/videocut/app/songs_test.go`](../../internal/videocut/app/songs_test.go)、[`internal/videocut/app/jobmusic_test.go`](../../internal/videocut/app/jobmusic_test.go)、[`internal/videocut/app/workers_test.go`](../../internal/videocut/app/workers_test.go)、[`internal/videocut/protocol/song_test.go`](../../internal/videocut/protocol/song_test.go)、[`internal/httpapi/montage_song_test.go`](../../internal/httpapi/montage_song_test.go)、[`internal/videocutcompute/music_test.go`](../../internal/videocutcompute/music_test.go)
+  - Go：[`internal/videocut/app/songs_test.go`](../../internal/videocut/app/songs_test.go)、[`internal/videocut/app/jobmusic_test.go`](../../internal/videocut/app/jobmusic_test.go)、[`internal/videocut/external/music_test.go`](../../internal/videocut/external/music_test.go)、[`internal/videocut/protocol/song_test.go`](../../internal/videocut/protocol/song_test.go)、[`internal/httpapi/montage_song_test.go`](../../internal/httpapi/montage_song_test.go)、[`internal/videocutcompute/music_test.go`](../../internal/videocutcompute/music_test.go)
   - Python：[`ai/tests/test_videocut_music_ops.py`](../../ai/tests/test_videocut_music_ops.py)、[`ai/tests/test_videocut_music_worker.py`](../../ai/tests/test_videocut_music_worker.py)
   - 对照：[`ai/eval/videocut_music_golden.py`](../../ai/eval/videocut_music_golden.py)、[`ai/eval/videocut_music_allin1.py`](../../ai/eval/videocut_music_allin1.py)
   - 系统测试的选歌一节：[`scripts/system-test.sh`](../../scripts/system-test.sh)
