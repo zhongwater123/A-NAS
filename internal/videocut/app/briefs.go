@@ -202,11 +202,11 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 // shotsTaken reports whether both steps of a 方案 have their answers.
 func (s *Store) shotsTaken(ctx context.Context, call roundCall, plan int) (bool, error) {
 	pick := planKey(call.pickKey, plan)
-	outline, taken, err := s.planAnswer(ctx, s.db, call.jobID, StepOutline, pick)
+	outline, taken, err := s.planAnswer(ctx, call.jobID, StepOutline, pick)
 	if err != nil || !taken {
 		return false, err
 	}
-	_, taken, err = s.planAnswer(ctx, s.db, call.jobID, StepShots, shotsKey(pick, outline))
+	_, taken, err = s.planAnswer(ctx, call.jobID, StepShots, shotsKey(pick, outline))
 	return taken, err
 }
 
@@ -240,7 +240,7 @@ func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step st
 	briefKey := call.pickKey
 	var picked json.RawMessage
 	if step == StepShots {
-		outline, taken, err := s.planAnswer(ctx, s.db, call.jobID, StepOutline, key)
+		outline, taken, err := s.planAnswer(ctx, call.jobID, StepOutline, key)
 		if err != nil {
 			return videocutcompute.PlanBrief{}, "", nil, err
 		}
@@ -269,7 +269,7 @@ func (s *Store) withEarlier(ctx context.Context, call roundCall, plan int, data 
 	}
 	earlier := []json.RawMessage{}
 	for before := 1; before < plan; before++ {
-		outline, taken, err := s.planAnswer(ctx, s.db, call.jobID, StepOutline, planKey(call.pickKey, before))
+		outline, taken, err := s.planAnswer(ctx, call.jobID, StepOutline, planKey(call.pickKey, before))
 		if err != nil {
 			return nil, err
 		}
@@ -350,7 +350,7 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 	if step == StepShots && plan < call.plans {
 		taken = ToolNextPlan
 	}
-	if _, kept, err := s.planAnswer(ctx, s.db, jobID, step, key); err != nil || kept {
+	if _, kept, err := s.planAnswer(ctx, jobID, step, key); err != nil || kept {
 		return toolAnswer(taken), err
 	}
 	if reasons := checkAnswer(brief.Schema, answer, step); len(reasons) > 0 {
@@ -370,12 +370,11 @@ func (s *Store) Submit(ctx context.Context, owner, jobID, token, step string, an
 		}
 		// The first answer for the key stays: one that came meanwhile, as
 		// from a tool call tried again, is not replaced.
-		inserted, err := tx.ExecContext(ctx, `INSERT INTO plan_answers(job_id, step, input_key, round_id, answer_json, accepted_at) VALUES(?, ?, ?, ?, ?, ?)
-			ON CONFLICT(job_id, step, input_key) DO NOTHING`, jobID, step, key, call.roundID, string(kept), sqlitedb.FormatTime(s.now()))
+		inserted, err := tx.KeepPlanAnswer(ctx, jobID, step, key, call.roundID, string(kept), s.now())
 		if err != nil {
 			return err
 		}
-		if n, _ := inserted.RowsAffected(); n == 0 {
+		if !inserted {
 			return nil
 		}
 		first = true

@@ -197,7 +197,7 @@ func (s *Store) planned(ctx context.Context, input domain.PlanInput, step string
 	if err != nil {
 		return nil, err
 	}
-	answer, taken, err := s.planAnswer(ctx, s.db, input.JobID, step, input.StepKey)
+	answer, taken, err := s.planAnswer(ctx, input.JobID, step, input.StepKey)
 	if err != nil {
 		return nil, err
 	}
@@ -215,10 +215,8 @@ func (s *Store) planned(ctx context.Context, input domain.PlanInput, step string
 }
 
 // planAnswer is the answer taken for a step's input key.
-func (s *Store) planAnswer(ctx context.Context, q queryer, jobID, step, key string) (json.RawMessage, bool, error) {
-	var answer string
-	err := q.QueryRowContext(ctx, "SELECT answer_json FROM plan_answers WHERE job_id = ? AND step = ? AND input_key = ?",
-		jobID, step, key).Scan(&answer)
+func (s *Store) planAnswer(ctx context.Context, jobID, step, key string) (json.RawMessage, bool, error) {
+	answer, err := s.db.PlanAnswer(ctx, jobID, step, key)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, false, nil
 	}
