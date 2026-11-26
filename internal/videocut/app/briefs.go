@@ -13,6 +13,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -86,7 +87,7 @@ type roundCall struct {
 // job no longer has.
 func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token string) (roundCall, *ToolAnswer, error) {
 	if token == "" || len(token) > 64 {
-		return roundCall{}, nil, ErrNotFound
+		return roundCall{}, nil, domain.ErrNotFound
 	}
 	call := roundCall{jobID: jobID}
 	var state string
@@ -98,7 +99,7 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 		FROM rounds r JOIN jobs j ON j.id = r.job_id WHERE r.job_id = ? AND r.owner_user_id = ? AND r.attempt_token = ?`,
 		jobID, owner, token).Scan(&call.roundID, &state, &epoch, &call.pickKey, &current, &cancelled, &call.plans, &pickKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return roundCall{}, nil, ErrNotFound
+		return roundCall{}, nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return roundCall{}, nil, err

@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -119,45 +120,45 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	switch {
-	case errors.Is(err, app.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-	case errors.Is(err, app.ErrTooManyAssets):
+	case errors.Is(err, domain.ErrTooManyAssets):
 		httpjson.WriteError(w, http.StatusBadRequest, "too_many_assets", "at most 500 videos at once")
-	case errors.Is(err, app.ErrInvalid):
+	case errors.Is(err, domain.ErrInvalid):
 		httpjson.WriteError(w, http.StatusBadRequest, "validation_failed", "the request is not valid")
-	case errors.Is(err, app.ErrAssetsRefused):
+	case errors.Is(err, domain.ErrAssetsRefused):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "assets_unavailable", "a video is not one you can add")
-	case errors.Is(err, app.ErrConflict):
+	case errors.Is(err, domain.ErrConflict):
 		httpjson.WriteError(w, http.StatusConflict, "conflict", "the request key was used for another request")
-	case errors.Is(err, app.ErrGrantRevoked):
+	case errors.Is(err, domain.ErrGrantRevoked):
 		httpjson.WriteError(w, http.StatusConflict, "grant_revoked", "the project can no longer reach its videos")
-	case errors.Is(err, app.ErrSessionEnded):
+	case errors.Is(err, domain.ErrSessionEnded):
 		httpjson.WriteError(w, http.StatusUnauthorized, "authentication_required", "authentication is required")
-	case errors.Is(err, app.ErrJobActive):
+	case errors.Is(err, domain.ErrJobActive):
 		httpjson.WriteError(w, http.StatusConflict, "job_in_progress", "the project already has a job in progress")
-	case errors.Is(err, app.ErrJobState):
+	case errors.Is(err, domain.ErrJobState):
 		httpjson.WriteError(w, http.StatusConflict, "job_state", "the job cannot do this now")
-	case errors.Is(err, app.ErrJobsUnavailable):
+	case errors.Is(err, domain.ErrJobsUnavailable):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center cannot make films here")
-	case errors.Is(err, app.ErrSongTooLarge):
+	case errors.Is(err, domain.ErrSongTooLarge):
 		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "song_too_large", "the song is larger than 100 MiB")
-	case errors.Is(err, app.ErrSongLength):
+	case errors.Is(err, domain.ErrSongLength):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 8 minutes")
-	case errors.Is(err, app.ErrNotAudio):
+	case errors.Is(err, domain.ErrNotAudio):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "not_audio", "the file is not audio the montage center can read")
-	case errors.Is(err, app.ErrNoSong):
+	case errors.Is(err, domain.ErrNoSong):
 		httpjson.WriteError(w, http.StatusNotFound, "no_song", "the project has no song yet")
-	case errors.Is(err, app.ErrSongNotReady):
+	case errors.Is(err, domain.ErrSongNotReady):
 		httpjson.WriteError(w, http.StatusConflict, "song_not_ready", "the song is not analysed yet, or cannot be used")
-	case errors.Is(err, app.ErrSongStart):
+	case errors.Is(err, domain.ErrSongStart):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_start_unusable", "no usable excerpt starts there")
-	case errors.Is(err, app.ErrMediaUnavailable):
+	case errors.Is(err, domain.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
 	case errors.Is(err, videocutcompute.ErrWorkerUnavailable), errors.Is(err, videocutcompute.ErrWorkerFailed), errors.Is(err, videocutcompute.ErrWorkerRefused):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
-	case errors.Is(err, app.ErrPhotosUnavailable):
+	case errors.Is(err, domain.ErrPhotosUnavailable):
 		h.logger.WarnContext(r.Context(), "photo library unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")
 	default:

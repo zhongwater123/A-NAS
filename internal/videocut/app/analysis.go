@@ -14,6 +14,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -133,11 +134,11 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 		case err != nil && ctx.Err() != nil:
 			// The service is stopping; the song is as due as it was.
 			return
-		case errors.Is(err, ErrNotAudio), errors.Is(err, videocutcompute.ErrWorkerRefused):
+		case errors.Is(err, domain.ErrNotAudio), errors.Is(err, videocutcompute.ErrWorkerRefused):
 			s.logger.InfoContext(ctx, "a song cannot be analysed", "song", sha, "error", err)
 			s.finish(ctx, sha, SongUnusable, UnusableUndecodable, songAnalysis{}, nil)
 			return
-		case errors.Is(err, ErrMediaUnavailable):
+		case errors.Is(err, domain.ErrMediaUnavailable):
 			s.logger.WarnContext(ctx, "the media worker is away; the song waits", "error", err)
 			s.wait(ctx, sha, WaitMedia)
 			return
@@ -222,7 +223,7 @@ func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, [
 // findStructure decodes the copy and has the music analysis Worker read it.
 func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error) {
 	if s.media == nil {
-		return Analysis{}, ErrMediaUnavailable
+		return Analysis{}, domain.ErrMediaUnavailable
 	}
 	if s.music == nil {
 		return Analysis{}, fmt.Errorf("%w: no music analysis worker", videocutcompute.ErrWorkerUnavailable)
@@ -289,9 +290,9 @@ func (s *Store) decodeInto(ctx context.Context, file *os.File, pipe *os.File, ch
 	case err == nil:
 		return nil
 	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid), errors.Is(err, ffmpegworker.ErrTooLarge):
-		return fmt.Errorf("%w: %v", ErrNotAudio, err)
+		return fmt.Errorf("%w: %v", domain.ErrNotAudio, err)
 	}
-	return fmt.Errorf("%w: %w", ErrMediaUnavailable, err)
+	return fmt.Errorf("%w: %w", domain.ErrMediaUnavailable, err)
 }
 
 func (s *Store) keepStructure(ctx context.Context, sha string, analysis songAnalysis, loudness []float32) error {

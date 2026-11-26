@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -331,25 +332,25 @@ func TestADraftStartsAsItsVersionAndIsTheMembersAlone(t *testing.T) {
 		t.Fatalf("the draft again = %v, %v", again.ID, err)
 	}
 	// Another member reaches neither the version nor the draft.
-	if _, err := env.store.VersionDraft(ctx, editOther, env.version); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.VersionDraft(ctx, editOther, env.version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's VersionDraft = %v", err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOther, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.EditDraft(ctx, editOther, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's EditDraft = %v", err)
 	}
-	if _, err := env.store.DraftCandidates(ctx, editOther, draft.ID, CandidateQuery{Shot: 1}); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.DraftCandidates(ctx, editOther, draft.ID, CandidateQuery{Shot: 1}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's DraftCandidates = %v", err)
 	}
-	if _, err := env.store.DraftShots(ctx, editOther, draft.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.DraftShots(ctx, editOther, draft.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's DraftShots = %v", err)
 	}
-	if _, err := env.store.VersionShots(ctx, editOther, env.version); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.VersionShots(ctx, editOther, env.version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's VersionShots = %v", err)
 	}
-	if _, err := env.store.Thumbnail(ctx, editOther, "project:1", videoA, 1000); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.Thumbnail(ctx, editOther, "project:1", videoA, 1000); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's Thumbnail = %v", err)
 	}
-	if _, err := env.store.ConfirmVersion(ctx, editOther, env.version); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.ConfirmVersion(ctx, editOther, env.version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's ConfirmVersion = %v", err)
 	}
 	// Deleting the project takes the draft with it.
@@ -380,7 +381,7 @@ func TestAVersionFromBeforeTakesItsTimelineFromItsJob(t *testing.T) {
 		t.Fatalf("versions = %+v", detail.Versions)
 	}
 	// Version 2 has no timeline of its own, and its job's fill-2 step is gone.
-	if _, err := env.store.VersionDraft(ctx, editOwner, "version:2"); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, "version:2"); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("a version whose fill is gone = %v", err)
 	}
 	// Version 1 without its timeline finds it in the fill step, and keeps it.
@@ -431,7 +432,7 @@ func TestEachStepFollowsTheRules(t *testing.T) {
 		_, err := edit(refusal.op)
 		refusedWith(t, err, refusal.reason)
 	}
-	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c9/1"}); !errors.Is(err, ErrInvalid) {
+	if _, err := edit(DraftOp{Type: "replace", Shot: 1, Beat: "c9/1"}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("a beat of no card = %v", err)
 	}
 	if draft.Revision != 0 {
@@ -525,7 +526,7 @@ func TestTwoWindowsEditingAtOnce(t *testing.T) {
 	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "lock", Shot: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); !errors.Is(err, ErrDraftConflict) {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, 0, DraftOp{Type: "replace", Shot: 1, Beat: "c1/3"}); !errors.Is(err, domain.ErrDraftConflict) {
 		t.Fatalf("a step on an old revision = %v", err)
 	}
 	now, err := env.store.VersionDraft(ctx, editOwner, env.version)
@@ -647,8 +648,8 @@ func TestAShuffleWithTheSameSeedPicksTheSame(t *testing.T) {
 	if !slices.Equal(env.search.texts[0], []string{"海边散步", "海浪"}) {
 		t.Fatalf("searched for %v", env.search.texts[0])
 	}
-	env.search.err = ErrSearchModel
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle"}); !errors.Is(err, ErrSearchModel) {
+	env.search.err = domain.ErrSearchModel
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "shuffle"}); !errors.Is(err, domain.ErrSearchModel) {
 		t.Fatalf("a shuffle with another model = %v", err)
 	}
 }
@@ -702,11 +703,11 @@ func TestCandidatesForAShot(t *testing.T) {
 	if last := env.search.texts[len(env.search.texts)-1]; !slices.Equal(last, []string{words}) {
 		t.Fatal("the blank around the words was searched for")
 	}
-	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: words + "山"}); !errors.Is(err, ErrInvalid) {
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: words + "山"}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("searching for more words than a search = %v", err)
 	}
 	env.store.search = nil
-	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"}); !errors.Is(err, ErrSearchUnavailable) {
+	if _, err := env.store.DraftCandidates(ctx, editOwner, draft.ID, CandidateQuery{Shot: 1, Q: "山"}); !errors.Is(err, domain.ErrSearchUnavailable) {
 		t.Fatalf("searching without the photo library's search = %v", err)
 	}
 }
@@ -783,13 +784,13 @@ func TestAThumbnailIsAFrameOfTheProjectsVideo(t *testing.T) {
 	if !slices.Equal(asked.Times, []float64{1.5}) || asked.LongEdge != thumbnailEdge || asked.Format != ffmpegworker.FormatJPEG {
 		t.Fatalf("asked for %+v", asked)
 	}
-	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", "asset:film1", 0); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", "asset:film1", 0); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a video not in the project = %v", err)
 	}
 	// A video deleted or in the trash has no frame: not found, rather than
 	// a video that cannot be added.
 	env.grants.trashed = map[string]bool{videoA: true}
-	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", videoA, 1500); !errors.Is(err, ErrNotFound) || errors.Is(err, ErrAssetsRefused) {
+	if _, err := env.store.Thumbnail(ctx, editOwner, "project:1", videoA, 1500); !errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("a frame of a video in the trash = %v", err)
 	}
 }
@@ -804,7 +805,7 @@ func TestAVersionAnalysedAgainWithAnotherModelIsNotEdited(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.grants.identity = "another-model|win=2s1f"
-	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrAnalysisChanged) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrAnalysisChanged) {
 		t.Fatalf("the draft of a version analysed again = %v", err)
 	}
 	env.grants.identity = ""
@@ -934,7 +935,7 @@ func TestDeletingAShotBesideAVideoGoneIsRefusedWithWhy(t *testing.T) {
 	env.grants.gone = map[string]bool{videoA: true}
 	_, err = env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2})
 	refusedWith(t, err, "已从相册删除或放进回收站")
-	if errors.Is(err, ErrAssetsRefused) {
+	if errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("deleting beside a video gone = %v, a video that cannot be added", err)
 	}
 }
@@ -991,17 +992,17 @@ func TestADraftWithABeatItsSourceLacksIsNotEdited(t *testing.T) {
 	beat := draft.Shots[0].Beat
 	// A beat of a card described but left out of the catalog cannot be either.
 	env.store.Exec(t, "UPDATE drafts SET shots_json = replace(shots_json, ?, ?)", `"beat":"`+beat+`"`, `"beat":"c5/1"`)
-	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("reading it with a beat out of the catalog = %v", err)
 	}
 	env.store.Exec(t, "UPDATE drafts SET shots_json = replace(shots_json, ?, ?)", `"beat":"c5/1"`, `"beat":"v9-9/1"`)
-	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("reading it = %v", err)
 	}
-	if _, err := env.store.DraftShots(ctx, editOwner, draft.ID); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.DraftShots(ctx, editOwner, draft.ID); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("its shot list = %v", err)
 	}
-	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1"); !errors.Is(err, ErrNotEditable) {
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:1"); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("saving it = %v", err)
 	}
 	if n := env.store.Count(t, "SELECT COUNT(*) FROM jobs WHERE kind = 'edit'"); n != 0 {
@@ -1030,7 +1031,7 @@ func TestDeletingAShotWhileItsVideosAreAnalysedAgain(t *testing.T) {
 	refusedWith(t, err, "正在重新分析")
 	env.grants.windowsState = nil
 	env.grants.identity = "another-model|win=2s1f"
-	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2}); !errors.Is(err, ErrAnalysisChanged) {
+	if _, err := env.store.EditDraft(ctx, editOwner, draft.ID, draft.Revision, DraftOp{Type: "delete", Shot: 2}); !errors.Is(err, domain.ErrAnalysisChanged) {
 		t.Fatalf("deleting once the videos were analysed with another model = %v", err)
 	}
 }
@@ -1097,10 +1098,10 @@ func TestAVersionWhoseJobWasRedoneSinceIsNotEdited(t *testing.T) {
 		t.Fatalf("a version whose job is as it was = %v", err)
 	}
 	env.store.Exec(t, "UPDATE steps SET finished_at = '2026-11-20T08:30:00.000000000Z' WHERE job_id = 'job:1' AND name = 'catalog'")
-	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("editing a version whose job made its catalog again = %v", err)
 	}
-	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "开头换热闹点"); !errors.Is(err, ErrNotEditable) {
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "开头换热闹点"); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("recutting it = %v", err)
 	}
 }
@@ -1145,7 +1146,7 @@ func TestAVersionWhoseCardIsOfAnotherVideoNowIsNotEdited(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()
 	env.store.Exec(t, `UPDATE versions SET timeline_json = replace(timeline_json, '"video":"`+videoB+`"', '"video":"asset:c"') WHERE id = 'version:1'`)
-	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+	if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 		t.Fatalf("editing a version whose card is of another video = %v", err)
 	}
 }

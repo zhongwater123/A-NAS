@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -30,14 +31,6 @@ type Excerpt struct {
 	Frames int     `json:"frames"`
 }
 
-// Song errors.
-var (
-	// ErrSongAnalyzing: the song's analysis is not done yet.
-	ErrSongAnalyzing = errors.New("the song is still being analysed")
-	// ErrSongUnusable: the song cannot be used, or none was chosen.
-	ErrSongUnusable = errors.New("the song cannot be used")
-)
-
 // DefaultStart stands for the excerpt the eighth version's rule picks: a
 // project whose member never dragged the start follows it, also when the
 // analysis finishes after the job began.
@@ -54,7 +47,7 @@ func (s *Store) Chosen(ctx context.Context, owner, projectID string) (string, fl
 func (s *Store) chosenIn(ctx context.Context, q queryer, owner, projectID string) (string, float64, error) {
 	chosen, err := s.projectSong(ctx, q, owner, projectID)
 	switch {
-	case errors.Is(err, ErrNoSong):
+	case errors.Is(err, domain.ErrNoSong):
 		return "", 0, nil
 	case err != nil:
 		return "", 0, err
@@ -68,10 +61,10 @@ func (s *Store) chosenIn(ctx context.Context, q queryer, owner, projectID string
 func (s *Store) ownSong(ctx context.Context, owner, songID string) (songRow, error) {
 	row, err := s.song(ctx, s.db, songID)
 	if err == nil && row.owner != owner {
-		err = ErrNoSong
+		err = domain.ErrNoSong
 	}
-	if errors.Is(err, ErrNoSong) {
-		return songRow{}, fmt.Errorf("%w: %v", ErrSongUnusable, err)
+	if errors.Is(err, domain.ErrNoSong) {
+		return songRow{}, fmt.Errorf("%w: %v", domain.ErrSongUnusable, err)
 	}
 	return row, err
 }
@@ -82,16 +75,16 @@ func (s *Store) ownSong(ctx context.Context, owner, songID string) (songRow, err
 func (row songRow) excerptStart(start float64) (float64, error) {
 	switch row.state {
 	case SongAnalyzing:
-		return 0, ErrSongAnalyzing
+		return 0, domain.ErrSongAnalyzing
 	case SongUnusable:
-		return 0, fmt.Errorf("%w: %s", ErrSongUnusable, row.reason)
+		return 0, fmt.Errorf("%w: %s", domain.ErrSongUnusable, row.reason)
 	}
 	st, selection := row.analysis.Structure, row.analysis.Selection
 	if st == nil || selection == nil || len(row.analysis.Music) == 0 {
-		return 0, ErrSongAnalyzing
+		return 0, domain.ErrSongAnalyzing
 	}
 	if math.IsNaN(start) || math.IsInf(start, 0) {
-		return 0, ErrInvalid
+		return 0, domain.ErrInvalid
 	}
 	if start < 0 {
 		return selection.Excerpt[0], nil
@@ -204,11 +197,11 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 			dragged, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
 			switch {
 			case errors.Is(err, videocutcompute.ErrWorkerRefused):
-				return Excerpt{}, fmt.Errorf("%w: %v", ErrSongUnusable, err)
+				return Excerpt{}, fmt.Errorf("%w: %v", domain.ErrSongUnusable, err)
 			case err != nil:
 				return Excerpt{}, err
 			case dragged.Unusable != "":
-				return Excerpt{}, fmt.Errorf("%w: %s", ErrSongUnusable, dragged.Unusable)
+				return Excerpt{}, fmt.Errorf("%w: %s", domain.ErrSongUnusable, dragged.Unusable)
 			}
 			kept = &keptSelection{Selection: dragged, Music: dragged.Music}
 		}

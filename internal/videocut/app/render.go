@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -504,7 +505,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	}
 	defer func() { _ = video.Close() }()
 	song, err := s.jobMusic.Audio(ctx, run.owner, run.settings.SongID)
-	if errors.Is(err, ErrSongUnusable) {
+	if errors.Is(err, domain.ErrSongUnusable) {
 		return nil, &stepNeeds{reason: NeedMusic, err: err}
 	}
 	if err != nil {

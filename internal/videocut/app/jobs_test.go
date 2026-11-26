@@ -21,6 +21,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -389,7 +390,7 @@ func (p *planner) Pick(_ context.Context, input app.PlanInput) (json.RawMessage,
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.unknow {
-		return nil, app.ErrPlanUnknown
+		return nil, domain.ErrPlanUnknown
 	}
 	p.picks++
 	p.last = input
@@ -524,10 +525,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	if err != nil || created || again.ID != job.ID {
 		t.Fatalf("the same request again = %+v, %v, %v", again, created, err)
 	}
-	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:2"); !errors.Is(err, app.ErrJobActive) {
+	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:2"); !errors.Is(err, domain.ErrJobActive) {
 		t.Fatalf("a second job while one is in progress = %v", err)
 	}
-	if _, err := env.store.Job(ctx, "user:bob", job.ID); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.Job(ctx, "user:bob", job.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Bob reading Alice's job = %v", err)
 	}
 	// The project's page picks the job up again after a reload.
@@ -596,7 +597,7 @@ func TestAJobWaitsForTheAnalysisAndNeedsTheMemberWhenItFails(t *testing.T) {
 	if needs.State != app.JobNeedsInput || needs.WaitReason != app.NeedAnalysis || !slices.Equal(needs.Missing, []string{"asset:a1"}) {
 		t.Fatalf("job = %+v", needs)
 	}
-	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("Retry() for a failed analysis = %v", err)
 	}
 	if again, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); err != nil || len(again.Missing) != 0 {
@@ -668,7 +669,7 @@ func TestCancellingWhileRenderingSavesNothing(t *testing.T) {
 	if cancelled.State != app.JobCancelled || env.lib.saves != 0 || env.editing.segments != 1 || env.jobFiles(job.ID) {
 		t.Fatalf("job = %+v; saved %d, segments %d", cancelled, env.lib.saves, env.editing.segments)
 	}
-	if _, err := env.store.Cancel(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.Cancel(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("cancelling again = %v", err)
 	}
 
@@ -778,14 +779,14 @@ func TestDroppingAMissingVideoPlansAgainWithoutIt(t *testing.T) {
 		t.Fatalf("job = %+v", needs)
 	}
 	env.editing.onSegment = nil
-	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1", "asset:a2"}); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1", "asset:a2"}); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("dropping every video = %v", err)
 	}
-	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("dropping a usable video = %v", err)
 	}
 	env.lib.setDown(true)
-	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); !errors.Is(err, app.ErrPhotosUnavailable) {
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a2"}); !errors.Is(err, domain.ErrPhotosUnavailable) {
 		t.Fatalf("dropping while the grant service is unavailable = %v", err)
 	}
 	if got := env.job(t, job.ID); got.State != app.JobNeedsInput || !slices.Equal(got.Missing, []string{"asset:a2"}) {
@@ -896,7 +897,7 @@ func TestDeletingAProjectTakesItsJobs(t *testing.T) {
 	if err := env.store.DeleteProject(ctx, "user:alice", env.project.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("the deleted project's job = %v", err)
 	}
 	if env.store.RunOnce(ctx) {
@@ -911,7 +912,7 @@ func TestGeneratingWithTheStoresOwnSongsDoesNotWaitOnItself(t *testing.T) {
 	env.store.UseMusic(env.store)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1"); !errors.Is(err, app.ErrNoSong) {
+	if _, _, err := env.store.Generate(ctx, "user:alice", env.project.ID, "generate:1"); !errors.Is(err, domain.ErrNoSong) {
 		t.Fatalf("Generate without a selected song = %v", err)
 	}
 }
@@ -971,7 +972,7 @@ func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := env.store.Generate(ctx, "user:alice", project.ID, "first"); !errors.Is(err, app.ErrConflict) {
+	if _, _, err := env.store.Generate(ctx, "user:alice", project.ID, "first"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("key reused on a different project: %v", err)
 	}
 }
@@ -1024,7 +1025,7 @@ func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
 	if _, err := store.Cancel(ctx, "user:alice", job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Audio(ctx, "user:alice", first.ID); !errors.Is(err, app.ErrSongUnusable) {
+	if _, err := store.Audio(ctx, "user:alice", first.ID); !errors.Is(err, domain.ErrSongUnusable) {
 		t.Fatalf("old song after cancellation = %v", err)
 	}
 }
@@ -1070,7 +1071,7 @@ func TestACancelledJobLeftQueuedDoesNotKeepTheSchedulerBusy(t *testing.T) {
 	}
 	// Nor does the member put one back in the queue.
 	env.store.Exec(t, "UPDATE jobs SET state = 'needs_input', wait_reason = 'storage_full' WHERE id = ?", job.ID)
-	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.Retry(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("going on with a job asked to cancel = %v", err)
 	}
 	if err := env.store.RecoverJobs(ctx); err != nil {
@@ -1127,7 +1128,7 @@ func TestCancellingOnceTheFilmWentToThePhotoLibraryIsRefused(t *testing.T) {
 		}
 	})
 	done := env.settle(t, job.ID)
-	if asked != 1 || !errors.Is(refusal, app.ErrJobState) {
+	if asked != 1 || !errors.Is(refusal, domain.ErrJobState) {
 		t.Fatalf("Cancel() while saving, asked %d times = %v", asked, refusal)
 	}
 	if done.State != app.JobDone || done.Version == nil || env.lib.saves != 1 || env.jobFiles(job.ID) {
@@ -1156,7 +1157,7 @@ func TestVideosTooLongToAnalyseAreNamedAndDropped(t *testing.T) {
 	if needs.State != app.JobNeedsInput || needs.WaitReason != app.NeedTooLong || !slices.Equal(needs.Missing, []string{"asset:a1", "asset:a3"}) {
 		t.Fatalf("job = %+v", needs)
 	}
-	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("RetryAnalysis() of videos too long = %v", err)
 	}
 	if len(env.lib.retried) != 0 {
@@ -1360,7 +1361,7 @@ func TestRemovingAnAccountStopsItsRunningJobAndTakesItsFiles(t *testing.T) {
 	if !stopped || env.editing.segments != 1 || env.lib.saves != 0 || env.jobFiles(job.ID) {
 		t.Fatalf("stopped %v, %d segments, %d films saved, files left %v", stopped, env.editing.segments, env.lib.saves, env.jobFiles(job.ID))
 	}
-	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.Job(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("the removed account's job = %v", err)
 	}
 }
@@ -1418,7 +1419,7 @@ func TestTheProjectListShowsAFewOfEachProjectsVideos(t *testing.T) {
 
 func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
 	env := newJobEnv(t)
-	if _, err := env.store.OpenHero("film"); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.OpenHero("film"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("without a hero = %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(env.root, "hero"), 0o750); err != nil {
@@ -1432,10 +1433,10 @@ func TestTheHeroFilmIsTheDevicesOwnWhenItHasOne(t *testing.T) {
 		t.Fatalf("hero = %+v, %v", hero, err)
 	}
 	_ = hero.File.Close()
-	if _, err := env.store.OpenHero("poster"); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.OpenHero("poster"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a poster the device does not have = %v", err)
 	}
-	if _, err := env.store.OpenHero("../montage.db"); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.OpenHero("../montage.db"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another file = %v", err)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // A project holds only the videos a member handed to the montage center
@@ -52,29 +53,6 @@ const (
 
 // UpkeepInterval is how often the montage service runs a store's Upkeep.
 const UpkeepInterval = time.Minute
-
-var (
-	// ErrNotFound covers another member's project as well as a missing one.
-	ErrNotFound = errors.New("montage project not found")
-	// ErrInvalid is a request the montage center refuses as it stands.
-	ErrInvalid = errors.New("invalid montage request")
-	// ErrTooManyAssets names more than MaxAssets videos at once.
-	ErrTooManyAssets = errors.New("too many videos in one request")
-	// ErrAssetsRefused: the photo library would not grant a video. Missing,
-	// hidden, trashed and non-video assets answer alike.
-	ErrAssetsRefused = errors.New("a video cannot be added")
-	// ErrConflict: a request key the member used for another request, of
-	// another kind, on another project or with other videos.
-	ErrConflict = errors.New("the request key was used for another request")
-	// ErrGrantRevoked: the photo library revoked the project's grant, as
-	// when montage.db was restored to before the project's deletion; the
-	// project can take no more videos.
-	ErrGrantRevoked = errors.New("the project's grant was revoked")
-	// ErrPhotosUnavailable: the photo library did not answer, or cannot now.
-	ErrPhotosUnavailable = errors.New("the photo library is not available")
-	// ErrSessionEnded: the member's session is no longer valid.
-	ErrSessionEnded = errors.New("the member's session is not valid")
-)
 
 // AssetStatus is where a project's video stands in the photo library now.
 type AssetStatus string
@@ -158,19 +136,19 @@ func newID(prefix string) string { return prefix + ":" + rand.Text() }
 // uniqueIDs checks a request's videos and returns them sorted, once each.
 func uniqueIDs(ids []string) ([]string, error) {
 	if len(ids) > MaxAssets {
-		return nil, ErrTooManyAssets
+		return nil, domain.ErrTooManyAssets
 	}
 	out := slices.Clone(ids)
 	for _, id := range out {
 		if !printable(id, MaxIDLength) {
-			return nil, ErrInvalid
+			return nil, domain.ErrInvalid
 		}
 	}
 	slices.Sort(out)
 	out = slices.Compact(out)
 	// No videos is no project: never all of the library (#514).
 	if len(out) == 0 {
-		return nil, ErrInvalid
+		return nil, domain.ErrInvalid
 	}
 	return out, nil
 }
@@ -199,15 +177,15 @@ func validText(text string, most int) bool {
 func grantError(err error) error {
 	switch photosapi.GrantErrorCode(err) {
 	case photosapi.GrantAssetsRefused, photosapi.GrantAssetNotFound:
-		return ErrAssetsRefused
+		return domain.ErrAssetsRefused
 	case photosapi.GrantTooMany:
-		return ErrTooManyAssets
+		return domain.ErrTooManyAssets
 	case photosapi.GrantUnauthorized:
-		return ErrSessionEnded
+		return domain.ErrSessionEnded
 	case photosapi.GrantNotFound:
-		return ErrGrantRevoked
+		return domain.ErrGrantRevoked
 	}
-	return fmt.Errorf("%w: %v", ErrPhotosUnavailable, err)
+	return fmt.Errorf("%w: %v", domain.ErrPhotosUnavailable, err)
 }
 
 // assetGone reports whether the photo library answered that a video a
@@ -235,7 +213,7 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (proje
 		FROM projects WHERE id = ? AND owner_user_id = ?`, id, owner).
 		Scan(&row.id, &row.owner, &row.name, &row.state, &row.grantID, &row.ask, &row.chronological, &created, &row.chosen)
 	if errors.Is(err, sql.ErrNoRows) {
-		return projectRow{}, ErrNotFound
+		return projectRow{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return projectRow{}, err
@@ -272,7 +250,7 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 				return err
 			}
 			if row.kind != kind || kind == kindAdd && row.projectID != projectID || !slices.Equal(row.assets, ids) {
-				return ErrConflict
+				return domain.ErrConflict
 			}
 			return nil
 		}
@@ -308,7 +286,7 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 	grant, err := s.grants.Register(ctx, session, b.projectID, b.assets)
 	if err != nil {
 		err = grantError(err)
-		if !errors.Is(err, ErrPhotosUnavailable) {
+		if !errors.Is(err, domain.ErrPhotosUnavailable) {
 			// Refused: nothing was granted.
 			s.undo(ctx, b, "")
 		}
@@ -325,17 +303,17 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 	case err != nil:
 		err = grantError(err)
 	case len(looked) != len(b.assets):
-		err = fmt.Errorf("%w: the grant answered %d of %d videos", ErrPhotosUnavailable, len(looked), len(b.assets))
+		err = fmt.Errorf("%w: the grant answered %d of %d videos", domain.ErrPhotosUnavailable, len(looked), len(b.assets))
 	default:
 		for _, asset := range looked {
 			if asset.Status != photos.GrantAvailable {
 				// It left the member's sight after the grant took it.
-				err = ErrAssetsRefused
+				err = domain.ErrAssetsRefused
 			}
 		}
 	}
 	if err != nil {
-		if !errors.Is(err, ErrPhotosUnavailable) {
+		if !errors.Is(err, domain.ErrPhotosUnavailable) {
 			s.undo(ctx, b, grant.ID)
 		}
 		return err
@@ -479,7 +457,7 @@ func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, n
 	}
 	name = strings.TrimSpace(name)
 	if !printable(requestKey, MaxRequestKey) || !validText(name, MaxNameRunes) {
-		return ProjectDetail{}, false, ErrInvalid
+		return ProjectDetail{}, false, domain.ErrInvalid
 	}
 	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
@@ -511,7 +489,7 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 		return ProjectDetail{}, err
 	}
 	if !printable(requestKey, MaxRequestKey) {
-		return ProjectDetail{}, ErrInvalid
+		return ProjectDetail{}, domain.ErrInvalid
 	}
 	unlock, err := s.members.Lock(ctx, owner)
 	if err != nil {
@@ -523,7 +501,7 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 		return ProjectDetail{}, err
 	}
 	if row.state != projectReady {
-		return ProjectDetail{}, ErrNotFound
+		return ProjectDetail{}, domain.ErrNotFound
 	}
 	b, err := s.batch(ctx, owner, requestKey, kindAdd, projectID, "", ids)
 	if err != nil {
@@ -543,7 +521,7 @@ func (s *Store) Projects(ctx context.Context, owner, cursor string) (ProjectPage
 	if cursor != "" {
 		at, id, ok := strings.Cut(cursor, "|")
 		if !ok {
-			return ProjectPage{}, ErrInvalid
+			return ProjectPage{}, domain.ErrInvalid
 		}
 		where += " AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))"
 		args = append(args, at, at, id)
@@ -623,7 +601,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (ProjectDe
 		return ProjectDetail{}, err
 	}
 	if row.state != projectReady {
-		return ProjectDetail{}, ErrNotFound
+		return ProjectDetail{}, domain.ErrNotFound
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT asset_id, object_id, added_at FROM project_assets WHERE project_id = ? ORDER BY added_at, asset_id", projectID)
 	if err != nil {
@@ -730,13 +708,13 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 	if change.Name != nil {
 		name := strings.TrimSpace(*change.Name)
 		if name == "" || !validText(name, MaxNameRunes) {
-			return ProjectDetail{}, ErrInvalid
+			return ProjectDetail{}, domain.ErrInvalid
 		}
 		sets, args = append(sets, "name = ?"), append(args, name)
 	}
 	if change.Ask != nil {
 		if !validText(*change.Ask, MaxAskRunes) {
-			return ProjectDetail{}, ErrInvalid
+			return ProjectDetail{}, domain.ErrInvalid
 		}
 		sets, args = append(sets, "ask = ?"), append(args, strings.TrimSpace(*change.Ask))
 	}
@@ -744,7 +722,7 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		sets, args = append(sets, "chronological = ?"), append(args, *change.Chronological)
 	}
 	if len(sets) == 0 && change.SongStart == nil {
-		return ProjectDetail{}, ErrInvalid
+		return ProjectDetail{}, domain.ErrInvalid
 	}
 	if change.SongStart != nil {
 		// The start is checked against the song first: a start that leaves
@@ -763,7 +741,7 @@ func (s *Store) UpdateProject(ctx context.Context, owner, projectID string, chan
 		return ProjectDetail{}, err
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
-		return ProjectDetail{}, errors.Join(ErrNotFound, err)
+		return ProjectDetail{}, errors.Join(domain.ErrNotFound, err)
 	}
 	return s.Project(ctx, owner, projectID)
 }
@@ -787,7 +765,7 @@ func (s *Store) DeleteProject(ctx context.Context, owner, projectID string) erro
 			return err
 		}
 		if row.state != projectReady {
-			return ErrNotFound
+			return domain.ErrNotFound
 		}
 		grantID = row.grantID
 		// The jobs go with the project; a running one is stopped below.

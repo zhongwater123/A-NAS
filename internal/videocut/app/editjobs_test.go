@@ -15,6 +15,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -122,14 +123,14 @@ func TestADraftSavedIsANewVersionOnce(t *testing.T) {
 		t.Fatalf("the same request again = %v, %v, %v", again.ID, created, err)
 	}
 	// One job at a time: saving again, generating or another save wait.
-	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:2"); !errors.Is(err, ErrJobActive) {
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:2"); !errors.Is(err, domain.ErrJobActive) {
 		t.Fatalf("saving while a job runs = %v", err)
 	}
 	env.store.Exec(t, "UPDATE projects SET song_id = 'song:x'")
-	if _, _, err := env.store.Generate(ctx, editOwner, "project:1", "generate:2"); !errors.Is(err, ErrJobActive) {
+	if _, _, err := env.store.Generate(ctx, editOwner, "project:1", "generate:2"); !errors.Is(err, domain.ErrJobActive) {
 		t.Fatalf("generating while an edit runs = %v", err)
 	}
-	if _, _, err := env.store.SaveDraft(ctx, editOther, draft.ID, "save:3"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := env.store.SaveDraft(ctx, editOther, draft.ID, "save:3"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member saving the draft = %v", err)
 	}
 	env.runJobs(t)
@@ -329,7 +330,7 @@ func TestAVersionKeepsTheSongItWasMadeWith(t *testing.T) {
 	if heard, _ := io.ReadAll(audio.File); string(heard) != "the old song" || audio.ContentType != "audio/mpeg" {
 		t.Fatalf("the draft's song = %q %q", heard, audio.ContentType)
 	}
-	if _, err := env.store.OpenDraftSongAudio(ctx, editOther, draft.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.OpenDraftSongAudio(ctx, editOther, draft.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's draft song = %v", err)
 	}
 	// A song browsers play is sought in; one decoded on the way is asked
@@ -373,7 +374,7 @@ func TestAnEditOfAMissingVideoNeedsTheMember(t *testing.T) {
 	if err != nil || needs.State != JobNeedsInput || needs.WaitReason != NeedMissing || !slices.Equal(needs.Missing, []string{videoB}) {
 		t.Fatalf("an edit of a missing video = %+v, %v", needs, err)
 	}
-	if _, err := env.store.DropAssets(ctx, editOwner, job.ID, []string{videoB}); !errors.Is(err, ErrJobState) {
+	if _, err := env.store.DropAssets(ctx, editOwner, job.ID, []string{videoB}); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("dropping an edit's video = %v", err)
 	}
 }
@@ -416,7 +417,7 @@ func TestASaveOfAVersionAnalysedAgainStops(t *testing.T) {
 	}
 	env.grants.identity = "another-model|win=2s1f"
 	// Analysed again before the save is asked for: it is refused at once.
-	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:2"); !errors.Is(err, ErrAnalysisChanged) {
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "save:2"); !errors.Is(err, domain.ErrAnalysisChanged) {
 		t.Fatalf("a save asked for after the analysis changed = %v", err)
 	}
 	env.runJobs(t)

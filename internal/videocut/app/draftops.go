@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // The rules of each step (ADR 0039, decision 2;
@@ -26,7 +27,7 @@ func randomSeed() int64 {
 // shotAt is shot number n of state, from 1.
 func shotAt(state draftState, n int) (int, error) {
 	if n < 1 || n > len(state.Shots) {
-		return 0, ErrInvalid
+		return 0, domain.ErrInvalid
 	}
 	return n - 1, nil
 }
@@ -42,7 +43,7 @@ func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, 
 		}
 		card, _, ok := src.beat(op.Beat)
 		if !ok {
-			return draftState{}, "", ErrInvalid
+			return draftState{}, "", domain.ErrInvalid
 		}
 		if !src.cuttable(card.ID) {
 			return draftState{}, "", refuse("这个节拍不在这一版能用的素材里")
@@ -82,7 +83,7 @@ func (src *editSource) apply(state draftState, op DraftOp) (draftState, string, 
 	case "reset":
 		return src.newDraftState(), "已全部还原", nil
 	}
-	return draftState{}, "", ErrInvalid
+	return draftState{}, "", domain.ErrInvalid
 }
 
 // fits checks that beat can lead shot i: not another shot's, and long
@@ -198,7 +199,7 @@ func (s *Store) deleteShot(ctx context.Context, src *editSource, state draftStat
 // mean window vectors each covers, which vectors reads.
 func (s *Store) likeness(ctx context.Context, vectors func(beat string) ([]float32, int, error), a, b string) (float64, error) {
 	if s.jobCompute == nil {
-		return 0, ErrJobsUnavailable
+		return 0, domain.ErrJobsUnavailable
 	}
 	va, dimensions, err := vectors(a)
 	if err != nil {
@@ -243,7 +244,7 @@ func (s *Store) beatVectors(ctx context.Context, src *editSource) func(beat stri
 				return nil, 0, refuse("这一镜或前后镜头的视频正在重新分析，请稍后再删")
 			}
 			if was.windowsChanged(analysis) {
-				return nil, 0, ErrAnalysisChanged
+				return nil, 0, domain.ErrAnalysisChanged
 			}
 			of = analysed{analysis: analysis, raw: raw}
 			read[video] = of
@@ -274,7 +275,7 @@ type scoredBeat struct {
 // scores its best window (docs/architecture/montage-center.md, 候选).
 func (s *Store) searchBeats(ctx context.Context, src *editSource, texts []string) ([][]scoredBeat, error) {
 	if s.search == nil {
-		return nil, ErrSearchUnavailable
+		return nil, domain.ErrSearchUnavailable
 	}
 	hits, err := s.search.SearchWindows(ctx, src.grantID, texts, searchWindows)
 	if err != nil {

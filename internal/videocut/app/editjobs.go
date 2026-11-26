@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -23,10 +24,10 @@ import (
 // answers ErrJobActive.
 func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string) (Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) {
-		return Job{}, false, ErrInvalid
+		return Job{}, false, domain.ErrInvalid
 	}
 	if !s.runsEdits() {
-		return Job{}, false, ErrJobsUnavailable
+		return Job{}, false, domain.ErrJobsUnavailable
 	}
 	// A request key used before answers its job, whatever became of the draft.
 	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindEdit, "draft_id", draftID)
@@ -87,7 +88,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 			return err
 		}
 		if revision != draft.revision {
-			return ErrDraftConflict
+			return domain.ErrDraftConflict
 		}
 		// The song, its excerpt and the plan are the version's own: the
 		// project may have another song since.
@@ -210,7 +211,7 @@ func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (
 	err := s.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
 		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return SongAudio{}, ErrNotFound
+		return SongAudio{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return SongAudio{}, err
@@ -220,10 +221,10 @@ func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (
 		return SongAudio{}, err
 	}
 	if settings.SongID == "" {
-		return SongAudio{}, ErrNoSong
+		return SongAudio{}, domain.ErrNoSong
 	}
 	if _, err := s.ownSong(ctx, owner, settings.SongID); err != nil {
-		return SongAudio{}, ErrNoSong
+		return SongAudio{}, domain.ErrNoSong
 	}
 	return s.openSong(ctx, settings.SongID)
 }

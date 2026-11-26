@@ -8,6 +8,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // Editing a film after it was made (#596; docs/architecture/montage-center.md,
@@ -52,7 +53,7 @@ func (h *handler) editDraft(w http.ResponseWriter, r *http.Request, user account
 		return
 	}
 	if request.BaseRevision == nil || *request.BaseRevision < 0 || request.Op.Seed != nil && *request.Op.Seed < 0 {
-		h.fail(w, r, app.ErrInvalid)
+		h.fail(w, r, domain.ErrInvalid)
 		return
 	}
 	draft, err := h.store.EditDraft(r.Context(), user.ID, r.PathValue("draftID"), *request.BaseRevision, request.Op)
@@ -68,12 +69,12 @@ func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user a
 	query := app.CandidateQuery{Q: values.Get("q"), Size: values.Get("size"), Scene: values.Get("scene")}
 	var err error
 	if query.Shot, err = strconv.Atoi(values.Get("shot")); err != nil {
-		h.fail(w, r, app.ErrInvalid)
+		h.fail(w, r, domain.ErrInvalid)
 		return
 	}
 	if landscape := values.Get("landscape"); landscape != "" {
 		if query.Landscape, err = strconv.ParseBool(landscape); err != nil {
-			h.fail(w, r, app.ErrInvalid)
+			h.fail(w, r, domain.ErrInvalid)
 			return
 		}
 	}
@@ -160,7 +161,7 @@ func (h *handler) shotList(w http.ResponseWriter, r *http.Request, list []byte, 
 func (h *handler) frame(w http.ResponseWriter, r *http.Request, user accounts.User) {
 	ms, err := strconv.ParseInt(r.URL.Query().Get("t"), 10, 64)
 	if err != nil {
-		h.fail(w, r, app.ErrInvalid)
+		h.fail(w, r, domain.ErrInvalid)
 		return
 	}
 	jpeg, err := h.store.Thumbnail(r.Context(), user.ID, r.PathValue("projectID"), r.PathValue("assetID"), ms)
@@ -180,15 +181,15 @@ func failEdit(w http.ResponseWriter, err error) bool {
 	switch {
 	case errors.As(err, &refusal):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "edit_refused", refusal.Reason)
-	case errors.Is(err, app.ErrDraftConflict):
+	case errors.Is(err, domain.ErrDraftConflict):
 		httpjson.WriteError(w, http.StatusConflict, "draft_conflict", "the draft changed since; read it again")
-	case errors.Is(err, app.ErrNotEditable):
+	case errors.Is(err, domain.ErrNotEditable):
 		httpjson.WriteError(w, http.StatusConflict, "not_editable", "the version can only be played")
-	case errors.Is(err, app.ErrAnalysisChanged):
+	case errors.Is(err, domain.ErrAnalysisChanged):
 		httpjson.WriteError(w, http.StatusConflict, "analysis_changed", app.AnalysisChangedReason)
-	case errors.Is(err, app.ErrSearchModel):
+	case errors.Is(err, domain.ErrSearchModel):
 		httpjson.WriteError(w, http.StatusConflict, "search_model_changed", "分析模型已更新，重新分析后才能搜索")
-	case errors.Is(err, app.ErrSearchUnavailable):
+	case errors.Is(err, domain.ErrSearchUnavailable):
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "search_unavailable", "searching the videos is not available")
 	default:
 		return false

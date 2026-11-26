@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -60,15 +61,6 @@ const (
 	lifecycleCheck   = 10 * time.Minute
 	finishedStates   = "'done', 'failed', 'cancelled'"
 	activeStateQuery = "state NOT IN (" + finishedStates + ")"
-)
-
-var (
-	// ErrJobActive: the project already has a job in progress.
-	ErrJobActive = errors.New("the project already has a job in progress")
-	// ErrJobState: the job is not in a state that allows this.
-	ErrJobState = errors.New("the job cannot do this now")
-	// ErrJobsUnavailable: this service was started without what jobs need.
-	ErrJobsUnavailable = errors.New("the montage center cannot make films here")
 )
 
 // JobSettings is what a job started with.
@@ -207,10 +199,10 @@ func scanTime(value sql.NullString) *time.Time {
 // in progress answers ErrJobActive.
 func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey string) (Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) {
-		return Job{}, false, ErrInvalid
+		return Job{}, false, domain.ErrInvalid
 	}
 	if !s.runsJobs() {
-		return Job{}, false, ErrJobsUnavailable
+		return Job{}, false, domain.ErrJobsUnavailable
 	}
 	var jobID string
 	created := false
@@ -224,7 +216,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 			return err
 		}
 		if row.state != "ready" {
-			return ErrNotFound
+			return domain.ErrNotFound
 		}
 		if err := projectIdle(ctx, tx, projectID); err != nil {
 			return err
@@ -234,14 +226,14 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 			return err
 		}
 		if count == 0 {
-			return ErrInvalid
+			return domain.ErrInvalid
 		}
 		settings, err := s.settingsOf(ctx, tx, row)
 		if err != nil {
 			return err
 		}
 		if settings.SongID == "" {
-			return ErrNoSong
+			return domain.ErrNoSong
 		}
 		if jobID, err = s.queueJob(ctx, tx, newJob{owner: owner, projectID: projectID, requestKey: requestKey, kind: KindGenerate, settings: settings, plans: s.plans}); err != nil {
 			return err
@@ -274,7 +266,7 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, s
 	case err != nil:
 		return "", err
 	case priorKind != kind || prior.String != subject:
-		return "", ErrConflict
+		return "", domain.ErrConflict
 	}
 	return id, nil
 }
@@ -287,7 +279,7 @@ func projectIdle(ctx context.Context, tx *sql.Tx, projectID string) error {
 		return err
 	}
 	if active {
-		return ErrJobActive
+		return domain.ErrJobActive
 	}
 	return nil
 }
@@ -361,7 +353,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (Job, error) {
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
 		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &step, &reason, &message, &created, &finished, &plans)
 	if errors.Is(err, sql.ErrNoRows) {
-		return Job{}, ErrNotFound
+		return Job{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return Job{}, err
@@ -472,7 +464,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (Job, error) {
 		if _, err := s.Job(ctx, owner, jobID); err != nil {
 			return Job{}, err
 		}
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	if err != nil {
 		return Job{}, err
@@ -510,7 +502,7 @@ func (s *Store) resume(ctx context.Context, tx *sql.Tx, owner, jobID string, sta
 		return err
 	}
 	if changed, _ := result.RowsAffected(); changed == 0 {
-		return ErrJobState
+		return domain.ErrJobState
 	}
 	return nil
 }
@@ -538,11 +530,11 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 	// 出片后的二次编辑: 任务的种类). A recut
 	// plans anew as generating does, and goes on without them the same way.
 	if job.Kind == KindEdit || job.State != JobNeedsInput || !slices.Contains([]string{NeedMissing, NeedAnalysis, NeedTooLong}, job.WaitReason) {
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	for _, id := range ids {
 		if !slices.Contains(job.Missing, id) {
-			return Job{}, ErrJobState
+			return Job{}, domain.ErrJobState
 		}
 	}
 	var count int
@@ -552,7 +544,7 @@ func (s *Store) DropAssets(ctx context.Context, owner, jobID string, assetIDs []
 		return Job{}, err
 	}
 	if count <= len(ids) {
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	// Remove is idempotent. If its answer or the local commit is lost, the
 	// job remains in needs_input and repeating the same drop finishes it.
@@ -602,7 +594,7 @@ func (s *Store) RetryAnalysis(ctx context.Context, owner, jobID string) (Job, er
 		return Job{}, err
 	}
 	if job.WaitReason != NeedAnalysis {
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	grantID, _, err := s.jobGrant(ctx, jobID)
 	if err != nil {
@@ -627,7 +619,7 @@ func (s *Store) Retry(ctx context.Context, owner, jobID string) (Job, error) {
 		return Job{}, err
 	}
 	if !slices.Contains([]string{NeedStorageFull, NeedNoFootage, NeedMusic, NeedModel}, job.WaitReason) {
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	if err := s.withTx(ctx, func(tx *sql.Tx) error { return s.resume(ctx, tx, owner, jobID, JobNeedsInput) }); err != nil {
 		return Job{}, err
@@ -651,7 +643,7 @@ func (s *Store) Replan(ctx context.Context, owner, jobID string) (Job, error) {
 	}
 	failedPlanning := job.State == JobFailed && job.WaitReason == FailPlanning
 	if !failedPlanning && !slices.Contains([]string{NeedVNASUnknown, NeedPlanInvalid, NeedPlanError, WaitVNAS}, job.WaitReason) {
-		return Job{}, ErrJobState
+		return Job{}, domain.ErrJobState
 	}
 	err = s.withTx(ctx, func(tx *sql.Tx) error {
 		if failedPlanning {
@@ -683,7 +675,7 @@ func (s *Store) reopenable(ctx context.Context, tx *sql.Tx, projectID, jobID str
 		return err
 	}
 	if latest != jobID {
-		return ErrJobState
+		return domain.ErrJobState
 	}
 	if err := projectIdle(ctx, tx, projectID); err != nil {
 		return err

@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // Planning by the member's own VNAS (docs/architecture/montage-planning-session.md):
@@ -106,16 +107,6 @@ const (
 	RoundAbandoned = "abandoned"
 )
 
-// Planning errors the planner and the tools are told.
-var (
-	// ErrNoPlanWanted: no job of the member waits for a round.
-	ErrNoPlanWanted = errors.New("no job waits for planning")
-	// ErrRoundOver: the round was abandoned, ended or timed out.
-	ErrRoundOver = errors.New("this round is over")
-	// ErrJobCancelled: the job was cancelled; the round should stop.
-	ErrJobCancelled = errors.New("the job was cancelled")
-)
-
 // The details a job waiting for VNAS shows (docs/specs/montage-center.md):
 // what it waits for and, when it waits to try again, when that is.
 const (
@@ -146,9 +137,9 @@ func planDetail(err error) string {
 
 func pending(detail string) error {
 	if detail == "" {
-		return ErrPlanPending
+		return domain.ErrPlanPending
 	}
-	return fmt.Errorf("%w%s%s", ErrPlanPending, detailSeparator, detail)
+	return fmt.Errorf("%w%s%s", domain.ErrPlanPending, detailSeparator, detail)
 }
 
 // accountName is what the planner accepts as an account's name: the marker
@@ -161,7 +152,7 @@ var accountName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 // whether to leave markers.
 func (s *Store) RegisterPlanGrant(ctx context.Context, owner, username string) error {
 	if !accountName.MatchString(username) {
-		return ErrInvalid
+		return domain.ErrInvalid
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO plan_grants(owner_user_id, username, registered_at) VALUES(?, ?, ?)
 		ON CONFLICT(owner_user_id) DO UPDATE SET username = excluded.username, registered_at = excluded.registered_at`,
@@ -337,7 +328,7 @@ type planFailed struct {
 func (p *planFailed) Error() string {
 	return fmt.Sprintf("规划试了 %d 轮都没有完成：%s", p.rounds, cmp.Or(p.said, "没有交回规划"))
 }
-func (p *planFailed) Unwrap() error { return ErrPlanFailed }
+func (p *planFailed) Unwrap() error { return domain.ErrPlanFailed }
 
 // awaitPlan says why the job's step has no plan yet: a round runs, VNAS has
 // not taken it, or it waits to plan again; or, once the planning was tried
@@ -541,7 +532,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 			return err
 		}
 		if !granted || !s.hasMarker(username) {
-			return ErrNoPlanWanted
+			return domain.ErrNoPlanWanted
 		}
 		var epoch int
 		var pickKey, settings string
@@ -550,7 +541,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
 			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&claim.JobID, &epoch, &pickKey, &settings)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNoPlanWanted
+			return domain.ErrNoPlanWanted
 		}
 		if err != nil {
 			return err
@@ -576,7 +567,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 	})
 	// Whether a round was claimed or none was wanted, the markers follow the
 	// jobs: the member's is gone unless another of their jobs wants a round.
-	if err == nil || errors.Is(err, ErrNoPlanWanted) {
+	if err == nil || errors.Is(err, domain.ErrNoPlanWanted) {
 		s.syncMarkers(ctx)
 	}
 	if err != nil {
@@ -606,7 +597,7 @@ func (s *Store) round(ctx context.Context, q queryer, owner, roundID string) (ro
 	err := q.QueryRowContext(ctx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
 		roundID, owner).Scan(&r.id, &r.jobID, &r.owner, &r.token, &r.state)
 	if errors.Is(err, sql.ErrNoRows) {
-		return round{}, ErrNotFound
+		return round{}, domain.ErrNotFound
 	}
 	return r, err
 }
@@ -639,7 +630,7 @@ func (s *Store) newPlanEpoch(ctx context.Context, tx *sql.Tx, jobID, why string)
 // abandoned or over is refused, and the planner hands nothing to the model.
 func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) error {
 	if len(runRef) > 128 {
-		return ErrInvalid
+		return domain.ErrInvalid
 	}
 	return s.withTx(ctx, func(tx *sql.Tx) error {
 		r, err := s.round(ctx, tx, owner, roundID)
@@ -651,7 +642,7 @@ func (s *Store) StartRound(ctx context.Context, owner, roundID, runRef string) e
 			return err
 		}
 		if r.state != RoundClaimed || cancelled {
-			return ErrRoundOver
+			return domain.ErrRoundOver
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE rounds SET state = 'started', run_ref = ?, started_at = ? WHERE id = ?",
 			runRef, sqlitedb.FormatTime(s.now()), roundID)
@@ -674,7 +665,7 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failur
 			return err
 		}
 		if r.state != RoundClaimed {
-			return ErrRoundOver
+			return domain.ErrRoundOver
 		}
 		now := sqlitedb.FormatTime(s.now())
 		if _, err := tx.ExecContext(ctx, "UPDATE rounds SET state = 'abandoned', ended_at = ?, reported_at = ?, outcome = ?, failure = ? WHERE id = ?",

@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -382,7 +383,7 @@ func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, e
 	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
 		Scan(&grantID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil, ErrNotFound
+		return "", nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return "", nil, err
@@ -881,7 +882,7 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 
 func (s *Store) songKey(ctx context.Context, run *jobRun) (string, error) {
 	if s.jobMusic == nil || run.settings.SongID == "" {
-		return "", &stepNeeds{reason: NeedMusic, err: ErrSongUnusable}
+		return "", &stepNeeds{reason: NeedMusic, err: domain.ErrSongUnusable}
 	}
 	key, err := s.jobMusic.ExcerptKey(ctx, run.owner, run.settings.SongID, run.settings.SongStart)
 	return key, songStepError(err)
@@ -889,9 +890,9 @@ func (s *Store) songKey(ctx context.Context, run *jobRun) (string, error) {
 
 func songStepError(err error) error {
 	switch {
-	case errors.Is(err, ErrSongAnalyzing):
+	case errors.Is(err, domain.ErrSongAnalyzing):
 		return &stepWait{reason: WaitAnalysis, delay: waitPoll}
-	case errors.Is(err, ErrSongUnusable):
+	case errors.Is(err, domain.ErrSongUnusable):
 		return &stepNeeds{reason: NeedMusic, err: err}
 	}
 	return err
@@ -903,7 +904,7 @@ func (s *Store) excerptOf(ctx context.Context, run *jobRun) (any, error) {
 		return nil, songStepError(err)
 	}
 	if excerpt.Frames <= 0 {
-		return nil, &stepNeeds{reason: NeedMusic, err: ErrSongUnusable}
+		return nil, &stepNeeds{reason: NeedMusic, err: domain.ErrSongUnusable}
 	}
 	if excerpt.Key != run.keys["song"] {
 		return nil, errors.New("the song analysis changed while selecting the excerpt")
@@ -945,13 +946,13 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	}
 	answer, err := ask(ctx, s.planInput(run, step))
 	switch {
-	case errors.Is(err, ErrPlanPending):
+	case errors.Is(err, domain.ErrPlanPending):
 		return nil, &stepWait{reason: WaitVNAS, delay: waitPoll, detail: planDetail(err)}
-	case errors.Is(err, ErrPlanUnknown):
+	case errors.Is(err, domain.ErrPlanUnknown):
 		return nil, &stepNeeds{reason: NeedVNASUnknown, err: err}
-	case errors.Is(err, ErrPlanInvalid):
+	case errors.Is(err, domain.ErrPlanInvalid):
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: err}
-	case errors.Is(err, ErrPlanFailed):
+	case errors.Is(err, domain.ErrPlanFailed):
 		// Planned as many rounds as a job is, none finished: the job fails
 		// and says why, and the member plans it again with one click (Replan).
 		return nil, &stepFailed{err: err, reason: FailPlanning}

@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 )
 
@@ -123,7 +124,7 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 		t.Fatal("no marker for the planner")
 	}
 	// Bob has no job wanting a round.
-	if _, err := env.store.ClaimRound(ctx, "user:bob"); !errors.Is(err, app.ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, "user:bob"); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("Bob's claim = %v", err)
 	}
 	claim, err := env.store.ClaimRound(ctx, "user:alice")
@@ -134,22 +135,22 @@ func TestARoundPlansBothStepsAndTheFilmIsMade(t *testing.T) {
 	if env.marked(t) {
 		t.Fatal("the claim left its marker")
 	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, app.ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("a second claim = %v", err)
 	}
 	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "conversation-in-hermes"); err != nil {
 		t.Fatal(err)
 	}
 	// Once started, the round is not abandoned.
-	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "late", "error"); !errors.Is(err, app.ErrRoundOver) {
+	if err := env.store.AbandonRound(ctx, "user:alice", claim.RoundID, "late", "error"); !errors.Is(err, domain.ErrRoundOver) {
 		t.Fatalf("abandoning a started round = %v", err)
 	}
 
 	// Bob's VNAS cannot reach Alice's job, even with her token.
-	if _, err := env.store.Brief(ctx, "user:bob", job.ID, claim.AttemptToken, app.StepOutline); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.Brief(ctx, "user:bob", job.ID, claim.AttemptToken, app.StepOutline); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Bob's brief = %v", err)
 	}
-	if _, err := env.store.Brief(ctx, "user:alice", job.ID, "0123", app.StepOutline); !errors.Is(err, app.ErrNotFound) {
+	if _, err := env.store.Brief(ctx, "user:alice", job.ID, "0123", app.StepOutline); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another token = %v", err)
 	}
 	brief, err := env.store.Brief(ctx, "user:alice", job.ID, claim.AttemptToken, app.StepOutline)
@@ -230,7 +231,7 @@ func TestARoundVNASCouldNotBeReachedForIsTriedAgainLaterEachTime(t *testing.T) {
 			t.Fatal(err)
 		}
 		// Abandoned, it is no longer started.
-		if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, app.ErrRoundOver) {
+		if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, domain.ErrRoundOver) {
 			t.Fatalf("starting an abandoned round = %v", err)
 		}
 		if job = env.waitForPlan(t, job.ID); env.marked(t) || job.Error != app.DetailUnreachable(minutes) {
@@ -337,13 +338,13 @@ func TestAFailedPlanningIsPlannedAgainOnlyAsTheProjectsLatestJob(t *testing.T) {
 	}
 	// The member started again instead: the failed job stays as it is.
 	next := env.waitForPlan(t, env.generate(t, "generate:2").ID)
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("replanning a job that is not the latest = %v", err)
 	}
 	if _, err := env.store.Cancel(ctx, "user:alice", next.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("replanning a job after a later one = %v", err)
 	}
 }
@@ -369,7 +370,7 @@ func TestAFailedPlanningIsPlannedAgainOnlyWithItsSong(t *testing.T) {
 	if err := env.store.ReclaimSongs(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrNoSong) {
+	if _, err := env.store.Replan(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrNoSong) {
 		t.Fatalf("Replan() after its song was let go = %v", err)
 	}
 }
@@ -447,7 +448,7 @@ func TestARoundNotStartedInFiveMinutesIsAbandonedAndWaitsFromThen(t *testing.T) 
 	if err := env.store.SweepRounds(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, app.ErrRoundOver) {
+	if err := env.store.StartRound(ctx, "user:alice", claim.RoundID, "late"); !errors.Is(err, domain.ErrRoundOver) {
 		t.Fatalf("starting it late = %v", err)
 	}
 	// No model was called: the job waits for another round.
@@ -606,7 +607,7 @@ func TestARestartWhileARoundPlansStartsNoOther(t *testing.T) {
 	if waiting := env.waitForPlan(t, job.ID); waiting.Step != "shots" || env.marked(t) {
 		t.Fatalf("after the restart: job = %+v, marked %v", waiting, env.marked(t))
 	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, app.ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("a second round after the restart = %v", err)
 	}
 	if taken := env.submit(t, claim, app.StepShots, outline("v1-0")); taken.Status != app.ToolAccepted {
@@ -638,7 +639,7 @@ func TestAMarkerGoesWithTheJobItWasFor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(env.markers, "alice"), nil, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, app.ErrNoPlanWanted) || env.marked(t) {
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, domain.ErrNoPlanWanted) || env.marked(t) {
 		t.Fatalf("a claim with nothing to plan = %v, marked %v (job %s)", err, env.marked(t), job.ID)
 	}
 
@@ -678,14 +679,14 @@ func TestAJobBackInTheQueueIsNotClaimedUntilItWaitsAgain(t *testing.T) {
 	if env.marked(t) {
 		t.Fatal("a marker for a job that is back in the queue")
 	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, app.ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("claiming a queued job = %v", err)
 	}
 	// Even with a marker the planner still saw.
 	if err := os.WriteFile(filepath.Join(env.markers, "alice"), nil, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, app.ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, "user:alice"); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("claiming a queued job by its old marker = %v", err)
 	}
 	env.waitForPlan(t, job.ID)

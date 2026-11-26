@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -86,22 +85,6 @@ type Planner interface {
 	Pick(ctx context.Context, input PlanInput) (json.RawMessage, error)
 	Shots(ctx context.Context, input PlanInput) (json.RawMessage, error)
 }
-
-// Planning errors.
-var (
-	// ErrPlanPending: the plan is not back yet; the job waits for it.
-	ErrPlanPending = errors.New("the plan is not back yet")
-	// ErrPlanUnknown: the planning ended without a plan, and only the
-	// member may plan again. The member's VNAS plans again on its own
-	// (ErrPlanFailed); a planner that cannot, as FixedPlanner, says this.
-	ErrPlanUnknown = errors.New("the planning round ended without a plan")
-	// ErrPlanInvalid: the plan is not one the job can take, and planning
-	// again is the member's call (FixedPlanner).
-	ErrPlanInvalid = errors.New("the plan failed its checks")
-	// ErrPlanFailed: the planning was tried as many rounds as a job's is
-	// and none finished it; the job fails (docs/architecture/montage-planning-session.md, 重试).
-	ErrPlanFailed = errors.New("the planning failed")
-)
 
 // Music is what jobs ask of the project's song (M8b).
 type Music interface {

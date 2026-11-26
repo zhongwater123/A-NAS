@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // The home page's background film, as the 第八版 prototype's hero.mp4: a
@@ -28,11 +30,11 @@ type HeroFile struct {
 func (s *Store) OpenHero(which string) (HeroFile, error) {
 	name, ok := heroFiles[which]
 	if !ok {
-		return HeroFile{}, ErrNotFound
+		return HeroFile{}, domain.ErrNotFound
 	}
 	file, err := os.Open(filepath.Join(s.root, heroDir, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return HeroFile{}, ErrNotFound
+		return HeroFile{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return HeroFile{}, err
@@ -40,7 +42,7 @@ func (s *Store) OpenHero(which string) (HeroFile, error) {
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
-		return HeroFile{}, errors.Join(ErrNotFound, err)
+		return HeroFile{}, errors.Join(domain.ErrNotFound, err)
 	}
 	kind := "video/mp4"
 	if which == "poster" {

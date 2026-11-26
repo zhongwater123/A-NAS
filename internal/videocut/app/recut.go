@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -22,10 +23,10 @@ import (
 // job in progress answers ErrJobActive.
 func (s *Store) RecutVersion(ctx context.Context, owner, versionID, requestKey, change string) (Job, bool, error) {
 	if !printable(requestKey, MaxRequestKey) || strings.TrimSpace(change) == "" || !validText(change, MaxAskRunes) {
-		return Job{}, false, ErrInvalid
+		return Job{}, false, domain.ErrInvalid
 	}
 	if !s.runsJobs() {
-		return Job{}, false, ErrJobsUnavailable
+		return Job{}, false, domain.ErrJobsUnavailable
 	}
 	jobID, err := keyedJob(ctx, s.db, owner, requestKey, KindRecut, "source_version_id", versionID)
 	if err != nil {
@@ -96,7 +97,7 @@ func recutBase(src *editSource) (json.RawMessage, map[string]CardPlace, error) {
 		} `json:"answer"`
 	}
 	if err := errors.Join(json.Unmarshal(src.pickedRaw, &outline), json.Unmarshal(src.plannedRaw, &shots)); err != nil {
-		return nil, nil, ErrNotEditable
+		return nil, nil, domain.ErrNotEditable
 	}
 	delete(outline, "unmet")
 	base := recutPlan{Outline: outline, Shots: shots.Answer.Parts}

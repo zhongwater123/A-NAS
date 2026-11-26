@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -29,11 +30,11 @@ func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
 	env := newEditEnv(t)
 	ctx := t.Context()
 	for _, change := range []string{"", "  ", strings.Repeat("长", MaxAskRunes+1)} {
-		if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:0", change); !errors.Is(err, ErrInvalid) {
+		if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:0", change); !errors.Is(err, domain.ErrInvalid) {
 			t.Fatalf("recutting with %q = %v", change, err)
 		}
 	}
-	if _, _, err := env.store.RecutVersion(ctx, editOther, env.version, "recut:0", "结尾留长一点"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := env.store.RecutVersion(ctx, editOther, env.version, "recut:0", "结尾留长一点"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member recutting = %v", err)
 	}
 	job, created, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "结尾留长一点")
@@ -43,10 +44,10 @@ func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
 	if again, created, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:1", "结尾留长一点"); err != nil || created || again.ID != job.ID {
 		t.Fatalf("the same request again = %v, %v, %v", again.ID, created, err)
 	}
-	if _, _, err := env.store.RecutVersion(ctx, editOwner, "version:2", "recut:1", "结尾留长一点"); !errors.Is(err, ErrConflict) {
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, "version:2", "recut:1", "结尾留长一点"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("the key of another recut = %v", err)
 	}
-	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:2", "开头短一点"); !errors.Is(err, ErrJobActive) {
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "recut:2", "开头短一点"); !errors.Is(err, domain.ErrJobActive) {
 		t.Fatalf("recutting while a job runs = %v", err)
 	}
 	// The recut takes the version's videos and starts from its plan.
@@ -134,7 +135,7 @@ func TestOnlyARecutTakesARound(t *testing.T) {
 	if n := env.store.Count(t, "SELECT COUNT(*) FROM jobs WHERE plan_wanted = 1") + env.store.Count(t, "SELECT COUNT(*) FROM rounds"); n != 0 {
 		t.Fatal("editing wanted a planning round")
 	}
-	if _, err := env.store.ClaimRound(ctx, editOwner); !errors.Is(err, ErrNoPlanWanted) {
+	if _, err := env.store.ClaimRound(ctx, editOwner); !errors.Is(err, domain.ErrNoPlanWanted) {
 		t.Fatalf("a claim after editing = %v", err)
 	}
 	// A recut that came to planning is claimed with its own template.
@@ -286,7 +287,7 @@ func TestGeneratingWithTheKeyOfAnotherKindOfJobIsAConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:1"); !errors.Is(err, ErrConflict) {
+	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:1"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("generating with a recut's key = %+v, %v", job, err)
 	}
 	if _, err := env.store.Cancel(ctx, editOwner, recut.ID); err != nil {
@@ -299,14 +300,14 @@ func TestGeneratingWithTheKeyOfAnotherKindOfJobIsAConflict(t *testing.T) {
 	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "key:2"); err != nil {
 		t.Fatal(err)
 	}
-	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:2"); !errors.Is(err, ErrConflict) {
+	if job, _, err := env.store.Generate(ctx, editOwner, "project:1", "key:2"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("generating with a save's key = %+v, %v", job, err)
 	}
 	// The other way round was already so.
-	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "key:2", "结尾留长一点"); !errors.Is(err, ErrConflict) {
+	if _, _, err := env.store.RecutVersion(ctx, editOwner, env.version, "key:2", "结尾留长一点"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("recutting with a save's key = %v", err)
 	}
-	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "key:1"); !errors.Is(err, ErrConflict) {
+	if _, _, err := env.store.SaveDraft(ctx, editOwner, draft.ID, "key:1"); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("saving with a recut's key = %v", err)
 	}
 }

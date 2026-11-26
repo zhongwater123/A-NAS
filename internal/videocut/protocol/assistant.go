@@ -12,6 +12,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // The montage center's assistant socket (docs/architecture/montage-planning-session.md):
@@ -107,13 +108,13 @@ func (h *assistantHandler) withMember(next func(http.ResponseWriter, *http.Reque
 
 func (h *assistantHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
-	case errors.Is(err, app.ErrNotFound):
+	case errors.Is(err, domain.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
-	case errors.Is(err, app.ErrNoPlanWanted):
+	case errors.Is(err, domain.ErrNoPlanWanted):
 		httpjson.WriteError(w, http.StatusConflict, "no_plan_wanted", "no job waits for planning")
-	case errors.Is(err, app.ErrRoundOver):
+	case errors.Is(err, domain.ErrRoundOver):
 		httpjson.WriteError(w, http.StatusConflict, "round_over", "this round is over")
-	case errors.Is(err, app.ErrInvalid):
+	case errors.Is(err, domain.ErrInvalid):
 		httpjson.WriteError(w, http.StatusBadRequest, "validation_failed", "the request is not valid")
 	default:
 		httpjson.WriteInternal(w, r, h.logger, err)

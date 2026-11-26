@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -24,7 +25,7 @@ func TestAJobFindsItsProjectsSong(t *testing.T) {
 	if err != nil || id != song.ID || start != app.DefaultStart {
 		t.Fatalf("Chosen() = %q, %v, %v", id, start, err)
 	}
-	if _, err := f.store.Excerpt(ctx, "user:alice", id, start); !errors.Is(err, app.ErrSongAnalyzing) {
+	if _, err := f.store.Excerpt(ctx, "user:alice", id, start); !errors.Is(err, domain.ErrSongAnalyzing) {
 		t.Fatalf("Excerpt() before the analysis = %v", err)
 	}
 	if err := f.store.AnalyzeWaiting(ctx); err != nil {
@@ -83,14 +84,14 @@ func TestAJobFindsItsProjectsSong(t *testing.T) {
 		t.Fatalf("audio = %q", data)
 	}
 	// Another member's job cannot reach it.
-	if _, err := f.store.Excerpt(ctx, "user:bob", id, start); !errors.Is(err, app.ErrSongUnusable) {
+	if _, err := f.store.Excerpt(ctx, "user:bob", id, start); !errors.Is(err, domain.ErrSongUnusable) {
 		t.Fatalf("Excerpt() for bob = %v", err)
 	}
-	if _, err := f.store.Audio(ctx, "user:bob", id); !errors.Is(err, app.ErrSongUnusable) {
+	if _, err := f.store.Audio(ctx, "user:bob", id); !errors.Is(err, domain.ErrSongUnusable) {
 		t.Fatalf("Audio() for bob = %v", err)
 	}
 	// A start that leaves no usable excerpt makes the job ask for another song.
-	if _, err := f.store.Excerpt(ctx, "user:alice", id, 170); !errors.Is(err, app.ErrSongUnusable) {
+	if _, err := f.store.Excerpt(ctx, "user:alice", id, 170); !errors.Is(err, domain.ErrSongUnusable) {
 		t.Fatalf("Excerpt() late = %v", err)
 	}
 }
@@ -106,7 +107,7 @@ func TestAJobWithAnUnusableSongNeedsAnother(t *testing.T) {
 	if err := f.store.AnalyzeWaiting(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.Excerpt(ctx, "user:alice", song.ID, app.DefaultStart); !errors.Is(err, app.ErrSongUnusable) {
+	if _, err := f.store.Excerpt(ctx, "user:alice", song.ID, app.DefaultStart); !errors.Is(err, domain.ErrSongUnusable) {
 		t.Fatalf("Excerpt() = %v", err)
 	}
 }

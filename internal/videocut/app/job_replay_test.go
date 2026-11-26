@@ -9,6 +9,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 func TestRestartAfterLostPhotoReplyReconcilesDespiteTrashedInput(t *testing.T) {
@@ -43,10 +44,10 @@ func TestUnavailableAnalysisAsksMemberForLocalModel(t *testing.T) {
 	if job.State != app.JobNeedsInput || job.WaitReason != app.NeedModel || len(job.Missing) != 0 {
 		t.Fatalf("%+v", job)
 	}
-	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.RetryAnalysis(ctx, "user:alice", job.ID); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("RetryAnalysis() without the model = %v", err)
 	}
-	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, app.ErrJobState) {
+	if _, err := env.store.DropAssets(ctx, "user:alice", job.ID, []string{"asset:a1"}); !errors.Is(err, domain.ErrJobState) {
 		t.Fatalf("DropAssets() without the model = %v", err)
 	}
 	// Still not installed: the job stops again, it does not poll.

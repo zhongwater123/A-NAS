@@ -10,6 +10,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // The photo library's grants are what a store searches with.
@@ -75,11 +76,11 @@ func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 		code string
 		want error
 	}{
-		{photosapi.GrantModelMismatch, ErrSearchModel},
-		{photosapi.GrantAIUnavailable, ErrSearchUnavailable},
-		{photosapi.GrantUnavailable, ErrSearchUnavailable},
-		{photosapi.GrantOwnerInactive, ErrSearchUnavailable},
-		{"down", ErrSearchUnavailable},
+		{photosapi.GrantModelMismatch, domain.ErrSearchModel},
+		{photosapi.GrantAIUnavailable, domain.ErrSearchUnavailable},
+		{photosapi.GrantUnavailable, domain.ErrSearchUnavailable},
+		{photosapi.GrantOwnerInactive, domain.ErrSearchUnavailable},
+		{"down", domain.ErrSearchUnavailable},
 	} {
 		var asked photosapi.GrantRequest
 		_, err := GrantSearch{Grants: grantCall(t, c.code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
@@ -91,11 +92,11 @@ func TestTheLibrarysRefusalsAreTheMontageCentersErrors(t *testing.T) {
 	// montage center's own (500): a text the library does not search for is
 	// the request's fault, a revoked grant the project's, an ended session
 	// the member's.
-	for code, want := range map[string]error{photosapi.GrantInvalid: ErrInvalid, photosapi.GrantNotFound: ErrGrantRevoked,
-		photosapi.GrantUnauthorized: ErrSessionEnded, "something_new": ErrPhotosUnavailable} {
+	for code, want := range map[string]error{photosapi.GrantInvalid: domain.ErrInvalid, photosapi.GrantNotFound: domain.ErrGrantRevoked,
+		photosapi.GrantUnauthorized: domain.ErrSessionEnded, "something_new": domain.ErrPhotosUnavailable} {
 		var asked photosapi.GrantRequest
 		_, err := GrantSearch{Grants: grantCall(t, code, &asked)}.SearchWindows(t.Context(), "grant-1", []string{"a"}, 3)
-		if !errors.Is(err, want) || errors.Is(err, ErrSearchUnavailable) || errors.Is(err, ErrSearchModel) {
+		if !errors.Is(err, want) || errors.Is(err, domain.ErrSearchUnavailable) || errors.Is(err, domain.ErrSearchModel) {
 			t.Errorf("%s: %v, want %v", code, err, want)
 		}
 	}

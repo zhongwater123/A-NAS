@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // A version's outline is the film as it is (#616 review): it is
@@ -53,7 +55,7 @@ func TestAVersionsOutlineIsItsFilmNotItsDraft(t *testing.T) {
 	if got := outlined(); !slices.Equal(got, film) {
 		t.Fatalf("the film's shots after editing its draft = %v", got)
 	}
-	if _, err := env.store.VersionOutline(ctx, editOther, env.version); !errors.Is(err, ErrNotFound) {
+	if _, err := env.store.VersionOutline(ctx, editOther, env.version); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("another member's outline = %v", err)
 	}
 }
@@ -74,13 +76,13 @@ func TestATimelineOfAnUnknownBeatIsNotEditable(t *testing.T) {
 		env := newEditEnv(t)
 		ctx := t.Context()
 		env.store.Exec(t, `UPDATE versions SET timeline_json = replace(timeline_json, '"beat":"c1/1"', ?) WHERE id = 'version:1'`, `"beat":"`+beat+`"`)
-		if _, err := env.store.VersionOutline(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		if _, err := env.store.VersionOutline(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 			t.Errorf("the outline of a timeline with beat %q = %v", beat, err)
 		}
-		if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		if _, err := env.store.VersionDraft(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 			t.Errorf("the draft of a timeline with beat %q = %v", beat, err)
 		}
-		if _, err := env.store.VersionShots(ctx, editOwner, env.version); !errors.Is(err, ErrNotEditable) {
+		if _, err := env.store.VersionShots(ctx, editOwner, env.version); !errors.Is(err, domain.ErrNotEditable) {
 			t.Errorf("the shot list of a timeline with beat %q = %v", beat, err)
 		}
 	}

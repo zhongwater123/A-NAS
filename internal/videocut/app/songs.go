@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -51,25 +52,6 @@ const (
 	songsDir    = "songs"
 	incomingDir = ".incoming"
 	songFile    = "audio"
-)
-
-var (
-	// ErrSongTooLarge: the file is larger than MaxSongBytes (413).
-	ErrSongTooLarge = errors.New("the song is larger than 100 MiB")
-	// ErrSongLength: the song is shorter than MinSongSeconds or longer than
-	// MaxSongSeconds (422).
-	ErrSongLength = errors.New("the song is shorter than 30 seconds or longer than 8 minutes")
-	// ErrNotAudio: FFmpeg finds no audio in the file (422).
-	ErrNotAudio = errors.New("the file is not audio")
-	// ErrNoSong: the project has no song yet (404).
-	ErrNoSong = errors.New("the project has no song")
-	// ErrSongNotReady: the song is still being analysed, or cannot be used
-	// (409).
-	ErrSongNotReady = errors.New("the song is not analysed")
-	// ErrSongStart: no usable excerpt starts at the downbeat asked for (422).
-	ErrSongStart = errors.New("no usable excerpt starts there")
-	// ErrMediaUnavailable: the media worker did not answer (503).
-	ErrMediaUnavailable = errors.New("the media worker is not available")
 )
 
 // Song states.
@@ -245,9 +227,9 @@ func (s *Store) receive(body io.Reader) (*os.File, string, error) {
 	case err != nil:
 		return discard(err)
 	case written > MaxSongBytes:
-		return discard(ErrSongTooLarge)
+		return discard(domain.ErrSongTooLarge)
 	case written == 0:
-		return discard(ErrNotAudio)
+		return discard(domain.ErrNotAudio)
 	}
 	if err := file.Sync(); err != nil {
 		return discard(err)
@@ -264,21 +246,21 @@ func (s *Store) receive(body io.Reader) (*os.File, string, error) {
 // and returns its length.
 func (s *Store) probeSong(ctx context.Context, file *os.File) (float64, error) {
 	if s.media == nil {
-		return 0, ErrMediaUnavailable
+		return 0, domain.ErrMediaUnavailable
 	}
 	probe, err := s.media.Probe(ctx, file)
 	switch {
 	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid), errors.Is(err, ffmpegworker.ErrTooLarge):
-		return 0, ErrNotAudio
+		return 0, domain.ErrNotAudio
 	case err != nil:
-		return 0, fmt.Errorf("%w: %v", ErrMediaUnavailable, err)
+		return 0, fmt.Errorf("%w: %v", domain.ErrMediaUnavailable, err)
 	}
 	if !slices.ContainsFunc(probe.Streams, func(stream ffmpegworker.ProbeStream) bool { return stream.Type == "audio" }) {
-		return 0, ErrNotAudio
+		return 0, domain.ErrNotAudio
 	}
 	duration := probe.Format.Duration
 	if math.IsNaN(duration) || duration < MinSongSeconds || duration > MaxSongSeconds {
-		return 0, ErrSongLength
+		return 0, domain.ErrSongLength
 	}
 	return duration, nil
 }
@@ -309,15 +291,15 @@ func (s *Store) PutSong(ctx context.Context, owner, projectID string, source Son
 		return SongDetail{}, err
 	}
 	if row.state != "ready" {
-		return SongDetail{}, ErrNotFound
+		return SongDetail{}, domain.ErrNotFound
 	}
 	if !utf8.ValidString(source.Title) || strings.ContainsRune(source.Title, 0) {
-		return SongDetail{}, ErrInvalid
+		return SongDetail{}, domain.ErrInvalid
 	}
 	title := SongTitle(source.Title)
 	contentType := source.ContentType
 	if contentType != "" && !strings.HasPrefix(contentType, "audio/") {
-		return SongDetail{}, ErrInvalid
+		return SongDetail{}, domain.ErrInvalid
 	}
 	file, sha, err := s.receive(body)
 	if err != nil {
@@ -465,13 +447,13 @@ func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID str
 	err := q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
 		projectID, owner).Scan(&state, &song.songID, &song.trackID, &song.start, &song.selection)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && state != "ready" {
-		return projectSong{}, ErrNotFound
+		return projectSong{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return projectSong{}, err
 	}
 	if !song.songID.Valid {
-		return projectSong{}, ErrNoSong
+		return projectSong{}, domain.ErrNoSong
 	}
 	return song, nil
 }
@@ -484,7 +466,7 @@ func (s *Store) song(ctx context.Context, q queryer, id string) (songRow, error)
 		Scan(&row.id, &row.owner, &row.sha, &row.title, &row.contentType, &row.state, &row.reason, &row.waiting, &row.version,
 			&row.duration, &analysis, &row.loudness)
 	if errors.Is(err, sql.ErrNoRows) {
-		return songRow{}, ErrNoSong
+		return songRow{}, domain.ErrNoSong
 	}
 	if err != nil {
 		return songRow{}, err
@@ -543,10 +525,10 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	}
 	st := row.analysis.Structure
 	if row.state != SongReady || st == nil || len(st.Downbeats) == 0 {
-		return SongDetail{}, ErrSongNotReady
+		return SongDetail{}, domain.ErrSongNotReady
 	}
 	if math.IsNaN(at) || math.IsInf(at, 0) || at < 0 || at > row.duration {
-		return SongDetail{}, ErrInvalid
+		return SongDetail{}, domain.ErrInvalid
 	}
 	start := nearest(st.Downbeats, at)
 	// What the project keeps: nothing on the default start, where the
@@ -564,13 +546,13 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 		selection, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
 		if errors.Is(err, videocutcompute.ErrWorkerRefused) {
 			// The Worker takes the song but no excerpt from there.
-			return SongDetail{}, fmt.Errorf("%w: %w", ErrSongStart, err)
+			return SongDetail{}, fmt.Errorf("%w: %w", domain.ErrSongStart, err)
 		}
 		if err != nil {
 			return SongDetail{}, err
 		}
 		if selection.Unusable != "" {
-			return SongDetail{}, fmt.Errorf("%w: %s", ErrSongStart, selection.Unusable)
+			return SongDetail{}, fmt.Errorf("%w: %s", domain.ErrSongStart, selection.Unusable)
 		}
 		encoded, err := json.Marshal(keptSelection{Selection: selection, Music: selection.Music})
 		if err != nil {
@@ -585,7 +567,7 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
 		// The member chose another song meanwhile.
-		return SongDetail{}, errors.Join(ErrSongNotReady, err)
+		return SongDetail{}, errors.Join(domain.ErrSongNotReady, err)
 	}
 	return s.Song(ctx, owner, projectID)
 }
@@ -627,17 +609,17 @@ func (s *Store) OpenSongAudio(ctx context.Context, owner, projectID string) (Son
 // descriptor of its own; audio.File stays the caller's to close.
 func (s *Store) DecodeSong(ctx context.Context, audio SongAudio, start float64) (io.ReadCloser, error) {
 	if math.IsNaN(start) || start < 0 || start > audio.Song.Duration {
-		return nil, ErrInvalid
+		return nil, domain.ErrInvalid
 	}
 	if s.media == nil {
-		return nil, ErrMediaUnavailable
+		return nil, domain.ErrMediaUnavailable
 	}
 	stream, err := s.media.Audio(ctx, audio.File, ffmpegworker.AudioRequest{Start: start, Bits: 16})
 	switch {
 	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid):
-		return nil, fmt.Errorf("%w: %v", ErrNotAudio, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrNotAudio, err)
 	case err != nil:
-		return nil, fmt.Errorf("%w: %v", ErrMediaUnavailable, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrMediaUnavailable, err)
 	}
 	return stream, nil
 }

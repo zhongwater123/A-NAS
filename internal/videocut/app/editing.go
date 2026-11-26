@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // What editing a film reads besides the draft (#596): candidates for a
@@ -85,7 +86,7 @@ func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, quer
 	// them (photos.QueryText); so does this.
 	q := strings.TrimSpace(query.Q)
 	if !validText(q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
-		return Candidates{}, ErrInvalid
+		return Candidates{}, domain.ErrInvalid
 	}
 	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
 	if err != nil {
@@ -210,7 +211,7 @@ func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (Pr
 		err := tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
 			WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`, versionID, owner).Scan(&projectID)
 		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
+			return domain.ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -367,17 +368,17 @@ const (
 // does not change, so the browser keeps it.
 func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string, ms int64) ([]byte, error) {
 	if ms < 0 || ms > math.MaxInt32 {
-		return nil, ErrInvalid
+		return nil, domain.ErrInvalid
 	}
 	if s.editing == nil {
-		return nil, ErrJobsUnavailable
+		return nil, domain.ErrJobsUnavailable
 	}
 	var grantID sql.NullString
 	var object string
 	err := s.db.QueryRowContext(ctx, `SELECT p.grant_id, a.object_id FROM projects p JOIN project_assets a ON a.project_id = p.id
 		WHERE p.id = ? AND p.owner_user_id = ? AND p.state = 'ready' AND a.asset_id = ?`, projectID, owner, assetID).Scan(&grantID, &object)
 	if errors.Is(err, sql.ErrNoRows) || err == nil && !grantID.Valid {
-		return nil, ErrNotFound
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -390,14 +391,14 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 	}
 	file, opened, err := s.grants.Open(ctx, grantID.String, assetID)
 	if assetGone(err) {
-		return nil, ErrNotFound // there is no frame of it
+		return nil, domain.ErrNotFound // there is no frame of it
 	}
 	if err != nil {
 		return nil, grantError(err)
 	}
 	defer func() { _ = file.Close() }()
 	if opened != object {
-		return nil, ErrNotFound // the video is not the one the project holds
+		return nil, domain.ErrNotFound // the video is not the one the project holds
 	}
 	var frame []byte
 	request := ffmpegworker.FramesRequest{Times: []float64{float64(ms) / 1000}, Format: ffmpegworker.FormatJPEG,
@@ -410,10 +411,10 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrMediaUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", domain.ErrMediaUnavailable, err)
 	}
 	if frame == nil {
-		return nil, fmt.Errorf("%w: no frame", ErrMediaUnavailable)
+		return nil, fmt.Errorf("%w: no frame", domain.ErrMediaUnavailable)
 	}
 	return frame, nil
 }

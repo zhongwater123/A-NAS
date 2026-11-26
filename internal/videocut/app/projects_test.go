@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // library stands in for the photo library's grants: each session is a
@@ -337,17 +338,17 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 		t.Fatalf("again = %+v, created %v, %v; registers %d, grants %d", again, created, err, lib.registrations(), len(lib.grants))
 	}
 	// The key repeats that request alone.
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:1", "", []string{"asset:a3"}); !errors.Is(err, app.ErrConflict) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:1", "", []string{"asset:a3"}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("CreateProject(the key with other videos) = %v", err)
 	}
-	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:1", []string{"asset:a1", "asset:a2"}); !errors.Is(err, app.ErrConflict) {
+	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:1", []string{"asset:a1", "asset:a2"}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("AddAssets(a creation's key) = %v", err)
 	}
 	// Bob's same request key is his own: he gets no project of Alice's.
-	if _, _, err := store.CreateProject(ctx, "user:bob", "bob", "key:1", "", []string{"asset:a1"}); !errors.Is(err, app.ErrAssetsRefused) {
+	if _, _, err := store.CreateProject(ctx, "user:bob", "bob", "key:1", "", []string{"asset:a1"}); !errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("Bob with Alice's video = %v", err)
 	}
-	if _, err := store.Project(ctx, "user:bob", project.ID); !errors.Is(err, app.ErrNotFound) {
+	if _, err := store.Project(ctx, "user:bob", project.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Bob reading Alice's project = %v", err)
 	}
 	if page, _ := store.Projects(ctx, "user:bob", ""); len(page.Items) != 0 {
@@ -355,18 +356,18 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 	}
 
 	// No videos is not all of them, and 501 is too many.
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:2", "", nil); !errors.Is(err, app.ErrInvalid) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:2", "", nil); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("CreateProject(no videos) = %v", err)
 	}
 	many := make([]string, app.MaxAssets+1)
 	for i := range many {
 		many[i] = fmt.Sprintf("asset:%d", i)
 	}
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:3", "", many); !errors.Is(err, app.ErrTooManyAssets) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:3", "", many); !errors.Is(err, domain.ErrTooManyAssets) {
 		t.Fatalf("CreateProject(501) = %v", err)
 	}
 	for _, id := range []string{"asset 1", "asset:é", fmt.Sprintf("%065d", 0)} {
-		if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:4", "", []string{id}); !errors.Is(err, app.ErrInvalid) {
+		if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:4", "", []string{id}); !errors.Is(err, domain.ErrInvalid) {
 			t.Fatalf("CreateProject(%q) = %v", id, err)
 		}
 	}
@@ -382,7 +383,7 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 		t.Fatalf("AddAssets() again = %+v, %v", again, err)
 	}
 	lib.add("asset:a4", "user:alice", "object:4", 6)
-	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:5", []string{"asset:a4"}); !errors.Is(err, app.ErrConflict) {
+	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:5", []string{"asset:a4"}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("AddAssets(the key with other videos) = %v", err)
 	}
 	if detail, err := store.Project(ctx, "user:alice", project.ID); err != nil || detail.AssetCount != 3 {
@@ -392,10 +393,10 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:6", []string{"asset:a4"}); !errors.Is(err, app.ErrConflict) {
+	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:6", []string{"asset:a4"}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("AddAssets(another project's key) = %v", err)
 	}
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:5", "", []string{"asset:a3"}); !errors.Is(err, app.ErrConflict) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:5", "", []string{"asset:a3"}); !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("CreateProject(an addition's key) = %v", err)
 	}
 
@@ -425,14 +426,14 @@ func TestAProjectHoldsOnlyTheVideosHandedToIt(t *testing.T) {
 	if detail, err = store.UpdateProject(ctx, "user:alice", project.ID, app.ProjectChange{Name: &name, Ask: &ask}); err != nil || detail.Name != name || detail.Ask != ask {
 		t.Fatalf("UpdateProject() = %+v, %v", detail, err)
 	}
-	if err := store.DeleteProject(ctx, "user:bob", project.ID); !errors.Is(err, app.ErrNotFound) {
+	if err := store.DeleteProject(ctx, "user:bob", project.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Bob deleting Alice's project = %v", err)
 	}
 	if err := store.DeleteProject(ctx, "user:alice", project.ID); err != nil {
 		t.Fatal(err)
 	}
 	eventually(t, "the deleted project's grant is revoked", func() bool { return slices.Equal(lib.revokedGrants(), []string{"grant:1"}) })
-	if _, err := store.Project(ctx, "user:alice", project.ID); !errors.Is(err, app.ErrNotFound) {
+	if _, err := store.Project(ctx, "user:alice", project.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("a deleted project = %v", err)
 	}
 	if detail, err := store.Project(ctx, "user:alice", other.ID); err != nil || detail.Assets[0].Status != app.AssetAvailable {
@@ -495,7 +496,7 @@ func TestReconcilingFollowsWhatThePhotoLibraryHolds(t *testing.T) {
 	// Two creations the photo library did not answer: one before its
 	// registration, one after it, then the service stopped.
 	lib.setDown(true)
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:3", "", []string{"asset:a3"}); !errors.Is(err, app.ErrPhotosUnavailable) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:3", "", []string{"asset:a3"}); !errors.Is(err, domain.ErrPhotosUnavailable) {
 		t.Fatalf("CreateProject() while the photo library is away = %v", err)
 	}
 	lib.setDown(false)
@@ -503,7 +504,7 @@ func TestReconcilingFollowsWhatThePhotoLibraryHolds(t *testing.T) {
 	lib.registered = func() { lib.setDown(true) }
 	lib.mu.Unlock()
 	lib.add("asset:a5", "user:alice", "object:5", 7)
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:4", "", []string{"asset:a5"}); !errors.Is(err, app.ErrPhotosUnavailable) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:4", "", []string{"asset:a5"}); !errors.Is(err, domain.ErrPhotosUnavailable) {
 		t.Fatalf("CreateProject() with the photo library gone after registering = %v", err)
 	}
 	lib.mu.Lock()
@@ -678,7 +679,7 @@ func TestAFailedRegistrationTakesBackItsGrant(t *testing.T) {
 	lib.mu.Lock()
 	lib.registered = func() { lib.trash("asset:a1") }
 	lib.mu.Unlock()
-	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:1", "", []string{"asset:a1"}); !errors.Is(err, app.ErrAssetsRefused) {
+	if _, _, err := store.CreateProject(ctx, "user:alice", "alice", "key:1", "", []string{"asset:a1"}); !errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("CreateProject() = %v", err)
 	}
 	eventually(t, "the refused project's grant is revoked", func() bool { return len(lib.revokedGrants()) == 1 })
@@ -696,7 +697,7 @@ func TestAFailedRegistrationTakesBackItsGrant(t *testing.T) {
 	lib.mu.Lock()
 	lib.registered = func() { lib.trash("asset:a3") }
 	lib.mu.Unlock()
-	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:3", []string{"asset:a2", "asset:a3"}); !errors.Is(err, app.ErrAssetsRefused) {
+	if _, err := store.AddAssets(ctx, "user:alice", "alice", project.ID, "key:3", []string{"asset:a2", "asset:a3"}); !errors.Is(err, domain.ErrAssetsRefused) {
 		t.Fatalf("AddAssets() = %v", err)
 	}
 	g, _ := lib.grantOf(project.ID)
@@ -732,7 +733,7 @@ func TestAProjectWhoseGrantWentAway(t *testing.T) {
 	if err := lib.Revoke(ctx, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AddAssets(ctx, "user:alice", "alice", revoked.ID, "key:4", []string{"asset:a2"}); !errors.Is(err, app.ErrGrantRevoked) {
+	if _, err := store.AddAssets(ctx, "user:alice", "alice", revoked.ID, "key:4", []string{"asset:a2"}); !errors.Is(err, domain.ErrGrantRevoked) {
 		t.Fatalf("AddAssets() to a project whose grant was revoked = %v", err)
 	}
 	if detail, err := store.Project(ctx, "user:alice", revoked.ID); err != nil || detail.Assets[0].Status != app.AssetMissing {

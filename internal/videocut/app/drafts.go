@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -20,26 +21,6 @@ import (
 // docs/architecture/montage-center.md, 出片后的二次编辑). A member edits a version slot by slot in a draft kept
 // here: each step is checked against the rules, written as a revision, and
 // can be undone. Nothing here calls a model.
-
-// Draft errors.
-var (
-	// ErrDraftConflict: the draft moved on since the revision the step was
-	// made on, as when another window changed it.
-	ErrDraftConflict = errors.New("the draft changed since")
-	// ErrNotEditable: the version's timeline is not known; it can only be
-	// played.
-	ErrNotEditable = errors.New("the version cannot be edited")
-	// ErrAnalysisChanged: the photo library analysed the version's videos
-	// again with another model since the version was cut. The version can
-	// only be played, or recut (docs/architecture/montage-center.md, 出片后的二次编辑:
-	// 修改稿).
-	ErrAnalysisChanged = errors.New("the videos were analysed again with another model")
-	// ErrSearchUnavailable: the photo library cannot search windows now.
-	ErrSearchUnavailable = errors.New("searching the videos is not available")
-	// ErrSearchModel: the text model is not the one the windows were
-	// analysed with; they are analysed again first.
-	ErrSearchModel = errors.New("the windows were analysed with another model")
-)
 
 // AnalysisChangedReason tells the member why a version analysed again can
 // no longer be edited, when its draft is opened and on a save that found it.
@@ -167,7 +148,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		FROM versions v JOIN projects p ON p.id = v.project_id WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`,
 		versionID, owner).Scan(&src.projectID, &src.number, &src.jobID, &src.plan, &timeline, &grantID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -192,7 +173,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		return nil, err
 	}
 	if !ok {
-		return nil, ErrNotEditable
+		return nil, domain.ErrNotEditable
 	}
 	stored := timeline.Valid
 	if !stored {
@@ -208,12 +189,12 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	if timeline.String == "" || json.Unmarshal([]byte(timeline.String), &filled) != nil || len(filled.Clips) == 0 ||
 		json.Unmarshal(src.excerpt.Music, &src.music) != nil ||
 		json.Unmarshal(src.pickedRaw, &src.picked) != nil || json.Unmarshal(src.plannedRaw, &src.planned) != nil {
-		return nil, ErrNotEditable
+		return nil, domain.ErrNotEditable
 	}
 	for _, raw := range filled.Clips {
 		var clip timelineClip
 		if err := json.Unmarshal(raw, &clip); err != nil {
-			return nil, ErrNotEditable
+			return nil, domain.ErrNotEditable
 		}
 		src.clips = append(src.clips, clip)
 	}
@@ -222,7 +203,7 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 	for id, card := range src.cards {
 		var about cardAbout
 		if json.Unmarshal(card.Answer, &about) != nil || len(about.Beats) != len(card.Times) {
-			return nil, ErrNotEditable
+			return nil, domain.ErrNotEditable
 		}
 		src.about[id] = about
 	}
@@ -233,11 +214,11 @@ func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*ed
 		// Each shot is shown by its beat's description (view): a beat its
 		// card does not have cannot be.
 		if _, _, known := src.beat(clip.Beat); !known || !src.pictureKnown(clip.Part, clip.Picture) {
-			return nil, ErrNotEditable
+			return nil, domain.ErrNotEditable
 		}
 		// A card numbered anew names another video's footage (redoneSince).
 		if card, ok := src.cards[clip.Card]; !ok || card.Video != clip.Video {
-			return nil, ErrNotEditable
+			return nil, domain.ErrNotEditable
 		}
 	}
 	if !stored {
@@ -827,7 +808,7 @@ func (s *Store) checkAnalysis(ctx context.Context, src *editSource) error {
 			return grantError(err)
 		}
 		if was.windowsChanged(now) {
-			return ErrAnalysisChanged
+			return domain.ErrAnalysisChanged
 		}
 	}
 	return nil
@@ -849,7 +830,7 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 	err := s.db.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
 		draftID, owner).Scan(&versionID, &draft.revision, &stateJSON, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, keptDraft{}, ErrNotFound
+		return nil, keptDraft{}, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, keptDraft{}, err
@@ -864,7 +845,7 @@ func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editS
 		return nil, keptDraft{}, fmt.Errorf("draft %s holds an unusable state", draftID)
 	}
 	if !src.holds(draft.state) {
-		return nil, keptDraft{}, ErrNotEditable
+		return nil, keptDraft{}, domain.ErrNotEditable
 	}
 	draft.updated, _ = time.Parse(time.RFC3339Nano, updated)
 	return src, draft, nil
@@ -928,7 +909,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		return Draft{}, err
 	}
 	if draft.revision != base {
-		return Draft{}, ErrDraftConflict
+		return Draft{}, domain.ErrDraftConflict
 	}
 	state := draft.state
 	var next draftState
@@ -988,7 +969,7 @@ func (s *Store) EditDraft(ctx context.Context, owner, draftID string, base int, 
 		if n, err := result.RowsAffected(); err != nil {
 			return err
 		} else if n == 0 {
-			return ErrDraftConflict
+			return domain.ErrDraftConflict
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_revisions(draft_id, revision, op, seed, back, shots_json, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
 			draftID, base+1, op.Type, seed, back, encoded, sqlitedb.FormatTime(now)); err != nil {

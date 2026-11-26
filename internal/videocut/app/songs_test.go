@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -288,11 +289,11 @@ func TestASongThatIsTooLargeOrNotAudioOrTooLongIsRefused(t *testing.T) {
 		song []byte
 		want error
 	}{
-		"larger than 100 MiB": {big, app.ErrSongTooLarge},
-		"not audio":           {[]byte("picture"), app.ErrNotAudio},
-		"empty":               {nil, app.ErrNotAudio},
-		"shorter than 30 s":   {songBytes(29, "short"), app.ErrSongLength},
-		"longer than 8 min":   {songBytes(481, "long"), app.ErrSongLength},
+		"larger than 100 MiB": {big, domain.ErrSongTooLarge},
+		"not audio":           {[]byte("picture"), domain.ErrNotAudio},
+		"empty":               {nil, domain.ErrNotAudio},
+		"shorter than 30 s":   {songBytes(29, "short"), domain.ErrSongLength},
+		"longer than 8 min":   {songBytes(481, "long"), domain.ErrSongLength},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := f.put(t, "user:alice", f.project, c.song); !errors.Is(err, c.want) {
@@ -303,21 +304,21 @@ func TestASongThatIsTooLargeOrNotAudioOrTooLongIsRefused(t *testing.T) {
 	if copies := f.copies(t); len(copies) != 0 {
 		t.Fatalf("a refused song left %v", copies)
 	}
-	if _, err := f.store.Song(context.Background(), "user:alice", f.project); !errors.Is(err, app.ErrNoSong) {
+	if _, err := f.store.Song(context.Background(), "user:alice", f.project); !errors.Is(err, domain.ErrNoSong) {
 		t.Fatalf("Song() = %v; want no song", err)
 	}
 	f.media.down = true
-	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); !errors.Is(err, app.ErrMediaUnavailable) {
+	if _, err := f.put(t, "user:alice", f.project, songBytes(200, "x")); !errors.Is(err, domain.ErrMediaUnavailable) {
 		t.Fatalf("PutSong() without the media worker = %v", err)
 	}
 }
 
 func TestAnotherMembersProjectTakesNoSong(t *testing.T) {
 	f := newSongFixture(t)
-	if _, err := f.put(t, "user:bob", f.project, songBytes(200, "x")); !errors.Is(err, app.ErrNotFound) {
+	if _, err := f.put(t, "user:bob", f.project, songBytes(200, "x")); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("PutSong() = %v; want not found", err)
 	}
-	if _, err := f.store.Song(context.Background(), "user:bob", f.project); !errors.Is(err, app.ErrNotFound) {
+	if _, err := f.store.Song(context.Background(), "user:bob", f.project); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Song() = %v; want not found", err)
 	}
 	if len(f.copies(t)) != 0 {
@@ -332,7 +333,7 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := 21.3
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &start}); !errors.Is(err, app.ErrSongNotReady) {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &start}); !errors.Is(err, domain.ErrSongNotReady) {
 		t.Fatalf("a start before the analysis = %v", err)
 	}
 	if err := f.store.AnalyzeWaiting(ctx); err != nil {
@@ -355,7 +356,7 @@ func TestDraggingTheStartSnapsToADownbeat(t *testing.T) {
 	}
 	// A start that leaves no usable excerpt changes nothing.
 	late := 170.0
-	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &late}); !errors.Is(err, app.ErrSongStart) {
+	if _, err := f.store.UpdateProject(ctx, "user:alice", f.project, app.ProjectChange{SongStart: &late}); !errors.Is(err, domain.ErrSongStart) {
 		t.Fatalf("a late start = %v", err)
 	}
 	if song, _ := f.store.Song(ctx, "user:alice", f.project); song.Selection.Excerpt[0] != 22 {
@@ -422,7 +423,7 @@ func TestASongThatCannotBeUsedSaysWhy(t *testing.T) {
 				t.Fatalf("song = %+v, %v; want unusable for %s", song, err, reason)
 			}
 			start := 50.0
-			if _, err := f.store.SongStart(ctx, "user:alice", f.project, start); !errors.Is(err, app.ErrSongNotReady) {
+			if _, err := f.store.SongStart(ctx, "user:alice", f.project, start); !errors.Is(err, domain.ErrSongNotReady) {
 				t.Fatalf("a start for an unusable song = %v", err)
 			}
 		})
@@ -796,7 +797,7 @@ func TestASongBrowsersCannotPlayIsDecodedToFLAC(t *testing.T) {
 	if data, _ := io.ReadAll(body); string(data) != "flac from 12.5 of song 200 ape" {
 		t.Fatalf("decoded = %q", data)
 	}
-	if _, err := f.store.DecodeSong(ctx, audio, 300); !errors.Is(err, app.ErrInvalid) {
+	if _, err := f.store.DecodeSong(ctx, audio, 300); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("decoding past the end = %v", err)
 	}
 }

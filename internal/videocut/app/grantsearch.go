@@ -6,6 +6,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // WindowSearch finds, among a grant's videos, the windows most like each of
@@ -32,14 +33,14 @@ func (g GrantSearch) SearchWindows(ctx context.Context, grantID string, texts []
 	}
 	switch photosapi.GrantErrorCode(err) {
 	case photosapi.GrantModelMismatch:
-		return nil, ErrSearchModel
+		return nil, domain.ErrSearchModel
 	case "", photosapi.GrantAIUnavailable, photosapi.GrantUnavailable, photosapi.GrantOwnerInactive:
 		// The library did not answer, or cannot now: searching waits.
-		return nil, fmt.Errorf("%w: %w", ErrSearchUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", domain.ErrSearchUnavailable, err)
 	case photosapi.GrantInvalid:
 		// The library does not search for such a text (blank, or longer
 		// than its queries are).
-		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrInvalid, err)
 	}
 	// The rest are what any grant call answers: a grant revoked, a session
 	// ended.

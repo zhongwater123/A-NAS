@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
 // FixedPlanner stands in for the planner until the AI assistant plans
@@ -17,10 +19,10 @@ type FixedPlanner struct{ Dir string }
 func (p FixedPlanner) read(name string) (json.RawMessage, error) {
 	answer, err := os.ReadFile(filepath.Join(p.Dir, name))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrPlanUnknown, err)
+		return nil, fmt.Errorf("%w: %v", domain.ErrPlanUnknown, err)
 	}
 	if !json.Valid(answer) {
-		return nil, fmt.Errorf("%w: %s is not JSON", ErrPlanInvalid, name)
+		return nil, fmt.Errorf("%w: %s is not JSON", domain.ErrPlanInvalid, name)
 	}
 	return answer, nil
 }
