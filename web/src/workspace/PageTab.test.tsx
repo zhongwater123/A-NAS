@@ -86,7 +86,12 @@ describe("共享页面的标签页", () => {
     };
     try {
       render(<PageTab pageId="page_prd" />);
-      const open = { pageId: "page_prd", version: 2, tab: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/) };
+      const open = {
+        pageId: "page_prd",
+        version: 2,
+        tab: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/),
+        seq: expect.any(Number),
+      };
       await waitFor(() => expect(store.viewing).toEqual({ ...open, focused: false }));
       // Getting the focus makes it the tab the member uses.
       focused = true;
@@ -110,6 +115,10 @@ describe("共享页面的标签页", () => {
         window.dispatchEvent(new Event("pagehide"));
       });
       await waitFor(() => expect(store.viewing).toBeUndefined());
+      // Each report and take-back counts up, so the service can drop one
+      // that arrives after a newer one.
+      expect(store.seqs.length).toBeGreaterThan(4);
+      expect(store.seqs.every((seq, i) => i === 0 || seq > store.seqs[i - 1])).toBe(true);
     } finally {
       delete (document as { hidden?: boolean }).hidden;
     }

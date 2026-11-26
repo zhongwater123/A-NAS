@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +41,20 @@ func newFixture(t *testing.T) fixture {
 		alice: workspace.Actor{AccountID: "user:alice", Name: "Alice"},
 		bob:   workspace.Actor{AccountID: "user:bob", Name: "bob"},
 	}
+}
+
+// reports counts the tab reports in these tests the way each browser tab
+// counts its own: always up.
+var reports atomic.Int64
+
+// open is one of actor's tabs saying it shows a page's version.
+func (f fixture) open(actor workspace.Actor, tab, pageID string, version int, focused bool) {
+	f.store.SetViewing(actor, workspace.TabReport{Tab: tab, PageID: pageID, Version: version, Focused: focused, Seq: reports.Add(1)})
+}
+
+// closeTab is one of accountID's tabs saying it closed.
+func (f fixture) closeTab(accountID, tab string) {
+	f.store.ClearViewing(accountID, tab, reports.Add(1))
 }
 
 func claude(tokenID string) workspace.Via {
@@ -296,7 +311,7 @@ func TestATransferLinkWorksOnceAndOnlyForTenMinutes(t *testing.T) {
 
 func TestASelectionIsTheMembersOwnForHalfAnHour(t *testing.T) {
 	f := newFixture(t)
-	f.store.SetViewing(f.alice, "tab", "page_a", 2, true)
+	f.open(f.alice, "tab", "page_a", 2, true)
 	f.store.SetSelection(f.alice.AccountID, workspace.Selection{PageID: "page_a", Version: 2, At: 10, Tag: "button"})
 	if _, ok := f.store.Selection(f.bob.AccountID); ok {
 		t.Fatal("bob sees alice's selection")
@@ -315,9 +330,9 @@ func TestASelectionIsTheMembersOwnForHalfAnHour(t *testing.T) {
 func TestATabIsOpenWhileItSaysSo(t *testing.T) {
 	f := newFixture(t)
 	start := *f.now
-	f.store.SetViewing(f.alice, "one", "page_a", 2, true)
+	f.open(f.alice, "one", "page_a", 2, true)
 	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
-	f.store.SetViewing(f.alice, "one", "page_a", 2, false)
+	f.open(f.alice, "one", "page_a", 2, false)
 	*f.now = f.now.Add(workspace.ViewingLife - time.Second)
 	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_a" || viewing.Version != 2 || !viewing.Since.Equal(start) {
 		t.Fatalf("Viewing() = %+v, %v", viewing, ok)
@@ -327,14 +342,14 @@ func TestATabIsOpenWhileItSaysSo(t *testing.T) {
 		t.Fatalf("a tab that went quiet still shows %+v", viewing)
 	}
 
-	f.store.SetViewing(f.alice, "one", "page_a", 1, true)
-	f.store.SetViewing(f.alice, "two", "page_b", 1, false)
-	f.store.ClearViewing(f.alice.AccountID, "one")
+	f.open(f.alice, "one", "page_a", 1, true)
+	f.open(f.alice, "two", "page_b", 1, false)
+	f.closeTab(f.alice.AccountID, "one")
 	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || viewing.PageID != "page_b" {
 		t.Fatalf("closing another tab = %+v, %v", viewing, ok)
 	}
-	f.store.ClearViewing(f.bob.AccountID, "two")
-	f.store.ClearViewing(f.alice.AccountID, "two")
+	f.closeTab(f.bob.AccountID, "two")
+	f.closeTab(f.alice.AccountID, "two")
 	if _, ok := f.store.Viewing(f.alice.AccountID); ok {
 		t.Fatal("a closed tab is still open")
 	}
@@ -354,14 +369,14 @@ func TestThePageIsTheTabTheMemberUsedLast(t *testing.T) {
 		}
 		return v.PageID
 	}
-	f.store.SetViewing(f.alice, "one", "page_a", 1, true)
+	f.open(f.alice, "one", "page_a", 1, true)
 	step()
-	f.store.SetViewing(f.alice, "two", "page_b", 1, true)
+	f.open(f.alice, "two", "page_b", 1, true)
 	if got := viewing(); got != "page_b" {
 		t.Fatalf("after switching tabs: %s", got)
 	}
 	step()
-	f.store.SetViewing(f.alice, "one", "page_a", 1, false)
+	f.open(f.alice, "one", "page_a", 1, false)
 	if got := viewing(); got != "page_b" {
 		t.Fatalf("a background tab took over: %s", got)
 	}
@@ -371,9 +386,80 @@ func TestThePageIsTheTabTheMemberUsedLast(t *testing.T) {
 		t.Fatalf("after picking on page_a: %s", got)
 	}
 	step()
-	f.store.SetViewing(f.alice, "two", "page_b", 1, true)
+	f.open(f.alice, "two", "page_b", 1, true)
 	if got := viewing(); got != "page_b" {
 		t.Fatalf("after going back to page_b: %s", got)
+	}
+}
+
+// A tab in the background whose page gets a new version, because the
+// member's agent saved it, is not the tab the member used last; it keeps when
+// it opened the page (Codex review of #674).
+func TestANewVersionLeavesWhenTheTabWasOpenedAndUsed(t *testing.T) {
+	f := newFixture(t)
+	opened := *f.now
+	f.open(f.alice, "one", "page_a", 1, true)
+	*f.now = f.now.Add(10 * time.Second)
+	f.open(f.alice, "two", "page_b", 1, true)
+	*f.now = f.now.Add(10 * time.Second)
+	f.open(f.alice, "one", "page_a", 2, false)
+	viewing, ok := f.store.Viewing(f.alice.AccountID)
+	if !ok || viewing.PageID != "page_b" {
+		t.Fatalf("after page_a's new version in the background: %+v, %v", viewing, ok)
+	}
+	f.open(f.alice, "one", "page_a", 2, true)
+	viewing, ok = f.store.Viewing(f.alice.AccountID)
+	if !ok || viewing.PageID != "page_a" || viewing.Version != 2 || !viewing.Since.Equal(opened) {
+		t.Fatalf("back on page_a = %+v, %v; want version 2 open since %v", viewing, ok, opened)
+	}
+}
+
+// A tab's reports and its take-back are separate requests that can arrive
+// in either order: one older than the tab's last changes nothing, so a late
+// take-back does not close a tab shown again and a late report does not
+// open a closed one (Codex review of #674).
+func TestATabReportOlderThanItsLastChangesNothing(t *testing.T) {
+	f := newFixture(t)
+	report := func(seq int64) {
+		f.store.SetViewing(f.alice, workspace.TabReport{Tab: "one", PageID: "page_a", Version: 1, Focused: true, Seq: seq})
+	}
+	open := func() bool {
+		_, ok := f.store.Viewing(f.alice.AccountID)
+		return ok
+	}
+	opened := *f.now
+	report(1)
+	*f.now = f.now.Add(time.Second)
+	// Hidden (2) and shown again (3), the take-back delivered last.
+	report(3)
+	f.store.ClearViewing(f.alice.AccountID, "one", 2)
+	if !open() {
+		t.Fatal("a late take-back closed a tab shown again")
+	}
+	// Closed (5), the minute's report before it (4) delivered last.
+	f.store.ClearViewing(f.alice.AccountID, "one", 5)
+	report(4)
+	if open() || len(f.store.Presence()["page_a"].Viewers) != 0 {
+		t.Fatal("a late report opened a closed tab")
+	}
+	// Shown again: the same page, open since it first was.
+	*f.now = f.now.Add(time.Second)
+	report(6)
+	if viewing, ok := f.store.Viewing(f.alice.AccountID); !ok || !viewing.Since.Equal(opened) {
+		t.Fatalf("shown again = %+v, %v; want open since %v", viewing, ok, opened)
+	}
+	// A take-back for a tab the service never heard of still holds off the
+	// report sent before it.
+	f.store.ClearViewing(f.alice.AccountID, "two", 2)
+	f.store.SetViewing(f.alice, workspace.TabReport{Tab: "two", PageID: "page_b", Version: 1, Focused: true, Seq: 1})
+	if presence := f.store.Presence(); len(presence["page_b"].Viewers) != 0 {
+		t.Fatalf("a report older than the take-back opened tab two: %+v", presence["page_b"])
+	}
+	// What a closed tab said is forgotten after ViewingLife.
+	*f.now = f.now.Add(workspace.ViewingLife)
+	f.store.SetViewing(f.alice, workspace.TabReport{Tab: "two", PageID: "page_b", Version: 1, Focused: true, Seq: 1})
+	if presence := f.store.Presence(); len(presence["page_b"].Viewers) != 1 {
+		t.Fatalf("tab two after its take-back lapsed = %+v", presence["page_b"])
 	}
 }
 
@@ -387,11 +473,11 @@ func TestPresenceShowsWhoHasAPageOpenAndWhoseAgentIsAtWork(t *testing.T) {
 		t.Fatalf("nobody has anything open: %+v", presence)
 	}
 	opened := *f.now
-	f.store.SetViewing(f.alice, "one", page.ID, 1, true)
+	f.open(f.alice, "one", page.ID, 1, true)
 	*f.now = f.now.Add(time.Second)
-	f.store.SetViewing(f.bob, "phone", page.ID, 1, false)
+	f.open(f.bob, "phone", page.ID, 1, false)
 	*f.now = f.now.Add(time.Second)
-	f.store.SetViewing(f.alice, "two", "page_other", 1, true)
+	f.open(f.alice, "two", "page_other", 1, true)
 
 	bobsAgent := workspace.Caller{Actor: f.bob, Via: claude("agent:b")}
 	f.store.AgentWorking(bobsAgent, page.ID, 1, workspace.AgentRead)
@@ -423,7 +509,7 @@ func TestPresenceShowsWhoHasAPageOpenAndWhoseAgentIsAtWork(t *testing.T) {
 		t.Fatalf("an agent quiet for %v is still at work: %+v", workspace.AgentLife, agents)
 	}
 
-	f.store.SetViewing(f.alice, "one", page.ID, 2, true)
+	f.open(f.alice, "one", page.ID, 2, true)
 	f.store.AgentWorking(bobsAgent, page.ID, 2, workspace.AgentRead)
 	if err := f.store.DeletePage(ctx, f.alice, page.ID); err != nil {
 		t.Fatal(err)
@@ -435,10 +521,10 @@ func TestPresenceShowsWhoHasAPageOpenAndWhoseAgentIsAtWork(t *testing.T) {
 
 func TestAnAccountKeepsAtMostMaxTabs(t *testing.T) {
 	f := newFixture(t)
-	f.store.SetViewing(f.alice, "first", "page_a", 1, false)
+	f.open(f.alice, "first", "page_a", 1, false)
 	for i := range workspace.MaxTabs {
 		*f.now = f.now.Add(time.Millisecond)
-		f.store.SetViewing(f.alice, fmt.Sprint("tab", i), "page_b", 1, false)
+		f.open(f.alice, fmt.Sprint("tab", i), "page_b", 1, false)
 	}
 	presence := f.store.Presence()
 	if _, ok := presence["page_a"]; ok {
@@ -456,7 +542,7 @@ func TestADeletedAccountLeavesItsPagesUnderItsName(t *testing.T) {
 		t.Fatal(err)
 	}
 	page, _ := f.store.CreatePage(ctx, f.alice, "a.html", []byte("<p>a"), workspace.Web, "")
-	f.store.SetViewing(f.alice, "tab", page.ID, 1, true)
+	f.open(f.alice, "tab", page.ID, 1, true)
 	f.store.AgentWorking(workspace.Caller{Actor: f.alice, Via: claude("agent:a")}, page.ID, 1, workspace.AgentRead)
 	if err := f.store.RemoveAccount(ctx, f.alice.AccountID); err != nil {
 		t.Fatal(err)

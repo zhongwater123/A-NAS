@@ -28,12 +28,36 @@ type Viewing struct {
 	PageID  string
 	Version int
 	Member  Person
-	// Since is when the tab began to show this version; Seen is when it last
-	// said it still does; Used is when it last said so while it had the
-	// focus, zero when it never did.
+	// Since is when the tab began to show the page, whatever version it
+	// shows now; Seen is when it last said it still does; Used is when it
+	// last said so while it had the focus, zero when it never did.
 	Since time.Time
 	Seen  time.Time
 	Used  time.Time
+}
+
+// TabReport is what one of a member's browser tabs says about itself.
+type TabReport struct {
+	// Tab is the name the tab made for itself.
+	Tab     string
+	PageID  string
+	Version int
+	// Focused says the tab had the focus, which makes it the one the member
+	// used last.
+	Focused bool
+	// Seq counts the tab's reports, its closing included: requests can
+	// arrive out of order, and one older than what the tab last said changes
+	// nothing (Codex review of #674).
+	Seq int64
+}
+
+// tabState is a tab as the service knows it. A closed tab is kept until
+// ViewingLife after it closed, so that a report sent before it closed and
+// delivered after cannot open it again.
+type tabState struct {
+	Viewing
+	seq    int64
+	closed bool
 }
 
 // Viewer is a member with a page open, in one tab or more.
@@ -109,44 +133,78 @@ type Selection struct {
 // live is what members are looking at now and what their agents are doing.
 type live struct {
 	mu sync.Mutex
-	// tabs holds each account's open tabs by the name each tab gave itself.
-	tabs       map[string]map[string]Viewing
+	// tabs holds each account's tabs by the name each tab gave itself.
+	tabs       map[string]map[string]tabState
 	selections map[string]Selection
 	// agents holds what each agent token last read or downloaded.
 	agents map[string]AgentWork
 }
 
-// SetViewing records that one of actor's tabs shows a page's version;
-// focused says the tab had the focus, which makes it the one the member
-// used last.
-func (s *Store) SetViewing(actor Actor, tab, pageID string, version int, focused bool) {
+// SetViewing records that one of actor's tabs shows a page's version. A
+// newer version on the same page keeps when the tab opened the page and was
+// last used: a tab in the background whose page an agent just saved does not
+// become the one the member used last (Codex review of #674).
+func (s *Store) SetViewing(actor Actor, report TabReport) {
 	s.live.mu.Lock()
 	defer s.live.mu.Unlock()
 	now := s.now()
-	if s.live.tabs == nil {
-		s.live.tabs = map[string]map[string]Viewing{}
+	tabs := s.live.tabsOf(actor.AccountID, now)
+	state, ok := tabs[report.Tab]
+	if ok && report.Seq <= state.seq {
+		return
 	}
-	tabs := s.live.tabs[actor.AccountID]
+	if !ok || state.PageID != report.PageID {
+		state = tabState{Viewing: Viewing{PageID: report.PageID, Since: now}}
+	}
+	state.seq, state.closed = report.Seq, false
+	state.Version = report.Version
+	state.Member = Person{ID: actor.AccountID, Name: actor.Name}
+	state.Seen = now
+	if report.Focused {
+		state.Used = now
+	}
+	tabs[report.Tab] = state
+	keepAtMost(tabs, MaxTabs)
+}
+
+// ClearViewing records that one of accountID's tabs closed or went to the
+// background; the others stay. seq is the tab's count of its reports, as in
+// TabReport.
+func (s *Store) ClearViewing(accountID, tab string, seq int64) {
+	s.live.mu.Lock()
+	defer s.live.mu.Unlock()
+	now := s.now()
+	tabs := s.live.tabsOf(accountID, now)
+	state, ok := tabs[tab]
+	if ok && seq <= state.seq {
+		return
+	}
+	state.seq, state.closed, state.Seen = seq, true, now
+	tabs[tab] = state
+	keepAtMost(tabs, MaxTabs)
+}
+
+// tabsOf returns accountID's tabs, without those quiet for ViewingLife.
+func (l *live) tabsOf(accountID string, now time.Time) map[string]tabState {
+	if l.tabs == nil {
+		l.tabs = map[string]map[string]tabState{}
+	}
+	tabs := l.tabs[accountID]
 	if tabs == nil {
-		tabs = map[string]Viewing{}
-		s.live.tabs[actor.AccountID] = tabs
+		tabs = map[string]tabState{}
+		l.tabs[accountID] = tabs
 	}
-	for name, viewing := range tabs {
-		if now.Sub(viewing.Seen) >= ViewingLife {
+	for name, state := range tabs {
+		if now.Sub(state.Seen) >= ViewingLife {
 			delete(tabs, name)
 		}
 	}
-	viewing, ok := tabs[tab]
-	if !ok || viewing.PageID != pageID || viewing.Version != version {
-		viewing = Viewing{PageID: pageID, Version: version, Since: now}
-	}
-	viewing.Member = Person{ID: actor.AccountID, Name: actor.Name}
-	viewing.Seen = now
-	if focused {
-		viewing.Used = now
-	}
-	tabs[tab] = viewing
-	for len(tabs) > MaxTabs {
+	return tabs
+}
+
+// keepAtMost drops the tabs quiet the longest until at most limit are left.
+func keepAtMost(tabs map[string]tabState, limit int) {
+	for len(tabs) > limit {
 		quietest := ""
 		for name, other := range tabs {
 			if quietest == "" || other.Seen.Before(tabs[quietest].Seen) {
@@ -155,13 +213,6 @@ func (s *Store) SetViewing(actor Actor, tab, pageID string, version int, focused
 		}
 		delete(tabs, quietest)
 	}
-}
-
-// ClearViewing forgets one of accountID's tabs; the others stay.
-func (s *Store) ClearViewing(accountID, tab string) {
-	s.live.mu.Lock()
-	defer s.live.mu.Unlock()
-	delete(s.live.tabs[accountID], tab)
 }
 
 // Viewing returns what the tab accountID used last shows, among those that
@@ -177,15 +228,16 @@ func (s *Store) Viewing(accountID string) (Viewing, bool) {
 	var best Viewing
 	var bestAt time.Time
 	found := false
-	for name, viewing := range s.live.tabs[accountID] {
-		if now.Sub(viewing.Seen) >= ViewingLife {
+	for name, state := range s.live.tabs[accountID] {
+		if now.Sub(state.Seen) >= ViewingLife {
 			delete(s.live.tabs[accountID], name)
 			continue
 		}
-		at := viewing.Used
-		if at.IsZero() {
-			at = viewing.Since
+		if state.closed {
+			continue
 		}
+		viewing := state.Viewing
+		at := lastUse(viewing)
 		if picked && viewing.PageID == selection.PageID && selection.PickedAt.After(at) {
 			at = selection.PickedAt
 		}
@@ -232,11 +284,15 @@ func (s *Store) Presence() map[string]Presence {
 		// The member's tab used last on each page gives the version.
 		used := map[string]Viewing{}
 		since := map[string]time.Time{}
-		for name, viewing := range tabs {
-			if now.Sub(viewing.Seen) >= ViewingLife {
+		for name, state := range tabs {
+			if now.Sub(state.Seen) >= ViewingLife {
 				delete(tabs, name)
 				continue
 			}
+			if state.closed {
+				continue
+			}
+			viewing := state.Viewing
 			if last, ok := used[viewing.PageID]; !ok || lastUse(viewing).After(lastUse(last)) {
 				used[viewing.PageID] = viewing
 			}
@@ -344,8 +400,8 @@ func (l *live) forgetPage(pageID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, tabs := range l.tabs {
-		for name, viewing := range tabs {
-			if viewing.PageID == pageID {
+		for name, state := range tabs {
+			if state.PageID == pageID {
 				delete(tabs, name)
 			}
 		}

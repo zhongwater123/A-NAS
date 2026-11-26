@@ -450,6 +450,7 @@ func (h *handler) viewing(w http.ResponseWriter, r *http.Request, caller workspa
 		Version int    `json:"version"`
 		Tab     string `json:"tab"`
 		Focused bool   `json:"focused"`
+		Seq     int64  `json:"seq"`
 	}
 	if !httpjson.Read(w, r, 4<<10, &request) {
 		return
@@ -458,16 +459,28 @@ func (h *handler) viewing(w http.ResponseWriter, r *http.Request, caller workspa
 		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give tab, the tab's name: 1–64 letters, digits, - or _")
 		return
 	}
+	if request.Seq < 1 {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give seq, the tab's count of its reports, from 1")
+		return
+	}
 	if _, _, err := h.store.Version(r.Context(), request.PageID, request.Version); err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.store.SetViewing(caller.Actor, request.Tab, request.PageID, request.Version, request.Focused)
+	h.store.SetViewing(caller.Actor, workspace.TabReport{
+		Tab: request.Tab, PageID: request.PageID, Version: request.Version, Focused: request.Focused, Seq: request.Seq,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *handler) stopViewing(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
-	h.store.ClearViewing(caller.Actor.AccountID, r.PathValue("tab"))
+	tab := r.PathValue("tab")
+	seq, err := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
+	if !tabName.MatchString(tab) || err != nil || seq < 1 {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give the tab's name and seq, the tab's count of its reports, from 1")
+		return
+	}
+	h.store.ClearViewing(caller.Actor.AccountID, tab, seq)
 	w.WriteHeader(http.StatusNoContent)
 }
 
