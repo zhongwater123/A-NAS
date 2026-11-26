@@ -164,8 +164,7 @@ func (s *Store) storedInput(ctx context.Context, jobID string) (domain.PlanInput
 // before the job came to that step.
 func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func() (domain.PlanInput, error)) (videocutcompute.PlanBrief, error) {
 	var brief videocutcompute.PlanBrief
-	var kept string
-	err := s.db.QueryRowContext(ctx, "SELECT brief_json FROM plan_briefs WHERE job_id = ? AND step = ? AND input_key = ?", jobID, step, key).Scan(&kept)
+	kept, err := s.db.PlanBrief(ctx, jobID, step, key)
 	if err == nil && json.Unmarshal([]byte(kept), &brief) == nil {
 		return brief, nil
 	}
@@ -196,8 +195,7 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 		return videocutcompute.PlanBrief{}, err
 	}
 	// The same inputs give the same brief, whoever built it first.
-	_, err = s.db.ExecContext(ctx, `INSERT INTO plan_briefs(job_id, step, input_key, brief_json) VALUES(?, ?, ?, ?)
-		ON CONFLICT(job_id, step, input_key) DO NOTHING`, jobID, step, key, string(encoded))
+	err = s.db.KeepPlanBrief(ctx, jobID, step, key, string(encoded))
 	return brief, err
 }
 
