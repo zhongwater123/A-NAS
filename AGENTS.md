@@ -16,6 +16,14 @@
 3. 涉及产品概念、领域命名或资源身份时，读 `CONTEXT.md`。
 4. 改下面“局部规则”中的目录前，读其中的 AGENTS.md；其余文档按“文档路由”只读与任务相关的。
 
+## 剪辑中心分支
+
+`videocut-center` 是剪辑小组的集成分支，本节只在这个分支上，合回 `main` 时删除。
+
+- 在本分支上判断现状按 `origin/videocut-center`。剪辑中心的功能分支从它拉，PR 目标选它（`gh pr create --base videocut-center`），不要选 `main`。
+- 改到剪辑中心以外的公共代码时，从 `main` 另拉分支，PR 目标选 `main`；研究用的改动放 `research/` 分支，不提 PR。
+- 提 PR 前运行检查命令，把公共代码填进 PR 描述。分类、命令与评审要求见[剪辑中心分支与公共代码](docs/development/videocut-center-branch.md)。
+
 ## 局部规则
 
 在那个目录必须遵守的约定。Claude Code 读其中的文件时自动加载；Codex 只加载从仓库根到会话启动目录这一路上的文件，所以在根目录启动时要自己去读。
