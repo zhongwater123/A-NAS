@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -143,28 +142,17 @@ type queryer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// batchRow is a request that brings videos to a project: kind create makes
-// the project, kind add adds to it.
-type batchRow struct {
-	id, projectID, kind, state string
-	assets                     []string
-}
-
 // batch finds owner's batch for requestKey, or starts one: a create batch
 // with its project in the registering state, named name, or an add batch on
 // projectID. A request key repeats one request: with another kind of
 // request, another project or other videos it is ErrConflict.
-func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, name string, ids []string) (batchRow, error) {
-	var row batchRow
+func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, name string, ids []string) (db.BatchRow, error) {
+	var row db.BatchRow
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
-		var assets string
-		err := tx.QueryRowContext(ctx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
-			owner, requestKey).Scan(&row.id, &row.projectID, &row.kind, &assets, &row.state)
+		var err error
+		row, err = tx.Batch(ctx, owner, requestKey)
 		if err == nil {
-			if err := json.Unmarshal([]byte(assets), &row.assets); err != nil {
-				return err
-			}
-			if row.kind != kind || kind == kindAdd && row.projectID != projectID || !slices.Equal(row.assets, ids) {
+			if row.Kind != kind || kind == kindAdd && row.ProjectID != projectID || !slices.Equal(row.Assets, ids) {
 				return domain.ErrConflict
 			}
 			return nil
@@ -172,7 +160,8 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		now := sqlitedb.FormatTime(s.now())
+		at := s.now()
+		now := sqlitedb.FormatTime(at)
 		if kind == kindCreate {
 			projectID = newID("project")
 			if _, err := tx.ExecContext(ctx, `INSERT INTO projects(id, owner_user_id, name, state, created_at, updated_at)
@@ -180,14 +169,8 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 				return err
 			}
 		}
-		encoded, err := json.Marshal(ids)
-		if err != nil {
-			return err
-		}
-		row = batchRow{id: newID("batch"), projectID: projectID, kind: kind, state: batchRegistering, assets: ids}
-		_, err = tx.ExecContext(ctx, `INSERT INTO batches(id, owner_user_id, project_id, request_key, kind, asset_ids, state, created_at)
-			VALUES(?, ?, ?, ?, ?, ?, 'registering', ?)`, row.id, owner, projectID, requestKey, kind, string(encoded), now)
-		return err
+		row = db.BatchRow{ID: newID("batch"), ProjectID: projectID, Kind: kind, State: batchRegistering, Assets: ids}
+		return tx.AddBatch(ctx, owner, requestKey, row, at)
 	})
 	return row, err
 }
@@ -197,8 +180,8 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 // A batch the photo library did not answer for stays registering: the
 // member repeats it with its request key, or reconciling settles it. It
 // runs under the member's lock.
-func (s *Store) register(ctx context.Context, owner, session string, b batchRow) error {
-	grant, err := s.grants.Register(ctx, session, b.projectID, b.assets)
+func (s *Store) register(ctx context.Context, owner, session string, b db.BatchRow) error {
+	grant, err := s.grants.Register(ctx, session, b.ProjectID, b.Assets)
 	if err != nil {
 		err = domain.GrantError(err)
 		if !errors.Is(err, domain.ErrPhotosUnavailable) {
@@ -207,18 +190,18 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 		}
 		return err
 	}
-	if b.kind == kindCreate {
+	if b.Kind == kindCreate {
 		// Settling a batch that does not finish revokes this grant.
-		if _, err := s.db.ExecContext(ctx, "UPDATE projects SET grant_id = ? WHERE id = ? AND state = 'registering'", grant.ID, b.projectID); err != nil {
+		if _, err := s.db.ExecContext(ctx, "UPDATE projects SET grant_id = ? WHERE id = ? AND state = 'registering'", grant.ID, b.ProjectID); err != nil {
 			return err
 		}
 	}
-	looked, err := s.grants.Lookup(ctx, grant.ID, b.assets)
+	looked, err := s.grants.Lookup(ctx, grant.ID, b.Assets)
 	switch {
 	case err != nil:
 		err = domain.GrantError(err)
-	case len(looked) != len(b.assets):
-		err = fmt.Errorf("%w: the grant answered %d of %d videos", domain.ErrPhotosUnavailable, len(looked), len(b.assets))
+	case len(looked) != len(b.Assets):
+		err = fmt.Errorf("%w: the grant answered %d of %d videos", domain.ErrPhotosUnavailable, len(looked), len(b.Assets))
 	default:
 		for _, asset := range looked {
 			if asset.Status != photos.GrantAvailable {
@@ -248,27 +231,26 @@ func (s *Store) register(ctx context.Context, owner, session string, b batchRow)
 		now := sqlitedb.FormatTime(s.now())
 		for _, asset := range looked {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO project_assets(project_id, asset_id, object_id, batch_id, added_at)
-				VALUES(?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, b.projectID, asset.AssetID, asset.ObjectID, b.id, now); err != nil {
+				VALUES(?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, b.ProjectID, asset.AssetID, asset.ObjectID, b.ID, now); err != nil {
 				return err
 			}
 		}
 		// An addition to a project whose grant was lost registered a new one.
 		if _, err := tx.ExecContext(ctx, `UPDATE projects SET state = 'ready', grant_id = ?, updated_at = ?,
 			name = CASE WHEN name = '' THEN ? ELSE name END WHERE id = ? AND owner_user_id = ?`,
-			grant.ID, now, defaultName(earliest, latest, s.now()), b.projectID, owner); err != nil {
+			grant.ID, now, defaultName(earliest, latest, s.now()), b.ProjectID, owner); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, "UPDATE batches SET state = 'done' WHERE id = ?", b.id)
-		return err
+		return tx.FinishBatch(ctx, b.ID)
 	})
 }
 
 // undo settles a batch its request gave up on, and revokes the grant that
 // queued. What it could not undo now, reconciling settles later.
-func (s *Store) undo(ctx context.Context, b batchRow, grantID string) {
+func (s *Store) undo(ctx context.Context, b db.BatchRow, grantID string) {
 	revoke, err := s.settle(ctx, b, grantID)
 	if err != nil {
-		s.logger.WarnContext(ctx, "undoing a refused batch failed; reconciling settles it", "batch", b.id, "error", err)
+		s.logger.WarnContext(ctx, "undoing a refused batch failed; reconciling settles it", "batch", b.ID, "error", err)
 		return
 	}
 	if revoke != "" {
@@ -281,12 +263,12 @@ func (s *Store) undo(ctx context.Context, b batchRow, grantID string) {
 // the grant unless the project holds them from another batch. grantID is
 // the project's grant, "" when none is known but the one a new project
 // recorded. It runs under the member's lock.
-func (s *Store) settle(ctx context.Context, b batchRow, grantID string) (string, error) {
-	if b.kind == kindCreate {
+func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (string, error) {
+	if b.Kind == kindCreate {
 		var revoke string
 		err := s.db.Update(ctx, func(tx *db.Tx) error {
 			var recorded sql.NullString
-			err := tx.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", b.projectID).Scan(&recorded)
+			err := tx.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", b.ProjectID).Scan(&recorded)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
@@ -301,25 +283,24 @@ func (s *Store) settle(ctx context.Context, b batchRow, grantID string) (string,
 					return err
 				}
 			}
-			_, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", b.projectID)
+			_, err = tx.ExecContext(ctx, "DELETE FROM projects WHERE id = ?", b.ProjectID)
 			return err
 		})
 		return revoke, err
 	}
 	if grantID != "" {
-		held, err := s.heldAssets(ctx, b.projectID, b.assets)
+		held, err := s.heldAssets(ctx, b.ProjectID, b.Assets)
 		if err != nil {
 			return "", err
 		}
-		drop := slices.DeleteFunc(slices.Clone(b.assets), func(id string) bool { return held[id] })
+		drop := slices.DeleteFunc(slices.Clone(b.Assets), func(id string) bool { return held[id] })
 		if len(drop) > 0 {
 			if err := s.grants.Remove(ctx, grantID, drop); err != nil && photosapi.GrantErrorCode(err) != photosapi.GrantNotFound {
 				return "", domain.GrantError(err)
 			}
 		}
 	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM batches WHERE id = ? AND state = 'registering'", b.id)
-	return "", err
+	return "", s.db.DeleteRegisteringBatch(ctx, b.ID)
 }
 
 // heldAssets reports which of ids the project holds.
@@ -385,13 +366,13 @@ func (s *Store) CreateProject(ctx context.Context, owner, session, requestKey, n
 	}
 	// A batch still registering is new, or one the photo library did not
 	// answer for before: the member has not had its project yet.
-	created := b.state == batchRegistering
+	created := b.State == batchRegistering
 	if created {
 		if err := s.register(ctx, owner, session, b); err != nil {
 			return domain.ProjectDetail{}, false, err
 		}
 	}
-	detail, err := s.Project(ctx, owner, b.projectID)
+	detail, err := s.Project(ctx, owner, b.ProjectID)
 	return detail, created, err
 }
 
@@ -422,7 +403,7 @@ func (s *Store) AddAssets(ctx context.Context, owner, session, projectID, reques
 	if err != nil {
 		return domain.ProjectDetail{}, err
 	}
-	if b.state == batchRegistering {
+	if b.State == batchRegistering {
 		if err := s.register(ctx, owner, session, b); err != nil {
 			return domain.ProjectDetail{}, err
 		}
@@ -809,8 +790,7 @@ func (s *Store) Upkeep(ctx context.Context) {
 // unfinished reports whether a batch is still registering, or the store
 // could not say.
 func (s *Store) unfinished(ctx context.Context) bool {
-	var found bool
-	err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM batches WHERE state = 'registering')").Scan(&found)
+	found, err := s.db.AnyBatchRegistering(ctx)
 	return err != nil || found
 }
 
@@ -901,23 +881,23 @@ func (s *Store) reconcileMember(ctx context.Context, owner string, grants []phot
 			projects[grant.ProjectID] = project
 		}
 	}
-	batches, err := s.unfinishedBatches(ctx, owner)
+	batches, err := s.db.RegisteringBatches(ctx, owner)
 	if err != nil {
 		return err
 	}
 	for _, b := range batches {
-		if !s.seen[b.id] {
-			seen[b.id] = true
+		if !s.seen[b.ID] {
+			seen[b.ID] = true
 			continue
 		}
-		grantID := projects[b.projectID].grantID
+		grantID := projects[b.ProjectID].grantID
 		if grantID == "" {
-			grantID = listed[b.projectID]
+			grantID = listed[b.ProjectID]
 		}
 		// A revocation it queues goes out with Upkeep's RetryRevocations.
 		if _, err := s.settle(ctx, b, grantID); err != nil {
-			s.logger.WarnContext(ctx, "settling an unfinished batch failed; trying again", "batch", b.id, "error", err)
-			seen[b.id] = true
+			s.logger.WarnContext(ctx, "settling an unfinished batch failed; trying again", "batch", b.ID, "error", err)
+			seen[b.ID] = true
 		}
 	}
 	if first {
@@ -951,27 +931,6 @@ func (s *Store) memberProjects(ctx context.Context, owner string) (map[string]kn
 		projects[id] = project
 	}
 	return projects, rows.Err()
-}
-
-func (s *Store) unfinishedBatches(ctx context.Context, owner string) ([]batchRow, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, project_id, kind, asset_ids FROM batches WHERE owner_user_id = ? AND state = 'registering'", owner)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var batches []batchRow
-	for rows.Next() {
-		b := batchRow{state: batchRegistering}
-		var assets string
-		if err := rows.Scan(&b.id, &b.projectID, &b.kind, &assets); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(assets), &b.assets); err != nil {
-			return nil, err
-		}
-		batches = append(batches, b)
-	}
-	return batches, rows.Err()
 }
 
 // RemoveAccount forgets a deleted account's projects. Its grants went with
