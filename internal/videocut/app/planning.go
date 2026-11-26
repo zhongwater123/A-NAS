@@ -148,16 +148,12 @@ func (s *Store) RegisterPlanGrant(ctx context.Context, owner, username string) e
 	if !domain.AccountName.MatchString(username) {
 		return domain.ErrInvalid
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO plan_grants(owner_user_id, username, registered_at) VALUES(?, ?, ?)
-		ON CONFLICT(owner_user_id) DO UPDATE SET username = excluded.username, registered_at = excluded.registered_at`,
-		owner, username, sqlitedb.FormatTime(s.now()))
-	return err
+	return s.db.RegisterPlanGrant(ctx, owner, username, s.now())
 }
 
 // planGrant is owner's last registration, if any.
 func (s *Store) planGrant(ctx context.Context, q queryer, owner string) (string, time.Time, bool, error) {
-	var username, at string
-	err := q.QueryRowContext(ctx, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
+	username, at, err := q.PlanGrant(ctx, owner)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", time.Time{}, false, nil
 	}

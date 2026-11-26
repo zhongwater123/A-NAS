@@ -135,7 +135,9 @@ func (s *Store) project(ctx context.Context, q queryer, owner, id string) (proje
 	return row, err
 }
 
+// queryer is the database or one transaction in it (db.DB, db.Tx).
 type queryer interface {
+	PlanGrant(ctx context.Context, owner string) (username, at string, err error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -989,7 +991,7 @@ func (s *Store) RemoveAccount(ctx context.Context, userID string) error {
 			return err
 		}
 		// Their planning grant goes too: the name may be another member's later.
-		if _, err := tx.ExecContext(ctx, "DELETE FROM plan_grants WHERE owner_user_id = ?", userID); err != nil {
+		if err := tx.DeletePlanGrant(ctx, userID); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ?", userID)

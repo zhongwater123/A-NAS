@@ -37,6 +37,14 @@ func Open(ctx context.Context, root string) (*DB, error) {
 // (#665).
 type Tx struct{ *sql.Tx }
 
+// queryer is the database or one transaction in it, for the reads and
+// writes that app makes in both.
+type queryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // Update runs apply in one transaction and commits it when apply returns
 // nil; otherwise nothing apply wrote stays.
 func (d *DB) Update(ctx context.Context, apply func(*Tx) error) error {
