@@ -175,10 +175,11 @@ func TestSamplesForAnalysisTakeABackgroundSlot(t *testing.T) {
 		got = append(got, priorityOf(ctx, op))
 		return nil, nil, ErrUnavailable
 	}
+	input := openFile(t, "")
 	ctx := context.Background()
-	_, _ = audio(ctx, dial, nil, AudioRequest{SampleRate: 22050, Bits: 32, PCM: true, Channels: 1})
-	_, _ = audio(ctx, dial, nil, AudioRequest{Bits: 16})
-	_, _ = audio(WithPriority(ctx, Interactive), dial, nil, AudioRequest{SampleRate: 22050, Bits: 32, PCM: true, Channels: 1})
+	_, _ = audio(ctx, dial, input, AudioRequest{SampleRate: 22050, Bits: 32, PCM: true, Channels: 1})
+	_, _ = audio(ctx, dial, input, AudioRequest{Bits: 16})
+	_, _ = audio(WithPriority(ctx, Interactive), dial, input, AudioRequest{SampleRate: 22050, Bits: 32, PCM: true, Channels: 1})
 	if !slices.Equal(got, []Priority{Background, Streaming, Interactive}) {
 		t.Fatalf("priorities = %v, want background for samples, streaming for playback, and the caller's own", got)
 	}
@@ -621,7 +622,14 @@ func TestRealFFmpegFilm(t *testing.T) {
 		_ = body.Close()
 		offset += piece.request.Frames
 	}
-	film, err := local.Assemble(ctx, joined, song, AssembleRequest{SongStart: 3, Frames: offset, Created: "2026-08-04T18:30:00+08:00"})
+	// The worker takes only read-only inputs, so the segments go to it
+	// through a descriptor of their own.
+	video, err := os.Open(joined.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = video.Close() }()
+	film, err := local.Assemble(ctx, video, song, AssembleRequest{SongStart: 3, Frames: offset, Created: "2026-08-04T18:30:00+08:00"})
 	if err != nil {
 		t.Fatalf("Assemble() error = %v", err)
 	}
@@ -635,7 +643,7 @@ func TestRealFFmpegFilm(t *testing.T) {
 		{SongStart: 3, Frames: offset + 30, Created: "2026-08-04T18:30:00Z"},
 		{SongStart: 29, Frames: offset, Created: "2026-08-04T18:30:00Z"},
 	} {
-		body, err := local.Assemble(ctx, joined, song, request)
+		body, err := local.Assemble(ctx, video, song, request)
 		if body != nil {
 			_ = body.Close()
 		}
