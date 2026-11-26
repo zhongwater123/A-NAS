@@ -2433,10 +2433,29 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only */
+        /** The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without */
         put: operations["setWorkspaceViewing"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/viewing/{pageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** The caller's desktop no longer shows this page; what it said of another page stays */
+        delete: operations["clearWorkspaceViewing"];
         options?: never;
         head?: never;
         patch?: never;
@@ -14672,6 +14691,29 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    clearWorkspaceViewing: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
         };
     };
     setWorkspaceSelection: {

@@ -4226,7 +4226,7 @@ paths:
   /api/v1/workspace/viewing:
     put:
       operationId: setWorkspaceViewing
-      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only
+      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -4241,6 +4241,19 @@ paths:
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/viewing/{pageId}:
+    parameters:
+      - $ref: '#/components/parameters/WorkspacePageID'
+    delete:
+      operationId: clearWorkspaceViewing
+      summary: The caller's desktop no longer shows this page; what it said of another page stays
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Forgotten
+        '403':
           $ref: '#/components/responses/ProductError'
   /api/v1/workspace/selection:
     put:
