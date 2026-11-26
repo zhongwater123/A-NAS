@@ -16,7 +16,10 @@ import (
 
 // DB is the open database. Its reads and writes are its methods, one file
 // for each kind of record; app writes no SQL of its own (#665).
-type DB struct{ db *sql.DB }
+type DB struct {
+	Conn
+	db *sql.DB
+}
 
 // Open opens, creating when missing, the database in root and takes it to
 // the newest step. Commits wait until they are on disk: a job that was
@@ -29,7 +32,7 @@ func Open(ctx context.Context, root string) (*DB, error) {
 	if err := sqlitedb.Migrate(ctx, database, schema); err != nil {
 		return nil, errors.Join(err, database.Close())
 	}
-	return &DB{db: database}, nil
+	return &DB{q: database, db: database}, nil
 }
 
 // Close closes the database.
@@ -41,10 +44,16 @@ func (d *DB) Close() error { return d.db.Close() }
 func (d *DB) SQLForTests() *sql.DB { return d.db }
 
 // Tx is one transaction: reads and writes that stand or fall together.
-type Tx struct{ tx *sql.Tx }
+type Tx struct {
+	Conn
+	tx *sql.Tx
+}
 
-// queryer is the database or one transaction in it, for the reads and
-// writes that app makes in both (DB.db, Tx.tx).
+// Conn holds the reads and writes that app makes both on the database and
+// inside a transaction: DB and Tx each have its methods.
+type Conn struct{ q queryer }
+
+// queryer is the database or one transaction in it (DB.db, Tx.tx).
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -54,5 +63,5 @@ type queryer interface {
 // Update runs apply in one transaction and commits it when apply returns
 // nil; otherwise nothing apply wrote stays.
 func (d *DB) Update(ctx context.Context, apply func(*Tx) error) error {
-	return sqlitedb.WithTx(ctx, d.db, func(tx *sql.Tx) error { return apply(&Tx{tx: tx}) })
+	return sqlitedb.WithTx(ctx, d.db, func(tx *sql.Tx) error { return apply(&Tx{q: tx, tx: tx}) })
 }

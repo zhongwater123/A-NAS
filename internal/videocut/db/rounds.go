@@ -36,18 +36,9 @@ type RoundStanding struct {
 
 // RoundStanding is owner's round for jobID with token, as it stands now;
 // sql.ErrNoRows when there is none.
-func (d *DB) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
-	return roundStanding(ctx, d.db, owner, jobID, token)
-}
-
-// RoundStanding is DB.RoundStanding inside the transaction.
-func (tx *Tx) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
-	return roundStanding(ctx, tx.tx, owner, jobID, token)
-}
-
-func roundStanding(ctx context.Context, q queryer, owner, jobID, token string) (RoundStanding, error) {
+func (c *Conn) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
 	var r RoundStanding
-	err := q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
+	err := c.q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
 		(SELECT input_key FROM steps WHERE job_id = j.id AND name = 'pick')
 		FROM rounds r JOIN jobs j ON j.id = r.job_id WHERE r.job_id = ? AND r.owner_user_id = ? AND r.attempt_token = ?`,
 		jobID, owner, token).Scan(&r.ID, &r.State, &r.Epoch, &r.InputKey, &r.JobEpoch, &r.Cancelled, &r.Plans, &r.PickKey)
@@ -127,17 +118,8 @@ func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error
 // EndRounds ends, at at with outcome, jobID's rounds in progress, whatever
 // they plan for (endRound). Their conversations stay in the member's VNAS
 // history; what they hand back from now on is not kept.
-func (d *DB) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
-	return endRounds(ctx, d.db, jobID, at, outcome)
-}
-
-// EndRounds is DB.EndRounds inside the transaction.
-func (tx *Tx) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
-	return endRounds(ctx, tx.tx, jobID, at, outcome)
-}
-
-func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outcome string) error {
-	_, err := q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
+func (c *Conn) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
+	_, err := c.q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
 	return err
 }
 

@@ -24,19 +24,10 @@ type ProjectRow struct {
 
 // Project is owner's project id, in whatever state; sql.ErrNoRows when
 // owner has none.
-func (d *DB) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
-	return project(ctx, d.db, owner, id)
-}
-
-// Project is DB.Project inside the transaction.
-func (tx *Tx) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
-	return project(ctx, tx.tx, owner, id)
-}
-
-func project(ctx context.Context, q queryer, owner, id string) (ProjectRow, error) {
+func (c *Conn) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
 	var row ProjectRow
 	var created string
-	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
+	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
 		FROM projects WHERE id = ? AND owner_user_id = ?`, id, owner).
 		Scan(&row.ID, &row.Owner, &row.Name, &row.State, &row.GrantID, &row.Ask, &row.Chronological, &created, &row.Chosen)
 	if err != nil {
@@ -274,19 +265,10 @@ type ProjectSong struct {
 
 // ProjectSong is owner's projectID's state and song; sql.ErrNoRows when
 // owner has no such project.
-func (d *DB) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
-	return projectSong(ctx, d.db, owner, projectID)
-}
-
-// ProjectSong is DB.ProjectSong inside the transaction.
-func (tx *Tx) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
-	return projectSong(ctx, tx.tx, owner, projectID)
-}
-
-func projectSong(ctx context.Context, q queryer, owner, projectID string) (string, ProjectSong, error) {
+func (c *Conn) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
 	var song ProjectSong
 	var state string
-	err := q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
+	err := c.q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
 		projectID, owner).Scan(&state, &song.SongID, &song.TrackID, &song.Start, &song.Selection)
 	return state, song, err
 }

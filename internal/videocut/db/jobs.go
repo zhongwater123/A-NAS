@@ -65,17 +65,8 @@ func (d *DB) JobPlanning(ctx context.Context, jobID string) (owner string, epoch
 }
 
 // UnwantRound records that jobID wants no round.
-func (d *DB) UnwantRound(ctx context.Context, jobID string) error {
-	return unwantRound(ctx, d.db, jobID)
-}
-
-// UnwantRound is DB.UnwantRound inside the transaction.
-func (tx *Tx) UnwantRound(ctx context.Context, jobID string) error {
-	return unwantRound(ctx, tx.tx, jobID)
-}
-
-func unwantRound(ctx context.Context, q queryer, jobID string) error {
-	_, err := q.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID)
+func (c *Conn) UnwantRound(ctx context.Context, jobID string) error {
+	_, err := c.q.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", jobID)
 	return err
 }
 
@@ -133,18 +124,9 @@ func (tx *Tx) NewPlanEpoch(ctx context.Context, jobID string) error {
 }
 
 // CancelRequested reports whether jobID is being cancelled.
-func (d *DB) CancelRequested(ctx context.Context, jobID string) (bool, error) {
-	return cancelRequested(ctx, d.db, jobID)
-}
-
-// CancelRequested is DB.CancelRequested inside the transaction.
-func (tx *Tx) CancelRequested(ctx context.Context, jobID string) (bool, error) {
-	return cancelRequested(ctx, tx.tx, jobID)
-}
-
-func cancelRequested(ctx context.Context, q queryer, jobID string) (bool, error) {
+func (c *Conn) CancelRequested(ctx context.Context, jobID string) (bool, error) {
 	var cancelled bool
-	err := q.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
+	err := c.q.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
 	return cancelled, err
 }
 
@@ -342,17 +324,8 @@ func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revisi
 
 // KeyedJob is owner's job started with requestKey: its id, its kind and
 // what column holds for it; sql.ErrNoRows when there is none.
-func (d *DB) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	return keyedJob(ctx, d.db, owner, requestKey, column)
-}
-
-// KeyedJob is DB.KeyedJob inside the transaction.
-func (tx *Tx) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	return keyedJob(ctx, tx.tx, owner, requestKey, column)
-}
-
-func keyedJob(ctx context.Context, q queryer, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	err = q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+func (c *Conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
+	err = c.q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
 		Scan(&id, &kind, &subject)
 	return id, kind, subject, err
 }
@@ -386,18 +359,9 @@ func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
 }
 
 // JobSettings are jobID's settings as it was started with them, encoded.
-func (d *DB) JobSettings(ctx context.Context, jobID string) (string, error) {
-	return jobSettings(ctx, d.db, jobID)
-}
-
-// JobSettings is DB.JobSettings inside the transaction.
-func (tx *Tx) JobSettings(ctx context.Context, jobID string) (string, error) {
-	return jobSettings(ctx, tx.tx, jobID)
-}
-
-func jobSettings(ctx context.Context, q queryer, jobID string) (string, error) {
+func (c *Conn) JobSettings(ctx context.Context, jobID string) (string, error) {
 	var encoded string
-	err := q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
+	err := c.q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
 	return encoded, err
 }
 
@@ -459,18 +423,9 @@ func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, notBefore, updat
 }
 
 // LatestJob is projectID's job made last; sql.ErrNoRows when it has none.
-func (d *DB) LatestJob(ctx context.Context, projectID string) (string, error) {
-	return latestJob(ctx, d.db, projectID)
-}
-
-// LatestJob is DB.LatestJob inside the transaction.
-func (tx *Tx) LatestJob(ctx context.Context, projectID string) (string, error) {
-	return latestJob(ctx, tx.tx, projectID)
-}
-
-func latestJob(ctx context.Context, q queryer, projectID string) (string, error) {
+func (c *Conn) LatestJob(ctx context.Context, projectID string) (string, error) {
 	var latest string
-	err := q.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
+	err := c.q.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
 	return latest, err
 }
 

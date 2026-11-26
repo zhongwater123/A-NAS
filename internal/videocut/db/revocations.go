@@ -12,17 +12,8 @@ import (
 
 // QueueRevocation records that grantID is to be revoked, due at at;
 // nothing when it is queued already.
-func (d *DB) QueueRevocation(ctx context.Context, grantID string, at time.Time) error {
-	return queueRevocation(ctx, d.db, grantID, at)
-}
-
-// QueueRevocation is DB.QueueRevocation inside the transaction.
-func (tx *Tx) QueueRevocation(ctx context.Context, grantID string, at time.Time) error {
-	return queueRevocation(ctx, tx.tx, grantID, at)
-}
-
-func queueRevocation(ctx context.Context, q queryer, grantID string, at time.Time) error {
-	_, err := q.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
+func (c *Conn) QueueRevocation(ctx context.Context, grantID string, at time.Time) error {
+	_, err := c.q.ExecContext(ctx, "INSERT INTO revocations(grant_id, next_try) VALUES(?, ?) ON CONFLICT DO NOTHING",
 		grantID, sqlitedb.FormatTime(at))
 	return err
 }

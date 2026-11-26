@@ -126,17 +126,8 @@ func (tx *Tx) CopySongAnalysis(ctx context.Context, id string) error {
 }
 
 // ForgetUnusedSongs forgets owner's song rows nothing needs (unusedSongs).
-func (d *DB) ForgetUnusedSongs(ctx context.Context, owner string) error {
-	return forgetUnusedSongs(ctx, d.db, owner)
-}
-
-// ForgetUnusedSongs is DB.ForgetUnusedSongs inside the transaction.
-func (tx *Tx) ForgetUnusedSongs(ctx context.Context, owner string) error {
-	return forgetUnusedSongs(ctx, tx.tx, owner)
-}
-
-func forgetUnusedSongs(ctx context.Context, q queryer, owner string) error {
-	_, err := q.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ? AND "+unusedSongs, owner)
+func (c *Conn) ForgetUnusedSongs(ctx context.Context, owner string) error {
+	_, err := c.q.ExecContext(ctx, "DELETE FROM songs WHERE owner_user_id = ? AND "+unusedSongs, owner)
 	return err
 }
 
@@ -169,18 +160,9 @@ type SongRow struct {
 }
 
 // Song is song row id; sql.ErrNoRows when there is none.
-func (d *DB) Song(ctx context.Context, id string) (SongRow, error) {
-	return song(ctx, d.db, id)
-}
-
-// Song is DB.Song inside the transaction.
-func (tx *Tx) Song(ctx context.Context, id string) (SongRow, error) {
-	return song(ctx, tx.tx, id)
-}
-
-func song(ctx context.Context, q queryer, id string) (SongRow, error) {
+func (c *Conn) Song(ctx context.Context, id string) (SongRow, error) {
 	var row SongRow
-	err := q.QueryRowContext(ctx, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
+	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
 		duration, analysis_json, loudness FROM songs WHERE id = ?`, id).
 		Scan(&row.ID, &row.Owner, &row.Sha, &row.Title, &row.ContentType, &row.State, &row.Reason, &row.Waiting, &row.Version,
 			&row.Duration, &row.Analysis, &row.Loudness)

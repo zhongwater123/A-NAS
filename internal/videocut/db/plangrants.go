@@ -21,17 +21,8 @@ func (d *DB) RegisterPlanGrant(ctx context.Context, owner, username string, at t
 
 // PlanGrant is owner's last registration: the username and when, as kept;
 // sql.ErrNoRows when owner has none.
-func (d *DB) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	return planGrant(ctx, d.db, owner)
-}
-
-// PlanGrant is DB.PlanGrant inside the transaction.
-func (tx *Tx) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	return planGrant(ctx, tx.tx, owner)
-}
-
-func planGrant(ctx context.Context, q queryer, owner string) (username, at string, err error) {
-	err = q.QueryRowContext(ctx, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
+func (c *Conn) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
+	err = c.q.QueryRowContext(ctx, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
 	return username, at, err
 }
 
