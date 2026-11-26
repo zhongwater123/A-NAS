@@ -18,12 +18,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
-	"github.com/zhongwater123/A-NAS/internal/montage"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
+	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 )
 
 // songMedia stands in for the media worker as the montage center uses it:
@@ -43,31 +43,31 @@ func (songMedia) Audio(_ context.Context, _ *os.File, request ffmpegworker.Audio
 // Worker's music operation.
 type songStructure struct{}
 
-func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (montage.Analysis, error) {
+func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-chan error) (app.Analysis, error) {
 	_, _ = io.Copy(io.Discard, stereo)
 	_, _ = io.Copy(io.Discard, mono)
 	if err := <-whole; err != nil {
-		return montage.Analysis{}, err
+		return app.Analysis{}, err
 	}
 	var downbeats []float64
 	for t := 0.0; t < 120; t += 2 {
 		downbeats = append(downbeats, t)
 	}
-	return montage.Analysis{Structure: montage.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
-		Segments: []montage.Section{{Start: 0, End: 30, Label: "intro"}, {Start: 30, End: 90, Label: "chorus"}, {Start: 90, End: 120, Label: "outro"}}},
+	return app.Analysis{Structure: app.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
+		Segments: []app.Section{{Start: 0, End: 30, Label: "intro"}, {Start: 30, End: 90, Label: "chorus"}, {Start: 90, End: 120, Label: "outro"}}},
 		Loudness: []float32{0.2, 0.3}}, nil
 }
 
 type songExcerpt struct{}
 
-func (songExcerpt) Music(_ context.Context, request montage.MusicRequest) (montage.Selection, error) {
+func (songExcerpt) Music(_ context.Context, request app.MusicRequest) (app.Selection, error) {
 	start := 30.0
 	if request.Start != nil {
 		start = *request.Start
 	}
 	end := min(start+request.Target, 120)
-	return montage.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, end}, Seconds: end - start, Chorus: true,
-		Parts: []montage.Part{{Start: 0, End: end - start, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, end - start}}}}}, nil
+	return app.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, end}, Seconds: end - start, Chorus: true,
+		Parts: []app.Part{{Start: 0, End: end - start, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, end - start}}}}}, nil
 }
 
 // TestASongComesFromTheMembersMusicLibrary chooses a song for a project
@@ -105,7 +105,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "montage"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"), montage.Options{
+	montageStore, err := app.Open(t.Context(), filepath.Join(dir, "montage"), app.Options{
 		Grants: photoservice.LocalGrants(photoService, sessionDirectory(t, controlDB), nil, logger),
 		Media:  songMedia{}, Music: songStructure{}, Compute: songExcerpt{}, Logger: logger,
 	})
@@ -115,9 +115,9 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	t.Cleanup(func() { _ = montageStore.Close() })
 	// What reaches the montage center: the header only the Product Service sets.
 	var seen []string
-	api := montageapi.New(montageStore, logger)
+	api := protocol.New(montageStore, logger)
 	recorded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Method+" "+r.Header.Get(montageapi.SongHeader))
+		seen = append(seen, r.Method+" "+r.Header.Get(protocol.SongHeader))
 		api.ServeHTTP(w, r)
 	})
 	handler := checkedProduct(t, httpapi.ProductDependencies{
@@ -178,7 +178,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 			video = asset.ID
 		}
 	}
-	var project montage.ProjectDetail
+	var project app.ProjectDetail
 	decode(t, owner.do(http.MethodPost, "/api/v1/montage/projects", `{"requestKey":"k1","assetIds":["`+video+`"]}`, nil, http.StatusCreated).Body, &project)
 	path := "/api/v1/montage/projects/" + project.ID
 
@@ -193,9 +193,9 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	}
 	// The browser cannot say what the song is.
 	seen = nil
-	var song montage.SongDetail
-	decode(t, owner.do(http.MethodPut, path+"/song", `{"trackId":"`+mine+`"}`, map[string]string{montageapi.SongHeader: "forged"}, http.StatusOK).Body, &song)
-	if song.Title != "Symphony" || song.State != montage.SongAnalyzing || song.Transcode {
+	var song app.SongDetail
+	decode(t, owner.do(http.MethodPut, path+"/song", `{"trackId":"`+mine+`"}`, map[string]string{protocol.SongHeader: "forged"}, http.StatusOK).Body, &song)
+	if song.Title != "Symphony" || song.State != app.SongAnalyzing || song.Transcode {
 		t.Fatalf("song = %+v", song)
 	}
 	if len(seen) != 1 || !strings.HasPrefix(seen[0], "PUT ") || seen[0] == "PUT forged" {
@@ -223,7 +223,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	decode(t, owner.do(http.MethodGet, path+"/song", "", nil, http.StatusOK).Body, &song)
-	if song.State != montage.SongReady || song.Selection == nil || song.Selection.Excerpt != [2]float64{30, 120} {
+	if song.State != app.SongReady || song.Selection == nil || song.Selection.Excerpt != [2]float64{30, 120} {
 		t.Fatalf("song = %+v", song)
 	}
 	owner.do(http.MethodPatch, path, `{"songStart":13.2}`, nil, http.StatusOK)

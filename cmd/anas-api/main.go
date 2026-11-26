@@ -49,9 +49,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpidle"
 	"github.com/zhongwater123/A-NAS/internal/media"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
-	"github.com/zhongwater123/A-NAS/internal/montage"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
-	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
@@ -66,6 +63,9 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/transfers"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
 	"github.com/zhongwater123/A-NAS/internal/vectorindex"
+	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearch"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
@@ -171,7 +171,7 @@ func runPhotoService(logger *slog.Logger) error {
 		AI:                  aiworker.Client{SocketPath: config.AISocket},
 		AIQuietPeriod:       config.Quiet,
 		Photos: photos.Options{Media: config.Media.client(), Release: version,
-			Compute: photoservice.MontageCompute(montagecompute.Client{SocketPath: config.ComputeSocket})},
+			Compute: photoservice.MontageCompute(videocutcompute.Client{SocketPath: config.ComputeSocket})},
 		Vectors: vectors,
 	})
 }
@@ -267,7 +267,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
-	var montageGrants montage.Grants
+	var montageGrants app.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -367,7 +367,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	var montageMedia montage.Media
+	var montageMedia app.Media
 	if mediaWorker != nil {
 		montageMedia = mediaWorker
 	}
@@ -995,7 +995,7 @@ func (g gatedAssistant) Connect(ctx context.Context, account string, fresh bool)
 
 // planGrants registers planning grants through the File Broker, where
 // there is one.
-func planGrants(broker *filebroker.Client) montageapi.PlanRegistrar {
+func planGrants(broker *filebroker.Client) protocol.PlanRegistrar {
 	if broker == nil {
 		return nil
 	}

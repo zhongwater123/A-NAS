@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // The library decides what becomes of a job by these three errors: it waits
@@ -21,10 +21,10 @@ func TestTheComputeWorkersErrorsBecomeTheLibrarys(t *testing.T) {
 		err  error
 		want error
 	}{
-		{fmt.Errorf("%w: connection refused", montagecompute.ErrUnavailable), photos.ErrComputeUnavailable},
-		{fmt.Errorf("%w: internal: the operation failed", montagecompute.ErrFailed), photos.ErrComputeFailed},
-		{fmt.Errorf("%w: unexpected EOF", montagecompute.ErrFailed), photos.ErrComputeFailed},
-		{fmt.Errorf("%w: message is too large", montagecompute.ErrRefused), photos.ErrComputeInvalidResult},
+		{fmt.Errorf("%w: connection refused", videocutcompute.ErrUnavailable), photos.ErrComputeUnavailable},
+		{fmt.Errorf("%w: internal: the operation failed", videocutcompute.ErrFailed), photos.ErrComputeFailed},
+		{fmt.Errorf("%w: unexpected EOF", videocutcompute.ErrFailed), photos.ErrComputeFailed},
+		{fmt.Errorf("%w: message is too large", videocutcompute.ErrRefused), photos.ErrComputeInvalidResult},
 		{context.Canceled, nil},
 		{context.DeadlineExceeded, nil},
 	} {
