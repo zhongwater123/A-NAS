@@ -2,8 +2,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { http, server } from "../test/server";
-import { MontageNotices, summarize } from "./MontageNotices";
+import { http, server } from "../../test/server";
+import { summarize, VideoCutNotices } from "./VideoCutNotices";
 
 const notices = [
   {
@@ -49,14 +49,14 @@ describe("the montage center's notices on the desktop", () => {
   it("shows them once on this device and opens the montage center", async () => {
     server.use(http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [...notices] })));
     const opened = vi.fn();
-    const { unmount } = render(<MontageNotices onOpen={opened} />);
+    const { unmount } = render(<VideoCutNotices onOpen={opened} />);
     expect(await screen.findByText("「海边」在等 VNAS 规划")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /去看看/ }));
     expect(opened).toHaveBeenCalledOnce();
     expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
     unmount();
     // Told once: the same jobs in the same state show no more.
-    render(<MontageNotices onOpen={opened} />);
+    render(<VideoCutNotices onOpen={opened} />);
     await settle();
     expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
   });
@@ -91,7 +91,7 @@ describe("the montage center's notices on the desktop", () => {
       }),
     );
     const opened = vi.fn();
-    render(<MontageNotices onOpen={opened} />);
+    render(<VideoCutNotices onOpen={opened} />);
     expect(await screen.findByText("「古镇」没有剪成：规划试了 3 轮都没有完成：out of time")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "重新规划" }));
     await waitFor(() => expect(replanned).toEqual(["job:3"]));
@@ -106,11 +106,11 @@ describe("the montage center's notices on the desktop", () => {
         response(200).json({ items: [detail ? { ...notices[0], detail } : notices[0]] }),
       ),
     );
-    const first = render(<MontageNotices onOpen={() => undefined} />);
+    const first = render(<VideoCutNotices onOpen={() => undefined} />);
     await userEvent.click(await screen.findByRole("button", { name: "关闭" }));
     first.unmount();
     detail = "VNAS 还没有接手";
-    render(<MontageNotices onOpen={() => undefined} />);
+    render(<VideoCutNotices onOpen={() => undefined} />);
     expect(await screen.findByText("「海边」在等 VNAS 规划：VNAS 还没有接手")).toBeInTheDocument();
   });
 
@@ -123,7 +123,7 @@ describe("the montage center's notices on the desktop", () => {
       }),
     );
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    render(<MontageNotices onOpen={() => undefined} />);
+    render(<VideoCutNotices onOpen={() => undefined} />);
     await settle();
     expect(asked).toBe(0);
     visibility.mockReturnValue("visible");
@@ -148,7 +148,7 @@ describe("the montage center's notices on the desktop", () => {
         return response(200).json({ items: [notices[1]] });
       }),
     );
-    render(<MontageNotices onOpen={() => undefined} />);
+    render(<VideoCutNotices onOpen={() => undefined} />);
     await waitFor(() => expect(asked).toBe(1));
     document.dispatchEvent(new Event("visibilitychange"));
     expect(await screen.findByText("「雪山」的成片已存进相册")).toBeInTheDocument();

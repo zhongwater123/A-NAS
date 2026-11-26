@@ -1,5 +1,5 @@
 // What the montage window says about jobs (docs/specs/montage-center.md).
-import type { MontageJob } from "./api";
+import type { MontageJob } from "../api/client";
 
 export const stepNames: Record<MontageJob["steps"][number]["name"], string> = {
   analysis: "分析素材",

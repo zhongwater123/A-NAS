@@ -2,15 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Music2, Pause, Play, Search } from "lucide-react";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
-import { coverURL, listTracks, streamURL } from "../music/api";
-import { clock } from "../photos/model";
-import { Spinner } from "../ui/workspace";
-import { chooseSong, type MontageSong, songAudioURL, updateProject } from "./api";
-import { Failed } from "./Failed";
-import styles from "./montage.module.css";
-import { songKey, songQuery } from "./queries";
-import { useShown } from "./shown";
+import { errorText } from "../../api/errorMessages";
+import { coverURL, listTracks, streamURL } from "../../music/api";
+import { clock } from "../../photos/model";
+import { Spinner } from "../../ui/workspace";
+import { chooseSong, type MontageSong, songAudioURL, updateProject } from "../api/client";
+import { songKey, songQuery } from "../app/queries";
+import { useShown } from "../app/shown";
+import { Failed } from "../ui/Failed";
+import styles from "./videocut.module.css";
 
 // Why a song is not ready yet, or cannot be used (MontageSong.waiting, .reason).
 const songWaits: Record<NonNullable<MontageSong["waiting"]>, string> = {

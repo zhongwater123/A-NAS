@@ -1,7 +1,7 @@
 import { RotateCw, WifiOff } from "lucide-react";
 
-import { errorText } from "../api/errorMessages";
-import styles from "./montage.module.css";
+import { errorText } from "../../api/errorMessages";
+import styles from "../screens/videocut.module.css";
 
 // Failed is what a page shows when it could not load: why, and a way to ask again.
 export function Failed({ error, onRetry, inline }: { error: Error; onRetry: () => void; inline?: boolean }) {

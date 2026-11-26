@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
-import { hasHero, heroPosterURL, heroURL } from "./api";
-import styles from "./montage.module.css";
+import { hasHero, heroPosterURL, heroURL } from "../api/client";
+import styles from "./videocut.module.css";
 
 const stillOnly = () =>
   typeof window === "undefined" ||

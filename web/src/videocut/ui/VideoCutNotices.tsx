@@ -9,10 +9,10 @@
 import { Clapperboard } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { DeskNotice } from "../ui/DeskNotice";
-import { listNotices, type MontageNotice, replan } from "./api";
+import { DeskNotice } from "../../ui/DeskNotice";
+import { listNotices, type MontageNotice, replan } from "../api/client";
+import { forMember } from "../lib/words";
 import styles from "./notices.module.css";
-import { forMember } from "./words";
 
 const POLL_MS = 60_000;
 const SEEN = "montage-notices-seen";
@@ -36,7 +36,7 @@ function remember(keys: string[]) {
   }
 }
 
-export function MontageNotices({ onOpen }: { onOpen: () => void }) {
+export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
   const [notices, setNotices] = useState<MontageNotice[]>([]);
 
   // Asked once a minute while the page is visible, and when it becomes

@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronLeft, Scissors } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { errorText } from "../api/errorMessages";
-import { Spinner } from "../ui/workspace";
-import { type MontageProjectDetail, type ProjectChange, updateProject } from "./api";
-import { Failed } from "./Failed";
-import styles from "./montage.module.css";
-import { projectKey, projectQuery } from "./queries";
-import { limitsOf } from "./words";
+import { errorText } from "../../api/errorMessages";
+import { Spinner } from "../../ui/workspace";
+import { type MontageProjectDetail, type ProjectChange, updateProject } from "../api/client";
+import { projectKey, projectQuery } from "../app/queries";
+import { limitsOf } from "../lib/words";
+import { Failed } from "../ui/Failed";
+import styles from "./videocut.module.css";
 
 const MAX_ASK = 200;
 // The prototype's ideas, a click away.

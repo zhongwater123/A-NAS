@@ -1,6 +1,6 @@
-import { call, client } from "../api/client";
-import { requestKey } from "../api/requestKey";
-import type { components, operations } from "../api.generated";
+import { call, client } from "../../api/client";
+import { requestKey } from "../../api/requestKey";
+import type { components, operations } from "../../api.generated";
 
 export type MontageProject = components["schemas"]["MontageProjectSummary"];
 export type MontageProjectDetail = components["schemas"]["MontageProject"];

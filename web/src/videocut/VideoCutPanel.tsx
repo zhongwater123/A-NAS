@@ -1,15 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
-import { AskPage } from "./AskPage";
-import styles from "./montage.module.css";
-import { NewProject } from "./NewProject";
-import { Home } from "./ProjectList";
-import { ProjectView } from "./ProjectView";
-import { SongPage } from "./SongPage";
-import { ShownProvider, useWindowShown } from "./shown";
+import { ShownProvider, useWindowShown } from "./app/shown";
+import { AskPage } from "./screens/AskPage";
+import { NewProject } from "./screens/NewProject";
+import { Home } from "./screens/ProjectList";
+import { ProjectView } from "./screens/ProjectView";
+import { SongPage } from "./screens/SongPage";
+import styles from "./screens/videocut.module.css";
 
-// MontagePanel is the 剪辑中心 window (docs/specs/montage-center.md), laid
+// VideoCutPanel is the 剪辑中心 window (docs/specs/montage-center.md), laid
 // out as the 第八版 prototype's pages: the home page, where a project is
 // selected and its film started; a new project from an upload or from the
 // photo library; a project opened with its videos; and the song and the
@@ -22,7 +22,7 @@ export type MontageView =
   | { kind: "project"; id: string }
   | { kind: "page"; id: string; page: "song" | "ask"; from: "home" | "project" };
 
-export function MontagePanel({ userId }: { userId: string }) {
+export function VideoCutPanel({ userId }: { userId: string }) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000, refetchOnWindowFocus: false } } }),
   );

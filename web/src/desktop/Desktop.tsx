@@ -22,7 +22,6 @@ import { Companion } from "../companion/Companion";
 import { useDeviceTrouble } from "../companion/health";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
-import { montageEnabled } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -31,6 +30,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
+import { montageEnabled } from "../videocut/lib/status";
 import { useWebSearch } from "../websearch/status";
 import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
@@ -64,7 +64,9 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint, 剪辑中心's notices and 待办's reminder load after the
 // desktop, so their code and styles stay out of the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
-const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
+const VideoCutNotices = lazyCode(() =>
+  import("../videocut/ui/VideoCutNotices").then((module) => module.VideoCutNotices),
+);
 const TodoNotices = lazyCode(() => import("../todos/TodoNotices").then((module) => module.TodoNotices));
 
 // An app's access read again that says the same keeps the old value.
@@ -396,7 +398,7 @@ export function Desktop({
           {montage && (
             <ShellPart name="montage hints">
               <Suspense fallback={null}>
-                <MontageNotices onOpen={() => open("montage")} />
+                <VideoCutNotices onOpen={() => open("montage")} />
               </Suspense>
             </ShellPart>
           )}

@@ -17,13 +17,13 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { APIError } from "../api/client";
-import { errorText } from "../api/errorMessages";
-import { getPhoto, originalURL, thumbnailURL } from "../photos/api";
-import { clock, durationLabel } from "../photos/model";
-import { VideoPlayer } from "../photos/VideoPlayer";
-import { useDialogs } from "../ui/feedback";
-import { Spinner } from "../ui/workspace";
+import { APIError } from "../../api/client";
+import { errorText } from "../../api/errorMessages";
+import { getPhoto, originalURL, thumbnailURL } from "../../photos/api";
+import { clock, durationLabel } from "../../photos/model";
+import { VideoPlayer } from "../../photos/VideoPlayer";
+import { useDialogs } from "../../ui/feedback";
+import { Spinner } from "../../ui/workspace";
 import {
   cancelJob,
   deleteProject,
@@ -38,11 +38,9 @@ import {
   retryAnalysis,
   retryJob,
   updateProject,
-} from "./api";
-import { Failed } from "./Failed";
-import styles from "./montage.module.css";
-import { jobKey, projectKey, projectQuery, projectsKey, songQuery } from "./queries";
-import { useShown } from "./shown";
+} from "../api/client";
+import { jobKey, projectKey, projectQuery, projectsKey, songQuery } from "../app/queries";
+import { useShown } from "../app/shown";
 import {
   actionLabels,
   actionsOf,
@@ -54,7 +52,9 @@ import {
   stageOf,
   stateText,
   stepLabel,
-} from "./words";
+} from "../lib/words";
+import { Failed } from "../ui/Failed";
+import styles from "./videocut.module.css";
 
 // A job in progress is asked about every two seconds, while the window can be seen.
 const POLL_MS = 2_000;
