@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -270,7 +269,7 @@ func (s *Store) songRowFor(ctx context.Context, tx *db.Tx, owner, sha, title, co
 		err = tx.RetitleSong(ctx, id, title, now)
 		return id, err
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if !errors.Is(err, db.ErrNotFound) {
 		return "", err
 	}
 	id = newID("song")
@@ -342,7 +341,7 @@ func (s *Store) ReclaimSongs(ctx context.Context) error {
 
 func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID string) (db.ProjectSong, error) {
 	state, song, err := q.ProjectSong(ctx, owner, projectID)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && state != projectReady {
+	if errors.Is(err, db.ErrNotFound) || err == nil && state != projectReady {
 		return db.ProjectSong{}, domain.ErrNotFound
 	}
 	if err != nil {
@@ -356,7 +355,7 @@ func (s *Store) projectSong(ctx context.Context, q queryer, owner, projectID str
 
 func (s *Store) song(ctx context.Context, q queryer, id string) (songRow, error) {
 	kept, err := q.Song(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return songRow{}, domain.ErrNoSong
 	}
 	if err != nil {

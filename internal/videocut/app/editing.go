@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -165,7 +164,7 @@ func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (do
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		var err error
 		projectID, err = tx.VersionProject(ctx, owner, versionID)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return domain.ErrNotFound
 		}
 		if err != nil {
@@ -327,7 +326,7 @@ func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string,
 		return nil, domain.ErrJobsUnavailable
 	}
 	grantID, object, err := s.db.ReadyProjectAsset(ctx, owner, projectID, assetID)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && !grantID.Valid {
+	if errors.Is(err, db.ErrNotFound) || err == nil && !grantID.Valid {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {

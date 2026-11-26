@@ -22,12 +22,12 @@ type ProjectRow struct {
 	Chosen                 string
 }
 
-// Project is owner's project id, in whatever state; sql.ErrNoRows when
+// Project is owner's project id, in whatever state; ErrNotFound when
 // owner has none.
 func (c *conn) Project(ctx context.Context, owner, id string) (ProjectRow, error) {
 	var row ProjectRow
 	var created string
-	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
+	err := queryRow(ctx, c.q, `SELECT id, owner_user_id, name, state, grant_id, ask, chronological, created_at, IFNULL(chosen_version_id, '')
 		FROM projects WHERE id = ? AND owner_user_id = ?`, id, owner).
 		Scan(&row.ID, &row.Owner, &row.Name, &row.State, &row.GrantID, &row.Ask, &row.Chronological, &created, &row.Chosen)
 	if err != nil {
@@ -63,10 +63,10 @@ func (tx *Tx) ReadyProject(ctx context.Context, owner, projectID, grantID, name 
 }
 
 // RegisteringGrant is the grant projectID recorded while registering (not
-// valid when none); sql.ErrNoRows when it is not registering.
+// valid when none); ErrNotFound when it is not registering.
 func (tx *Tx) RegisteringGrant(ctx context.Context, projectID string) (sql.NullString, error) {
 	var recorded sql.NullString
-	err := tx.tx.QueryRowContext(ctx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", projectID).Scan(&recorded)
+	err := queryRow(ctx, tx.tx, "SELECT grant_id FROM projects WHERE id = ? AND state = 'registering'", projectID).Scan(&recorded)
 	return recorded, err
 }
 
@@ -158,21 +158,21 @@ func (tx *Tx) ChooseVersion(ctx context.Context, projectID, versionID string, at
 }
 
 // ReadyProjectAsset is the grant of owner's ready projectID (not valid
-// when none) and the content it holds of assetID; sql.ErrNoRows when it
+// when none) and the content it holds of assetID; ErrNotFound when it
 // does not hold it.
 func (d *DB) ReadyProjectAsset(ctx context.Context, owner, projectID, assetID string) (sql.NullString, string, error) {
 	var grantID sql.NullString
 	var object string
-	err := d.db.QueryRowContext(ctx, `SELECT p.grant_id, a.object_id FROM projects p JOIN project_assets a ON a.project_id = p.id
+	err := queryRow(ctx, d.db, `SELECT p.grant_id, a.object_id FROM projects p JOIN project_assets a ON a.project_id = p.id
 		WHERE p.id = ? AND p.owner_user_id = ? AND p.state = 'ready' AND a.asset_id = ?`, projectID, owner, assetID).Scan(&grantID, &object)
 	return grantID, object, err
 }
 
 // DraggedSelection is the excerpt one of owner's projects keeps for songID
-// from start, encoded; sql.ErrNoRows when none does.
+// from start, encoded; ErrNotFound when none does.
 func (d *DB) DraggedSelection(ctx context.Context, owner, songID string, start float64) (string, error) {
 	var text string
-	err := d.db.QueryRowContext(ctx, `SELECT song_selection FROM projects
+	err := queryRow(ctx, d.db, `SELECT song_selection FROM projects
 		WHERE owner_user_id = ? AND song_id = ? AND song_start = ? AND song_selection IS NOT NULL LIMIT 1`, owner, songID, start).Scan(&text)
 	return text, err
 }
@@ -182,7 +182,7 @@ func (d *DB) DraggedSelection(ctx context.Context, owner, songID string, start f
 func (d *DB) ProjectGrantAndJobAssets(ctx context.Context, projectID, jobID string) (sql.NullString, int, error) {
 	var count int
 	var grantID sql.NullString
-	err := d.db.QueryRowContext(ctx, `SELECT grant_id, (SELECT COUNT(*) FROM job_assets WHERE job_id = ?)
+	err := queryRow(ctx, d.db, `SELECT grant_id, (SELECT COUNT(*) FROM job_assets WHERE job_id = ?)
 		FROM projects WHERE id = ?`, jobID, projectID).Scan(&grantID, &count)
 	return grantID, count, err
 }
@@ -228,7 +228,7 @@ func (d *DB) MemberProjects(ctx context.Context, owner string) (map[string]Known
 func (d *DB) VersionNumber(ctx context.Context, versionKey, projectID string) (int, string, error) {
 	var number int
 	var name string
-	err := d.db.QueryRowContext(ctx, `SELECT IFNULL((SELECT number FROM versions WHERE version_key = ?),
+	err := queryRow(ctx, d.db, `SELECT IFNULL((SELECT number FROM versions WHERE version_key = ?),
 		(SELECT IFNULL(MAX(number), 0) + 1 FROM versions WHERE project_id = p.id)), p.name
 		FROM projects p WHERE p.id = ?`, versionKey, projectID).Scan(&number, &name)
 	return number, name, err
@@ -250,12 +250,12 @@ type ProjectSong struct {
 	Selection sql.NullString
 }
 
-// ProjectSong is owner's projectID's state and song; sql.ErrNoRows when
+// ProjectSong is owner's projectID's state and song; ErrNotFound when
 // owner has no such project.
 func (c *conn) ProjectSong(ctx context.Context, owner, projectID string) (string, ProjectSong, error) {
 	var song ProjectSong
 	var state string
-	err := c.q.QueryRowContext(ctx, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
+	err := queryRow(ctx, c.q, `SELECT state, song_id, song_track, song_start, song_selection FROM projects WHERE id = ? AND owner_user_id = ?`,
 		projectID, owner).Scan(&state, &song.SongID, &song.TrackID, &song.Start, &song.Selection)
 	return state, song, err
 }

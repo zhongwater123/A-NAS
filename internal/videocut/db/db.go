@@ -60,6 +60,28 @@ type queryer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// ErrNotFound is what a read of one record answers when there is no such
+// record: app tells "not found" by it and not by the database's own error.
+var ErrNotFound = errors.New("videocut: no such record")
+
+// queryRow runs query for one row on q. Its Scan answers ErrNotFound when
+// the query gives none.
+func queryRow(ctx context.Context, q queryer, query string, args ...any) row {
+	return row{q.QueryRowContext(ctx, query, args...)}
+}
+
+// row is one row queryRow read.
+type row struct{ row *sql.Row }
+
+// Scan copies the row's columns into dest, as sql.Row.Scan does.
+func (r row) Scan(dest ...any) error {
+	err := r.row.Scan(dest...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // column is the values of the one column query selects, in the order it
 // gives them.
 func column[T any](ctx context.Context, q queryer, query string, args ...any) ([]T, error) {

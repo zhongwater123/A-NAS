@@ -50,7 +50,7 @@ func (tx *Tx) ResetPlanRejections(ctx context.Context, jobID string) error {
 // says how many there are now.
 func (tx *Tx) CountPlanRejection(ctx context.Context, jobID string) (int, error) {
 	var rejections int
-	err := tx.tx.QueryRowContext(ctx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
+	err := queryRow(ctx, tx.tx, "UPDATE jobs SET plan_rejections = plan_rejections + 1 WHERE id = ? RETURNING plan_rejections",
 		jobID).Scan(&rejections)
 	return rejections, err
 }
@@ -58,7 +58,7 @@ func (tx *Tx) CountPlanRejection(ctx context.Context, jobID string) (int, error)
 // JobPlanning is how jobID's planning stands: its owner, its epoch, and
 // whether it wants a round.
 func (d *DB) JobPlanning(ctx context.Context, jobID string) (owner string, epoch int, wanted bool, err error) {
-	err = d.db.QueryRowContext(ctx, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
+	err = queryRow(ctx, d.db, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
 		Scan(&owner, &epoch, &wanted)
 	return owner, epoch, wanted, err
 }
@@ -73,7 +73,7 @@ func (c *conn) UnwantRound(ctx context.Context, jobID string) error {
 // did, and says since when as kept ("" when that is unknown).
 func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string, error) {
 	var since string
-	err := d.db.QueryRowContext(ctx, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
+	err := queryRow(ctx, d.db, `UPDATE jobs SET plan_wanted_at = CASE WHEN plan_wanted = 1 AND plan_wanted_at IS NOT NULL THEN plan_wanted_at ELSE ? END, plan_wanted = 1
 		WHERE id = ? RETURNING IFNULL(plan_wanted_at, '')`, sqlitedb.FormatTime(at), jobID).Scan(&since)
 	return since, err
 }
@@ -89,10 +89,10 @@ func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSin
 
 // ClaimableJob is owner's earliest job a round may be claimed for
 // (wantsRound, with waitVNAS) and none is in progress for: its id, epoch,
-// first step's input key and settings, encoded; sql.ErrNoRows when there
+// first step's input key and settings, encoded; ErrNotFound when there
 // is none.
 func (tx *Tx) ClaimableJob(ctx context.Context, owner, waitVNAS string) (jobID string, epoch int, pickKey, settings string, err error) {
-	err = tx.tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
+	err = queryRow(ctx, tx.tx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
 			WHERE j.owner_user_id = ? AND `+wantsRound(waitVNAS)+`
 			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
 			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&jobID, &epoch, &pickKey, &settings)
@@ -109,7 +109,7 @@ func (tx *Tx) NewPlanEpoch(ctx context.Context, jobID string) error {
 // CancelRequested reports whether jobID is being cancelled.
 func (c *conn) CancelRequested(ctx context.Context, jobID string) (bool, error) {
 	var cancelled bool
-	err := c.q.QueryRowContext(ctx, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
+	err := queryRow(ctx, c.q, "SELECT cancel_requested FROM jobs WHERE id = ?", jobID).Scan(&cancelled)
 	return cancelled, err
 }
 
@@ -150,7 +150,7 @@ func (tx *Tx) RequeueRunningJobs(ctx context.Context, at time.Time) error {
 // JobActive reports whether jobID is a job that has not ended.
 func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 	var active bool
-	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+activeStateQuery+")", jobID).Scan(&active)
+	err := queryRow(ctx, d.db, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+activeStateQuery+")", jobID).Scan(&active)
 	return active, err
 }
 
@@ -158,7 +158,7 @@ func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 // (not valid when none is).
 func (d *DB) NextNotBefore(ctx context.Context) (sql.NullString, error) {
 	var next sql.NullString
-	err := d.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next)
+	err := queryRow(ctx, d.db, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next)
 	return next, err
 }
 
@@ -169,10 +169,10 @@ type DueJob struct {
 	Plans                                int
 }
 
-// DueJob is the job due first at now; sql.ErrNoRows when none is.
+// DueJob is the job due first at now; ErrNotFound when none is.
 func (tx *Tx) DueJob(ctx context.Context, now time.Time) (DueJob, error) {
 	var job DueJob
-	err := tx.tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
+	err := queryRow(ctx, tx.tx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
 			WHERE `+dueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
 		Scan(&job.ID, &job.Owner, &job.ProjectID, &job.Kind, &job.Settings, &job.Plans)
@@ -195,18 +195,18 @@ func (tx *Tx) RunJob(ctx context.Context, jobID string, leaseUntil, at time.Time
 
 // RenewLease renews jobID's lease until leaseUntil, at at, and says
 // whether the job is being cancelled and whether it is saving;
-// sql.ErrNoRows when the job is gone.
+// ErrNotFound when the job is gone.
 func (d *DB) RenewLease(ctx context.Context, jobID string, leaseUntil, at time.Time) (requested, saving bool, err error) {
-	err = d.db.QueryRowContext(ctx, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
+	err = queryRow(ctx, d.db, `UPDATE jobs SET lease_until = ?, heartbeat_at = ? WHERE id = ? RETURNING cancel_requested, save_started`,
 		sqlitedb.FormatTime(leaseUntil), sqlitedb.FormatTime(at), jobID).Scan(&requested, &saving)
 	return requested, saving, err
 }
 
 // RunningJob is how jobID stands while it runs: its attempts, whether it
-// is being cancelled and whether it is saving; sql.ErrNoRows when it is
+// is being cancelled and whether it is saving; ErrNotFound when it is
 // not running.
 func (tx *Tx) RunningJob(ctx context.Context, jobID string) (attempts int, cancelled, saving bool, err error) {
-	err = tx.tx.QueryRowContext(ctx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", jobID).Scan(&attempts, &cancelled, &saving)
+	err = queryRow(ctx, tx.tx, "SELECT attempts, cancel_requested, save_started FROM jobs WHERE id = ? AND state = 'running'", jobID).Scan(&attempts, &cancelled, &saving)
 	return attempts, cancelled, saving, err
 }
 
@@ -236,7 +236,7 @@ func (tx *Tx) SettleJob(ctx context.Context, jobID string, s JobSettlement) erro
 // heard back.
 func (d *DB) SaveStarted(ctx context.Context, jobID string) (bool, error) {
 	var saving bool
-	err := d.db.QueryRowContext(ctx, "SELECT save_started FROM jobs WHERE id = ?", jobID).Scan(&saving)
+	err := queryRow(ctx, d.db, "SELECT save_started FROM jobs WHERE id = ?", jobID).Scan(&saving)
 	return saving, err
 }
 
@@ -244,17 +244,17 @@ func (d *DB) SaveStarted(ctx context.Context, jobID string) (bool, error) {
 // project's grant, what its render step kept, and the input key of its
 // save step.
 func (d *DB) SaveReplay(ctx context.Context, jobID, renderStep, saveStep string) (grantID, rendered, key string, err error) {
-	err = d.db.QueryRowContext(ctx, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
+	err = queryRow(ctx, d.db, `SELECT p.grant_id, r.result_json, w.input_key FROM jobs j
 			JOIN projects p ON p.id=j.project_id JOIN steps r ON r.job_id=j.id AND r.name=?
 			JOIN steps w ON w.job_id=j.id AND w.name=? WHERE j.id=?`, renderStep, saveStep, jobID).Scan(&grantID, &rendered, &key)
 	return grantID, rendered, key, err
 }
 
 // JobGrant is the grant of jobID's project (not valid when none);
-// sql.ErrNoRows when there is no such job.
+// ErrNotFound when there is no such job.
 func (d *DB) JobGrant(ctx context.Context, jobID string) (sql.NullString, error) {
 	var grantID sql.NullString
-	err := d.db.QueryRowContext(ctx, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
+	err := queryRow(ctx, d.db, `SELECT p.grant_id FROM jobs j JOIN projects p ON p.id = j.project_id WHERE j.id = ?`, jobID).
 		Scan(&grantID)
 	return grantID, err
 }
@@ -299,16 +299,16 @@ func (tx *Tx) FinishJob(ctx context.Context, jobID string, at time.Time) error {
 
 // JobDraft is the draft an edit job saves and the draft's revision.
 func (d *DB) JobDraft(ctx context.Context, jobID string) (draftID string, revision int, err error) {
-	err = d.db.QueryRowContext(ctx, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
+	err = queryRow(ctx, d.db, "SELECT draft_id, draft_revision FROM jobs WHERE id = ?", jobID).Scan(&draftID, &revision)
 	return draftID, revision, err
 }
 
 // --- the member's requests and reads ---
 
 // KeyedJob is owner's job started with requestKey: its id, its kind and
-// what column holds for it; sql.ErrNoRows when there is none.
+// what column holds for it; ErrNotFound when there is none.
 func (c *conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (id, kind string, subject sql.NullString, err error) {
-	err = c.q.QueryRowContext(ctx, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
+	err = queryRow(ctx, c.q, "SELECT id, kind, "+column+" FROM jobs WHERE owner_user_id = ? AND request_key = ?", owner, requestKey).
 		Scan(&id, &kind, &subject)
 	return id, kind, subject, err
 }
@@ -316,7 +316,7 @@ func (c *conn) KeyedJob(ctx context.Context, owner, requestKey, column string) (
 // ProjectJobActive reports whether a job of projectID has not ended.
 func (tx *Tx) ProjectJobActive(ctx context.Context, projectID string) (bool, error) {
 	var active bool
-	err := tx.tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active)
+	err := queryRow(ctx, tx.tx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active)
 	return active, err
 }
 
@@ -344,7 +344,7 @@ func (tx *Tx) AddJob(ctx context.Context, job NewJob, at time.Time) error {
 // JobSettings are jobID's settings as it was started with them, encoded.
 func (c *conn) JobSettings(ctx context.Context, jobID string) (string, error) {
 	var encoded string
-	err := c.q.QueryRowContext(ctx, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
+	err := queryRow(ctx, c.q, "SELECT settings_json FROM jobs WHERE id = ?", jobID).Scan(&encoded)
 	return encoded, err
 }
 
@@ -357,10 +357,10 @@ type JobRow struct {
 	Plans                      int
 }
 
-// Job is owner's job jobID; sql.ErrNoRows when owner has none.
+// Job is owner's job jobID; ErrNotFound when owner has none.
 func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
 	var job JobRow
-	err := d.db.QueryRowContext(ctx, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
+	err := queryRow(ctx, d.db, `SELECT id, project_id, kind, state, step, wait_reason, error, created_at, finished_at, plans
 		FROM jobs WHERE id = ? AND owner_user_id = ?`, jobID, owner).
 		Scan(&job.ID, &job.ProjectID, &job.Kind, &job.State, &job.Step, &job.WaitReason, &job.Error, &job.Created, &job.Finished, &job.Plans)
 	return job, err
@@ -370,17 +370,17 @@ func (d *DB) Job(ctx context.Context, owner, jobID string) (JobRow, error) {
 // none).
 func (d *DB) JobMissing(ctx context.Context, jobID string) (sql.NullString, error) {
 	var raw sql.NullString
-	err := d.db.QueryRowContext(ctx, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw)
+	err := queryRow(ctx, d.db, "SELECT missing_json FROM jobs WHERE id = ?", jobID).Scan(&raw)
 	return raw, err
 }
 
 // RequestCancel asks, at at, that owner's jobID stop: a job not running
-// is cancelled at once. It says the job's state after; sql.ErrNoRows when
+// is cancelled at once. It says the job's state after; ErrNotFound when
 // owner has no such job in progress that is not saving.
 func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Time) (string, error) {
 	now := sqlitedb.FormatTime(at)
 	var state string
-	err := d.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
+	err := queryRow(ctx, d.db, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
 		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
 		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
 		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+activeStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
@@ -405,10 +405,10 @@ func (tx *Tx) Requeue(ctx context.Context, owner, jobID string, at time.Time, st
 	return changed > 0, nil
 }
 
-// LatestJob is projectID's job made last; sql.ErrNoRows when it has none.
+// LatestJob is projectID's job made last; ErrNotFound when it has none.
 func (c *conn) LatestJob(ctx context.Context, projectID string) (string, error) {
 	var latest string
-	err := c.q.QueryRowContext(ctx, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
+	err := queryRow(ctx, c.q, "SELECT id FROM jobs WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", projectID).Scan(&latest)
 	return latest, err
 }
 

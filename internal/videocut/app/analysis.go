@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,7 +100,7 @@ func (s *Store) requeueStale(ctx context.Context) error {
 
 func (s *Store) nextSong(ctx context.Context) (string, bool, error) {
 	sha, err := s.db.NextSong(ctx, s.now())
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return "", false, nil
 	}
 	return sha, err == nil, err
@@ -187,7 +186,7 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 // knownStructure is what an earlier attempt found for the content.
 func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, []float32, error) {
 	text, blob, err := s.db.KnownStructure(ctx, sha)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return songAnalysis{}, nil, nil
 	}
 	if err != nil {

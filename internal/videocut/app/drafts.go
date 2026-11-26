@@ -128,7 +128,7 @@ type editSource struct {
 func (s *Store) versionSource(ctx context.Context, owner, versionID string) (*editSource, error) {
 	src := &editSource{versionID: versionID}
 	row, err := s.db.VersionSource(ctx, owner, versionID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
@@ -510,7 +510,7 @@ func (s *Store) VersionDraft(ctx context.Context, owner, versionID string) (doma
 		return domain.Draft{}, err
 	}
 	id, err := s.db.DraftID(ctx, owner, versionID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		encoded, err := src.newDraftState().Encode()
 		if err != nil {
 			return domain.Draft{}, err
@@ -574,7 +574,7 @@ type keptDraft struct {
 func (s *Store) openDraft(ctx context.Context, owner, draftID string, src *editSource) (*editSource, keptDraft, error) {
 	var draft keptDraft
 	row, err := s.db.Draft(ctx, owner, draftID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, keptDraft{}, domain.ErrNotFound
 	}
 	if err != nil {
@@ -624,7 +624,7 @@ type undone struct {
 func (s *Store) undoTarget(ctx context.Context, draftID string, revision int) (target undone, ok bool, err error) {
 	kept, err := s.db.UndoTarget(ctx, draftID, revision)
 	target = undone{revision: kept.Revision, shots: kept.Shots, back: kept.Back}
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return undone{}, false, nil
 	}
 	return target, err == nil, err

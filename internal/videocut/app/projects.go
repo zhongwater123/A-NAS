@@ -110,7 +110,7 @@ func assetGone(err error) bool {
 
 func (s *Store) project(ctx context.Context, q queryer, owner, id string) (db.ProjectRow, error) {
 	row, err := q.Project(ctx, owner, id)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return db.ProjectRow{}, domain.ErrNotFound
 	}
 	return row, err
@@ -143,7 +143,7 @@ func (s *Store) batch(ctx context.Context, owner, requestKey, kind, projectID, n
 			}
 			return nil
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		if !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
 		at := s.now()
@@ -249,7 +249,7 @@ func (s *Store) settle(ctx context.Context, b db.BatchRow, grantID string) (stri
 		var revoke string
 		err := s.db.Update(ctx, func(tx *db.Tx) error {
 			recorded, err := tx.RegisteringGrant(ctx, b.ProjectID)
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, db.ErrNotFound) {
 				return nil
 			}
 			if err != nil {
@@ -460,7 +460,7 @@ func (s *Store) Project(ctx context.Context, owner, projectID string) (domain.Pr
 			return domain.ProjectDetail{}, err
 		}
 		detail.Job = &job
-	case !errors.Is(err, sql.ErrNoRows):
+	case !errors.Is(err, db.ErrNotFound):
 		return domain.ProjectDetail{}, err
 	}
 	// The films were added to the grant when saved: one lookup says where

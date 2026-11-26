@@ -3,7 +3,6 @@ package app
 import (
 	"cmp"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -195,7 +194,7 @@ func (s *Store) claim(ctx context.Context) (claimed, bool, error) {
 	err := s.db.Update(ctx, func(tx *db.Tx) error {
 		now := s.now()
 		due, err := tx.DueJob(ctx, now)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return nil
 		}
 		if err != nil {
@@ -255,7 +254,7 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 			now := s.now()
 			requested, saving, err := s.db.RenewLease(ctx, job.id, now.Add(jobLease), now)
 			switch {
-			case errors.Is(err, sql.ErrNoRows):
+			case errors.Is(err, db.ErrNotFound):
 				cancel(errCancelled) // the project went
 				return
 			case err != nil:
@@ -293,7 +292,7 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 	dbErr := s.db.Update(ctx, func(tx *db.Tx) error {
 		attempts, cancelled, saving, readErr := tx.RunningJob(ctx, job.id)
 		if readErr != nil {
-			if errors.Is(readErr, sql.ErrNoRows) {
+			if errors.Is(readErr, db.ErrNotFound) {
 				return nil
 			}
 			return readErr

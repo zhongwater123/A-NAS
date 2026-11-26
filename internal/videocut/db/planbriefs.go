@@ -6,10 +6,10 @@ import "context"
 // for a step's input key (docs/architecture/videocut-planning-session.md).
 
 // PlanBrief is the brief kept for jobID's step and input key, encoded;
-// sql.ErrNoRows when none is.
+// ErrNotFound when none is.
 func (d *DB) PlanBrief(ctx context.Context, jobID, step, key string) (string, error) {
 	var kept string
-	err := d.db.QueryRowContext(ctx, "SELECT brief_json FROM plan_briefs WHERE job_id = ? AND step = ? AND input_key = ?", jobID, step, key).Scan(&kept)
+	err := queryRow(ctx, d.db, "SELECT brief_json FROM plan_briefs WHERE job_id = ? AND step = ? AND input_key = ?", jobID, step, key).Scan(&kept)
 	return kept, err
 }
 

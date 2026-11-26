@@ -154,7 +154,7 @@ func (s *Store) Generate(ctx context.Context, owner, projectID, requestKey strin
 func keyedJob(ctx context.Context, q queryer, owner, requestKey, kind, column, subject string) (string, error) {
 	id, priorKind, prior, err := q.KeyedJob(ctx, owner, requestKey, column)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case errors.Is(err, db.ErrNotFound):
 		return "", nil
 	case err != nil:
 		return "", err
@@ -225,7 +225,7 @@ func (s *Store) settingsOf(ctx context.Context, q queryer, row db.ProjectRow) (d
 // Job returns owner's job.
 func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error) {
 	row, err := s.db.Job(ctx, owner, jobID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return domain.Job{}, domain.ErrNotFound
 	}
 	if err != nil {
@@ -269,7 +269,7 @@ func (s *Store) Job(ctx context.Context, owner, jobID string) (domain.Job, error
 		// The same revision saved again: its film was saved once, by the
 		// job before, under the same version key.
 		key, err := s.db.DoneSaveKey(ctx, jobID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return domain.Job{}, err
 		}
 		if key != "" {
@@ -314,7 +314,7 @@ func (s *Store) Cancel(ctx context.Context, owner, jobID string) (domain.Job, er
 	}
 	defer unlock()
 	state, err := s.db.RequestCancel(ctx, owner, jobID, s.now())
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		if _, err := s.Job(ctx, owner, jobID); err != nil {
 			return domain.Job{}, err
 		}

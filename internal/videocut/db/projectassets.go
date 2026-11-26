@@ -66,7 +66,7 @@ func (d *DB) ProjectAssets(ctx context.Context, projectID string) ([]ProjectAsse
 // ProjectAssetCount is how many videos projectID holds.
 func (tx *Tx) ProjectAssetCount(ctx context.Context, projectID string) (int, error) {
 	var count int
-	err := tx.tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM project_assets WHERE project_id = ?", projectID).Scan(&count)
+	err := queryRow(ctx, tx.tx, "SELECT COUNT(*) FROM project_assets WHERE project_id = ?", projectID).Scan(&count)
 	return count, err
 }
 

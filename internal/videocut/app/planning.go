@@ -153,7 +153,7 @@ func (s *Store) RegisterPlanGrant(ctx context.Context, owner, username string) e
 // planGrant is owner's last registration, if any.
 func (s *Store) planGrant(ctx context.Context, q queryer, owner string) (string, time.Time, bool, error) {
 	username, at, err := q.PlanGrant(ctx, owner)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return "", time.Time{}, false, nil
 	}
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *Store) planned(ctx context.Context, input domain.PlanInput, step string
 // planAnswer is the answer taken for a step's input key.
 func (s *Store) planAnswer(ctx context.Context, jobID, step, key string) (json.RawMessage, bool, error) {
 	answer, err := s.db.PlanAnswer(ctx, jobID, step, key)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
 	return json.RawMessage(answer), err == nil, err
@@ -449,14 +449,14 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 		var epoch int
 		var pickKey, settings string
 		claim.JobID, epoch, pickKey, settings, err = tx.ClaimableJob(ctx, owner, WaitVNAS)
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, db.ErrNotFound) {
 			return domain.ErrNoPlanWanted
 		}
 		if err != nil {
 			return err
 		}
 		excerpt, err := tx.DoneExcerpt(ctx, claim.JobID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
 			return err
 		}
 		claim.TargetSeconds = domain.ExcerptSeconds(excerpt.String)
@@ -484,7 +484,7 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (domain.Claim, err
 
 func (s *Store) round(ctx context.Context, tx *db.Tx, owner, roundID string) (db.RoundRow, error) {
 	r, err := tx.Round(ctx, owner, roundID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return db.RoundRow{}, domain.ErrNotFound
 	}
 	return r, err

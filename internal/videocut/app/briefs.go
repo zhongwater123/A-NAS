@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,7 +81,7 @@ func (s *Store) standing(ctx context.Context, q queryer, owner, jobID, token str
 		return roundCall{}, nil, domain.ErrNotFound
 	}
 	r, err := q.RoundStanding(ctx, owner, jobID, token)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return roundCall{}, nil, domain.ErrNotFound
 	}
 	if err != nil {
@@ -159,7 +158,7 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 	if err == nil && json.Unmarshal([]byte(kept), &brief) == nil {
 		return brief, nil
 	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
 		return videocutcompute.PlanBrief{}, err
 	}
 	in, err := input()

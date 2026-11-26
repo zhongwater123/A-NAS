@@ -11,20 +11,20 @@ import (
 // The reads and writes of steps: each job's steps, the input key each ran
 // with and what it kept (docs/architecture/videocut-center.md, 每一步可重跑).
 
-// DoneCatalog is what jobID's catalog step kept when done; sql.ErrNoRows
+// DoneCatalog is what jobID's catalog step kept when done; ErrNotFound
 // when it is not done.
 func (d *DB) DoneCatalog(ctx context.Context, jobID string) (string, error) {
 	var catalogJSON string
-	err := d.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",
+	err := queryRow(ctx, d.db, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'catalog' AND state = 'done'",
 		jobID).Scan(&catalogJSON)
 	return catalogJSON, err
 }
 
 // DoneExcerpt is what jobID's song step kept when done, the excerpt;
-// sql.ErrNoRows when it is not done.
+// ErrNotFound when it is not done.
 func (d *DB) DoneExcerpt(ctx context.Context, jobID string) (string, error) {
 	var songJSON string
-	err := d.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
+	err := queryRow(ctx, d.db, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
 		jobID).Scan(&songJSON)
 	return songJSON, err
 }
@@ -33,7 +33,7 @@ func (d *DB) DoneExcerpt(ctx context.Context, jobID string) (string, error) {
 // step kept nothing.
 func (tx *Tx) DoneExcerpt(ctx context.Context, jobID string) (sql.NullString, error) {
 	var excerpt sql.NullString
-	err := tx.tx.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
+	err := queryRow(ctx, tx.tx, "SELECT result_json FROM steps WHERE job_id = ? AND name = 'song' AND state = 'done'",
 		jobID).Scan(&excerpt)
 	return excerpt, err
 }
@@ -89,18 +89,18 @@ func (d *DB) JobSteps(ctx context.Context, jobID string) ([]StepRow, error) {
 }
 
 // DoneSaveKey is the input key jobID's save step was done with;
-// sql.ErrNoRows when it is not done.
+// ErrNotFound when it is not done.
 func (d *DB) DoneSaveKey(ctx context.Context, jobID string) (string, error) {
 	var key string
-	err := d.db.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = 'save' AND state = 'done'", jobID).Scan(&key)
+	err := queryRow(ctx, d.db, "SELECT input_key FROM steps WHERE job_id = ? AND name = 'save' AND state = 'done'", jobID).Scan(&key)
 	return key, err
 }
 
 // StepResult is what jobID's step name kept, not valid when nothing;
-// sql.ErrNoRows when the job has no such step.
+// ErrNotFound when the job has no such step.
 func (d *DB) StepResult(ctx context.Context, jobID, name string) (sql.NullString, error) {
 	var saved sql.NullString
-	err := d.db.QueryRowContext(ctx, "SELECT result_json FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&saved)
+	err := queryRow(ctx, d.db, "SELECT result_json FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&saved)
 	return saved, err
 }
 
@@ -113,19 +113,19 @@ func (d *DB) RekeyStep(ctx context.Context, jobID, name, key string) error {
 }
 
 // StoredStep is jobID's step name as kept: its input key, its state and
-// what it kept (not valid when nothing); sql.ErrNoRows when the job has no
+// what it kept (not valid when nothing); ErrNotFound when the job has no
 // such step.
 func (d *DB) StoredStep(ctx context.Context, jobID, name string) (key, state string, result sql.NullString, err error) {
-	err = d.db.QueryRowContext(ctx, "SELECT input_key, state, result_json FROM steps WHERE job_id = ? AND name = ?", jobID, name).
+	err = queryRow(ctx, d.db, "SELECT input_key, state, result_json FROM steps WHERE job_id = ? AND name = ?", jobID, name).
 		Scan(&key, &state, &result)
 	return key, state, result, err
 }
 
-// StepInputKey is the input key jobID's step name ran with; sql.ErrNoRows
+// StepInputKey is the input key jobID's step name ran with; ErrNotFound
 // when the job has no such step.
 func (tx *Tx) StepInputKey(ctx context.Context, jobID, name string) (string, error) {
 	var stored string
-	err := tx.tx.QueryRowContext(ctx, "SELECT input_key FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&stored)
+	err := queryRow(ctx, tx.tx, "SELECT input_key FROM steps WHERE job_id = ? AND name = ?", jobID, name).Scan(&stored)
 	return stored, err
 }
 

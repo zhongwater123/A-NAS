@@ -35,10 +35,10 @@ type RoundStanding struct {
 }
 
 // RoundStanding is owner's round for jobID with token, as it stands now;
-// sql.ErrNoRows when there is none.
+// ErrNotFound when there is none.
 func (c *conn) RoundStanding(ctx context.Context, owner, jobID, token string) (RoundStanding, error) {
 	var r RoundStanding
-	err := c.q.QueryRowContext(ctx, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
+	err := queryRow(ctx, c.q, `SELECT r.id, r.state, r.epoch, r.input_key, j.plan_epoch, j.cancel_requested, j.plans,
 		(SELECT input_key FROM steps WHERE job_id = j.id AND name = 'pick')
 		FROM rounds r JOIN jobs j ON j.id = r.job_id WHERE r.job_id = ? AND r.owner_user_id = ? AND r.attempt_token = ?`,
 		jobID, owner, token).Scan(&r.ID, &r.State, &r.Epoch, &r.InputKey, &r.JobEpoch, &r.Cancelled, &r.Plans, &r.PickKey)
@@ -107,10 +107,10 @@ type RoundRow struct {
 	ID, JobID, Owner, Token, State string
 }
 
-// Round is owner's round roundID; sql.ErrNoRows when owner has none.
+// Round is owner's round roundID; ErrNotFound when owner has none.
 func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error) {
 	var r RoundRow
-	err := tx.tx.QueryRowContext(ctx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
+	err := queryRow(ctx, tx.tx, "SELECT id, job_id, owner_user_id, attempt_token, state FROM rounds WHERE id = ? AND owner_user_id = ?",
 		roundID, owner).Scan(&r.ID, &r.JobID, &r.Owner, &r.Token, &r.State)
 	return r, err
 }

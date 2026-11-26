@@ -32,20 +32,20 @@ func (d *DB) RequeueStaleSongs(ctx context.Context, at time.Time, version string
 }
 
 // NextSong is the content of the earliest song waiting for its analysis
-// and due at now; sql.ErrNoRows when there is none.
+// and due at now; ErrNotFound when there is none.
 func (d *DB) NextSong(ctx context.Context, now time.Time) (string, error) {
 	var sha string
-	err := d.db.QueryRowContext(ctx, `SELECT sha256 FROM songs WHERE state = 'analyzing' AND (next_try IS NULL OR next_try <= ?)
+	err := queryRow(ctx, d.db, `SELECT sha256 FROM songs WHERE state = 'analyzing' AND (next_try IS NULL OR next_try <= ?)
 		ORDER BY created_at, id LIMIT 1`, sqlitedb.FormatTime(now)).Scan(&sha)
 	return sha, err
 }
 
 // KnownStructure is the latest analysis kept for the content sha, and its
-// loudness, as kept; sql.ErrNoRows when there is none.
+// loudness, as kept; ErrNotFound when there is none.
 func (d *DB) KnownStructure(ctx context.Context, sha string) (sql.NullString, []byte, error) {
 	var text sql.NullString
 	var blob []byte
-	err := d.db.QueryRowContext(ctx, `SELECT analysis_json, loudness FROM songs WHERE sha256 = ? AND analysis_json IS NOT NULL
+	err := queryRow(ctx, d.db, `SELECT analysis_json, loudness FROM songs WHERE sha256 = ? AND analysis_json IS NOT NULL
 		ORDER BY updated_at DESC LIMIT 1`, sha).Scan(&text, &blob)
 	return text, blob, err
 }
@@ -88,15 +88,15 @@ func (tx *Tx) FailSongAttempt(ctx context.Context, sha, why string, next time.Ti
 // waiting counts, 0 when none waits.
 func (tx *Tx) SongAttempts(ctx context.Context, sha string) (int, error) {
 	var attempts int
-	err := tx.tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(attempts), 0) FROM songs WHERE sha256 = ? AND state = 'analyzing'", sha).Scan(&attempts)
+	err := queryRow(ctx, tx.tx, "SELECT COALESCE(MAX(attempts), 0) FROM songs WHERE sha256 = ? AND state = 'analyzing'", sha).Scan(&attempts)
 	return attempts, err
 }
 
-// SongID is owner's row for the content sha; sql.ErrNoRows when there is
+// SongID is owner's row for the content sha; ErrNotFound when there is
 // none.
 func (tx *Tx) SongID(ctx context.Context, owner, sha string) (string, error) {
 	var id string
-	err := tx.tx.QueryRowContext(ctx, "SELECT id FROM songs WHERE owner_user_id = ? AND sha256 = ?", owner, sha).Scan(&id)
+	err := queryRow(ctx, tx.tx, "SELECT id FROM songs WHERE owner_user_id = ? AND sha256 = ?", owner, sha).Scan(&id)
 	return id, err
 }
 
@@ -146,7 +146,7 @@ func (tx *Tx) DeleteOwnerSongs(ctx context.Context, owner string) error {
 // SongContentKept reports whether any song row names the content sha.
 func (d *DB) SongContentKept(ctx context.Context, sha string) (bool, error) {
 	var used bool
-	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM songs WHERE sha256 = ?)", sha).Scan(&used)
+	err := queryRow(ctx, d.db, "SELECT EXISTS (SELECT 1 FROM songs WHERE sha256 = ?)", sha).Scan(&used)
 	return used, err
 }
 
@@ -159,10 +159,10 @@ type SongRow struct {
 	Loudness                                                            []byte
 }
 
-// Song is song row id; sql.ErrNoRows when there is none.
+// Song is song row id; ErrNotFound when there is none.
 func (c *conn) Song(ctx context.Context, id string) (SongRow, error) {
 	var row SongRow
-	err := c.q.QueryRowContext(ctx, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
+	err := queryRow(ctx, c.q, `SELECT id, owner_user_id, sha256, title, content_type, state, reason, waiting, analysis_version,
 		duration, analysis_json, loudness FROM songs WHERE id = ?`, id).
 		Scan(&row.ID, &row.Owner, &row.Sha, &row.Title, &row.ContentType, &row.State, &row.Reason, &row.Waiting, &row.Version,
 			&row.Duration, &row.Analysis, &row.Loudness)

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -12,6 +11,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
@@ -120,7 +120,7 @@ func (s *Store) ExcerptKey(ctx context.Context, owner, songID string, start floa
 // from start (SongStart), nil when none does.
 func (s *Store) draggedSelection(ctx context.Context, owner, songID string, start float64) (*keptSelection, error) {
 	text, err := s.db.DraggedSelection(ctx, owner, songID, start)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {

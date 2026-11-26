@@ -25,10 +25,10 @@ func (tx *Tx) KeepPlanAnswer(ctx context.Context, jobID, step, key, roundID, ans
 }
 
 // PlanAnswer is the answer kept for jobID's step and input key;
-// sql.ErrNoRows when there is none.
+// ErrNotFound when there is none.
 func (d *DB) PlanAnswer(ctx context.Context, jobID, step, key string) (string, error) {
 	var answer string
-	err := d.db.QueryRowContext(ctx, "SELECT answer_json FROM plan_answers WHERE job_id = ? AND step = ? AND input_key = ?",
+	err := queryRow(ctx, d.db, "SELECT answer_json FROM plan_answers WHERE job_id = ? AND step = ? AND input_key = ?",
 		jobID, step, key).Scan(&answer)
 	return answer, err
 }

@@ -11,11 +11,11 @@ import (
 // The reads and writes of drafts and their revisions (#596; docs/
 // architecture/videocut-center.md, 出片后的二次编辑).
 
-// DraftID is the id of owner's draft of versionID; sql.ErrNoRows when
+// DraftID is the id of owner's draft of versionID; ErrNotFound when
 // there is none.
 func (d *DB) DraftID(ctx context.Context, owner, versionID string) (string, error) {
 	var id string
-	err := d.db.QueryRowContext(ctx, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
+	err := queryRow(ctx, d.db, "SELECT id FROM drafts WHERE base_version_id = ? AND owner_user_id = ?", versionID, owner).Scan(&id)
 	return id, err
 }
 
@@ -46,10 +46,10 @@ type DraftRow struct {
 	Updated   string
 }
 
-// Draft reads owner's draft; sql.ErrNoRows when owner has none by that id.
+// Draft reads owner's draft; ErrNotFound when owner has none by that id.
 func (d *DB) Draft(ctx context.Context, owner, draftID string) (DraftRow, error) {
 	var row DraftRow
-	err := d.db.QueryRowContext(ctx, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
+	err := queryRow(ctx, d.db, "SELECT base_version_id, revision, shots_json, updated_at FROM drafts WHERE id = ? AND owner_user_id = ?",
 		draftID, owner).Scan(&row.VersionID, &row.Revision, &row.Shots, &row.Updated)
 	return row, err
 }
@@ -57,15 +57,15 @@ func (d *DB) Draft(ctx context.Context, owner, draftID string) (DraftRow, error)
 // DraftRevision is the revision draftID stands at.
 func (tx *Tx) DraftRevision(ctx context.Context, draftID string) (int, error) {
 	var revision int
-	err := tx.tx.QueryRowContext(ctx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision)
+	err := queryRow(ctx, tx.tx, "SELECT revision FROM drafts WHERE id = ?", draftID).Scan(&revision)
 	return revision, err
 }
 
 // DraftJob is the job that made the version owner's draft edits;
-// sql.ErrNoRows when owner has no such draft.
+// ErrNotFound when owner has no such draft.
 func (d *DB) DraftJob(ctx context.Context, owner, draftID string) (string, error) {
 	var jobID string
-	err := d.db.QueryRowContext(ctx, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
+	err := queryRow(ctx, d.db, `SELECT v.job_id FROM drafts d JOIN versions v ON v.id = d.base_version_id
 		WHERE d.id = ? AND d.owner_user_id = ?`, draftID, owner).Scan(&jobID)
 	return jobID, err
 }
@@ -99,10 +99,10 @@ type Revision struct {
 }
 
 // UndoTarget is the revision undoing revision of draftID goes back to;
-// sql.ErrNoRows when it has none or it is no longer kept.
+// ErrNotFound when it has none or it is no longer kept.
 func (d *DB) UndoTarget(ctx context.Context, draftID string, revision int) (Revision, error) {
 	var target Revision
-	err := d.db.QueryRowContext(ctx, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
+	err := queryRow(ctx, d.db, `SELECT t.revision, t.shots_json, t.back FROM draft_revisions r
 		JOIN draft_revisions t ON t.draft_id = r.draft_id AND t.revision = r.back
 		WHERE r.draft_id = ? AND r.revision = ?`, draftID, revision).Scan(&target.Revision, &target.Shots, &target.Back)
 	return target, err

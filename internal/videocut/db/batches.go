@@ -18,11 +18,11 @@ type BatchRow struct {
 	Assets                     []string
 }
 
-// Batch is owner's batch for requestKey; sql.ErrNoRows when there is none.
+// Batch is owner's batch for requestKey; ErrNotFound when there is none.
 func (tx *Tx) Batch(ctx context.Context, owner, requestKey string) (BatchRow, error) {
 	var row BatchRow
 	var assets string
-	err := tx.tx.QueryRowContext(ctx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
+	err := queryRow(ctx, tx.tx, "SELECT id, project_id, kind, asset_ids, state FROM batches WHERE owner_user_id = ? AND request_key = ?",
 		owner, requestKey).Scan(&row.ID, &row.ProjectID, &row.Kind, &assets, &row.State)
 	if err != nil {
 		return row, err
@@ -58,7 +58,7 @@ func (d *DB) DeleteRegisteringBatch(ctx context.Context, id string) error {
 // AnyBatchRegistering reports whether any batch is still registering.
 func (d *DB) AnyBatchRegistering(ctx context.Context) (bool, error) {
 	var found bool
-	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM batches WHERE state = 'registering')").Scan(&found)
+	err := queryRow(ctx, d.db, "SELECT EXISTS (SELECT 1 FROM batches WHERE state = 'registering')").Scan(&found)
 	return found, err
 }
 

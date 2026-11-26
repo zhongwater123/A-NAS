@@ -91,10 +91,10 @@ type VersionSourceRow struct {
 }
 
 // VersionSource reads owner's version versionID of a ready project;
-// sql.ErrNoRows when owner has none.
+// ErrNotFound when owner has none.
 func (d *DB) VersionSource(ctx context.Context, owner, versionID string) (VersionSourceRow, error) {
 	var row VersionSourceRow
-	err := d.db.QueryRowContext(ctx, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
+	err := queryRow(ctx, d.db, `SELECT v.project_id, v.number, v.job_id, v.plan, v.timeline_json, p.grant_id
 		FROM versions v JOIN projects p ON p.id = v.project_id WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`,
 		versionID, owner).Scan(&row.ProjectID, &row.Number, &row.JobID, &row.Plan, &row.Timeline, &row.GrantID)
 	return row, err
@@ -114,26 +114,26 @@ func (d *DB) RedoneSince(ctx context.Context, jobID string, plan int, names []st
 		args = append(args, name)
 	}
 	var redone bool
-	err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
+	err := queryRow(ctx, d.db, `SELECT EXISTS (SELECT 1 FROM versions v JOIN steps s ON s.job_id = v.job_id
 		WHERE v.job_id = ? AND v.plan = ? AND s.finished_at > v.created_at AND s.name IN (`+sqlitedb.Placeholders(len(names))+`))`,
 		args...).Scan(&redone)
 	return redone, err
 }
 
 // VersionProject is the project of owner's version versionID, when the
-// project is ready; sql.ErrNoRows otherwise.
+// project is ready; ErrNotFound otherwise.
 func (tx *Tx) VersionProject(ctx context.Context, owner, versionID string) (string, error) {
 	var projectID string
-	err := tx.tx.QueryRowContext(ctx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
+	err := queryRow(ctx, tx.tx, `SELECT v.project_id FROM versions v JOIN projects p ON p.id = v.project_id
 			WHERE v.id = ? AND p.owner_user_id = ? AND p.state = 'ready'`, versionID, owner).Scan(&projectID)
 	return projectID, err
 }
 
 // SavedEditJob is the job of the first version an edit of draftID saved
-// at revision; sql.ErrNoRows when none did.
+// at revision; ErrNotFound when none did.
 func (d *DB) SavedEditJob(ctx context.Context, draftID string, revision int) (string, error) {
 	var saved string
-	err := d.db.QueryRowContext(ctx, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
+	err := queryRow(ctx, d.db, `SELECT v.job_id FROM versions v JOIN jobs j ON j.id = v.job_id
 		WHERE j.draft_id = ? AND v.kind = 'edit' AND v.draft_revision = ? ORDER BY v.number LIMIT 1`, draftID, revision).Scan(&saved)
 	return saved, err
 }
@@ -160,6 +160,6 @@ func (d *DB) SavedPlans(ctx context.Context, jobID string) (map[int]bool, error)
 // it has versions.
 func (d *DB) NextUnsavedPlan(ctx context.Context, jobID string) (int, error) {
 	var plan int
-	err := d.db.QueryRowContext(ctx, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", jobID).Scan(&plan)
+	err := queryRow(ctx, d.db, "SELECT COUNT(*) + 1 FROM versions WHERE job_id = ?", jobID).Scan(&plan)
 	return plan, err
 }

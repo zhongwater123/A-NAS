@@ -20,9 +20,9 @@ func (d *DB) RegisterPlanGrant(ctx context.Context, owner, username string, at t
 }
 
 // PlanGrant is owner's last registration: the username and when, as kept;
-// sql.ErrNoRows when owner has none.
+// ErrNotFound when owner has none.
 func (c *conn) PlanGrant(ctx context.Context, owner string) (username, at string, err error) {
-	err = c.q.QueryRowContext(ctx, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
+	err = queryRow(ctx, c.q, "SELECT username, registered_at FROM plan_grants WHERE owner_user_id = ?", owner).Scan(&username, &at)
 	return username, at, err
 }
 

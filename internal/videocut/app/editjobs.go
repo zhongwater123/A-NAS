@@ -52,7 +52,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	case err == nil:
 		job, err := s.Job(ctx, owner, saved)
 		return job, false, err
-	case !errors.Is(err, sql.ErrNoRows):
+	case !errors.Is(err, db.ErrNotFound):
 		return domain.Job{}, false, err
 	}
 	// A version whose videos were analysed again with another model since the
@@ -206,7 +206,7 @@ func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) 
 // its job had it: the project may have another song since.
 func (s *Store) OpenDraftSongAudio(ctx context.Context, owner, draftID string) (domain.SongAudio, error) {
 	jobID, err := s.db.DraftJob(ctx, owner, draftID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return domain.SongAudio{}, domain.ErrNotFound
 	}
 	if err != nil {

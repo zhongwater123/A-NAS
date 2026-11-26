@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -342,7 +341,7 @@ func (s *Store) loadRun(ctx context.Context, run *jobRun) error {
 // grant is gone has all its videos missing.
 func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, error) {
 	grantID, err := s.db.JobGrant(ctx, jobID)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return "", nil, domain.ErrNotFound
 	}
 	if err != nil {
@@ -360,7 +359,7 @@ func (s *Store) jobGrant(ctx context.Context, jobID string) (string, []string, e
 
 func (s *Store) storedStep(ctx context.Context, jobID, name, key string) ([]byte, bool, error) {
 	stored, state, result, err := s.db.StoredStep(ctx, jobID, name)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -378,7 +377,7 @@ func (s *Store) startStep(ctx context.Context, jobID string, st step, key string
 	return s.db.Update(ctx, func(tx *db.Tx) error {
 		stored, err := tx.StepInputKey(ctx, jobID, name)
 		switch {
-		case errors.Is(err, sql.ErrNoRows):
+		case errors.Is(err, db.ErrNotFound):
 			err = tx.AddRunningStep(ctx, jobID, name, key, at)
 		case err != nil:
 		case stored == key:
@@ -851,7 +850,7 @@ func (s *Store) planInput(run *jobRun, step string) domain.PlanInput {
 // accepted is a 方案's plan for a step taken for this catalog, not voided.
 func (s *Store) accepted(ctx context.Context, jobID string, plan int, step, catalogKey string) (json.RawMessage, bool, error) {
 	answer, err := s.db.AcceptedPlan(ctx, jobID, plan, step, catalogKey)
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
 	return json.RawMessage(answer), err == nil, err

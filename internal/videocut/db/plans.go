@@ -12,10 +12,10 @@ import (
 // (docs/architecture/videocut-center.md).
 
 // AcceptedPlan is the latest plan, not voided, taken for jobID's plan-th
-// 方案 and step with catalogKey, encoded; sql.ErrNoRows when there is none.
+// 方案 and step with catalogKey, encoded; ErrNotFound when there is none.
 func (d *DB) AcceptedPlan(ctx context.Context, jobID string, plan int, step, catalogKey string) (string, error) {
 	var answer string
-	err := d.db.QueryRowContext(ctx, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
+	err := queryRow(ctx, d.db, `SELECT answer_json FROM plans WHERE job_id = ? AND plan = ? AND step = ? AND catalog_key = ? AND voided_at IS NULL
 		ORDER BY accepted_at DESC LIMIT 1`, jobID, plan, step, catalogKey).Scan(&answer)
 	return answer, err
 }
