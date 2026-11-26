@@ -154,7 +154,7 @@ func (s *Store) SetViewing(actor Actor, report TabReport) {
 		return
 	}
 	if !ok || state.PageID != report.PageID {
-		state = tabState{Viewing: Viewing{PageID: report.PageID, Since: now}}
+		state = tabState{PageID: report.PageID, Since: now}
 	}
 	state.seq, state.closed = report.Seq, false
 	state.Version = report.Version
