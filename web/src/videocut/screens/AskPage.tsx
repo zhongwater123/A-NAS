@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 
 import { errorText } from "../../api/errorMessages";
 import { Spinner } from "../../ui/workspace";
-import { type MontageProjectDetail, type ProjectChange, updateProject } from "../api/client";
+import { type ProjectChange, updateProject, type VideoCutProjectDetail } from "../api/client";
 import { projectKey, projectQuery } from "../app/queries";
 import { limitsOf } from "../lib/words";
 import { Failed } from "../ui/Failed";
@@ -30,7 +30,7 @@ export function AskPage({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
-function Ask({ detail, onBack }: { detail: MontageProjectDetail; onBack: () => void }) {
+function Ask({ detail, onBack }: { detail: VideoCutProjectDetail; onBack: () => void }) {
   const client = useQueryClient();
   const [ask, setAsk] = useState(detail.ask);
   const save = useMutation({

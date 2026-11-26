@@ -96,8 +96,8 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) == 2 && os.Args[1] == montageServiceCommand {
-		if err := runMontageService(logger); err != nil {
+	if len(os.Args) == 2 && os.Args[1] == videoCutServiceCommand {
+		if err := runVideoCutService(logger); err != nil {
 			logger.Error("A-NAS montage service stopped", "error", err)
 			os.Exit(1)
 		}
@@ -267,7 +267,7 @@ func run(logger *slog.Logger) error {
 	var photoAI photos.Embedder
 	var photoGate *photoservice.Gate
 	photoAPI := photoservice.Proxy(config.PhotosSocket, logger)
-	var montageGrants app.Grants
+	var videoCutGrants app.Grants
 	if !live {
 		// Development reaches an AI Worker only when ANAS_AI_SOCKET names
 		// one, so development without the AI component keeps local AI off.
@@ -286,7 +286,7 @@ func run(logger *slog.Logger) error {
 		defer closeAtExit(logger, "session directory", sessions)
 		photoGate = photoservice.NewGate(photoservice.QuietPeriod, logger)
 		photoAPI = photoservice.Local(photoService, sessions, photoGate, logger)
-		montageGrants = photoservice.LocalGrants(photoService, sessions, photoGate, logger)
+		videoCutGrants = photoservice.LocalGrants(photoService, sessions, photoGate, logger)
 	}
 	mediaStore, err := media.OpenSQLite(filepath.Join(stateDirectory, "media.db"))
 	if err != nil {
@@ -367,15 +367,15 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeFamily()
-	var montageMedia app.Media
+	var videoCutMedia app.Media
 	if mediaWorker != nil {
-		montageMedia = mediaWorker
+		videoCutMedia = mediaWorker
 	}
-	montageAPI, removeMontage, closeMontage, err := configuredMontage(background, config, montageGrants, montageMedia, logger)
+	videoCutAPI, removeVideoCut, closeVideoCut, err := configuredVideoCut(background, config, videoCutGrants, videoCutMedia, logger)
 	if err != nil {
 		return err
 	}
-	defer closeMontage()
+	defer closeVideoCut()
 	workspaceAPI, removeWorkspace, closeWorkspace, err := configuredWorkspace(config, filepath.Join(stateDirectory, "control.db"), logger)
 	if err != nil {
 		return err
@@ -411,7 +411,7 @@ func run(logger *slog.Logger) error {
 		Photos:       photoAPI,
 		Shares:       shareAPI,
 		Family:       familyAPI,
-		Montage:      montageAPI,
+		VideoCut:     videoCutAPI,
 		Workspace:    workspaceAPI,
 		PlanGrants:   planGrants(broker),
 		Modules:      moduleRegistry,
@@ -444,7 +444,7 @@ func run(logger *slog.Logger) error {
 	tasks.Go(func() error { runDirectoryReconciliation(background, accountService, fileService, logger); return nil })
 	// Deleted accounts are removed once their 30 days are over
 	// (docs/specs/account-enable-and-delete.md).
-	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeMontage,
+	deletionSteps := accountDeletionSteps(config, accountService, photoService, fileService, removeShares, removeFamily, removeVideoCut,
 		removeWorkspace, musicService, mediaService, transferService)
 	tasks.Go(func() error { accountService.RunDeletions(background, deletionSteps, logger); return nil })
 	// The Host Agent takes scheduled snapshots, so they need no session. A

@@ -30,14 +30,14 @@ import {
   dropAssets,
   generate,
   getJob,
-  type MontageJob,
-  type MontageProjectDetail,
-  type MontageSong,
-  type MontageVersion,
   replan,
   retryAnalysis,
   retryJob,
   updateProject,
+  type VideoCutJob,
+  type VideoCutProjectDetail,
+  type VideoCutSong,
+  type VideoCutVersion,
 } from "../api/client";
 import { jobKey, projectKey, projectQuery, projectsKey, songQuery } from "../app/queries";
 import { useShown } from "../app/shown";
@@ -178,7 +178,7 @@ export function ProjectView({
   );
 }
 
-function Videos({ detail, seconds, onAdd }: { detail: MontageProjectDetail; seconds: number; onAdd: () => void }) {
+function Videos({ detail, seconds, onAdd }: { detail: VideoCutProjectDetail; seconds: number; onAdd: () => void }) {
   const trashed = detail.assets.filter((asset) => asset.status === "trashed").length;
   const missing = detail.assets.filter((asset) => asset.status === "missing").length;
   return (
@@ -214,7 +214,7 @@ function Videos({ detail, seconds, onAdd }: { detail: MontageProjectDetail; seco
   );
 }
 
-const tones: Record<MontageJob["state"], string> = {
+const tones: Record<VideoCutJob["state"], string> = {
   queued: "running",
   running: "running",
   waiting: "waiting",
@@ -225,7 +225,7 @@ const tones: Record<MontageJob["state"], string> = {
 };
 
 // Why a film cannot start yet, for the song's part.
-function songHint(song: MontageSong | null | undefined): string | undefined {
+function songHint(song: VideoCutSong | null | undefined): string | undefined {
   if (song === undefined) return undefined;
   if (song === null) return "先选一首歌";
   if (song.state === "analyzing") return "配乐分析完成后可以开始";
@@ -243,9 +243,9 @@ export function Go({
   song,
   onPage,
 }: {
-  detail: MontageProjectDetail;
+  detail: VideoCutProjectDetail;
   // undefined while the song loads, null when the project has none.
-  song: MontageSong | null | undefined;
+  song: VideoCutSong | null | undefined;
   onPage: (page: "song" | "ask") => void;
 }) {
   const client = useQueryClient();
@@ -273,7 +273,7 @@ export function Go({
       client.setQueryData(jobKey(created.id), created);
       // The project carries its latest job: pages that read it again, as
       // this bar does when it is mounted anew, find the job just started.
-      client.setQueryData<MontageProjectDetail>(projectKey(detail.id), (old) => old && { ...old, job: created });
+      client.setQueryData<VideoCutProjectDetail>(projectKey(detail.id), (old) => old && { ...old, job: created });
     },
   });
   const act = useMutation({
@@ -431,7 +431,7 @@ export function Go({
 // Films is the prototype's 挑一个 page: the latest job's 方案 side by side,
 // each played where the photo library plays its videos, and the films of
 // earlier jobs below, each of which plays here too.
-export function Films({ versions }: { versions: MontageVersion[] }) {
+export function Films({ versions }: { versions: VideoCutVersion[] }) {
   const [playing, setPlaying] = useState<number>();
   if (!versions.length) return null;
   const latest = versions[0].jobId;
@@ -497,7 +497,7 @@ export function Films({ versions }: { versions: MontageVersion[] }) {
 }
 
 // FilmCard is one 方案's film, as the prototype's version card.
-function FilmCard({ version }: { version: MontageVersion }) {
+function FilmCard({ version }: { version: VideoCutVersion }) {
   const name = planName(version.plan);
   return (
     <article className={styles.mtFilmCard} aria-label={name}>

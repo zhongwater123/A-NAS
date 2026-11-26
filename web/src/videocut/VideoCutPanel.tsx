@@ -16,7 +16,7 @@ import styles from "./screens/videocut.module.css";
 // request, each on its own page, returning where they were opened from.
 // Data comes through TanStack Query (#271), which loads with this window
 // only. What polls stops while the window is minimized (shown.ts).
-export type MontageView =
+export type VideoCutView =
   | { kind: "home" }
   | { kind: "new"; into?: string }
   | { kind: "project"; id: string }
@@ -26,7 +26,7 @@ export function VideoCutPanel({ userId }: { userId: string }) {
   const [client] = useState(
     () => new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000, refetchOnWindowFocus: false } } }),
   );
-  const [view, setView] = useState<MontageView>({ kind: "home" });
+  const [view, setView] = useState<VideoCutView>({ kind: "home" });
   // The project selected on the home page: the newest until one is
   // clicked (undefined), none once the member unselects it (null).
   const [selected, setSelected] = useState<string | null>();

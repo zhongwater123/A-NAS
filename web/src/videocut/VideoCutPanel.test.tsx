@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WINDOW_ID } from "../desktop/windowSnapshot";
 import { asset } from "../test/handlers/photos";
 import { apiError, http, server } from "../test/server";
-import type { MontageJob, MontageProjectDetail, MontageSong, ProjectChange } from "./api/client";
+import type { ProjectChange, VideoCutJob, VideoCutProjectDetail, VideoCutSong } from "./api/client";
 import { excerptAudio } from "./screens/SongPage";
 import { VideoCutPanel } from "./VideoCutPanel";
 
@@ -25,7 +25,7 @@ const steps = [
   "save-2",
 ];
 
-function job(state: MontageJob["state"], extra: Partial<MontageJob> = {}): MontageJob {
+function job(state: VideoCutJob["state"], extra: Partial<VideoCutJob> = {}): VideoCutJob {
   return {
     id: "job:1",
     projectId: "project:1",
@@ -33,14 +33,14 @@ function job(state: MontageJob["state"], extra: Partial<MontageJob> = {}): Monta
     state,
     createdAt: "2026-11-18T10:00:00Z",
     steps: steps.map((name, i) => ({
-      name: name as MontageJob["steps"][number]["name"],
+      name: name as VideoCutJob["steps"][number]["name"],
       state: state === "done" || i < 2 ? "done" : "pending",
     })),
     ...extra,
   };
 }
 
-function project(extra: Partial<MontageProjectDetail> = {}): MontageProjectDetail {
+function project(extra: Partial<VideoCutProjectDetail> = {}): VideoCutProjectDetail {
   return {
     id: "project:1",
     name: "2026-08-02 至 08-04",
@@ -57,7 +57,7 @@ function project(extra: Partial<MontageProjectDetail> = {}): MontageProjectDetai
   };
 }
 
-const symphony: MontageSong = {
+const symphony: VideoCutSong = {
   id: "song:1",
   trackId: "file:symphony",
   title: "Symphony",
@@ -96,10 +96,10 @@ interface Seen {
 const fresh = (): Seen => ({ generated: 0, polled: 0, changes: [], did: [] });
 
 function serve(
-  detail: () => MontageProjectDetail,
-  jobs: () => MontageJob,
+  detail: () => VideoCutProjectDetail,
+  jobs: () => VideoCutJob,
   seen: Seen,
-  song: MontageSong | null = symphony,
+  song: VideoCutSong | null = symphony,
 ) {
   server.use(
     // The device keeps no film of its own for the home page.
@@ -187,7 +187,7 @@ afterEach(() => {
 });
 
 // A job's two 方案, as the job and the project list them.
-const saved: MontageProjectDetail["versions"] = [
+const saved: VideoCutProjectDetail["versions"] = [
   {
     id: "version:1",
     number: 1,
@@ -213,8 +213,8 @@ const saved: MontageProjectDetail["versions"] = [
 describe("剪辑中心", () => {
   it("starts a film, follows its job and shows the two 方案 it saved side by side", async () => {
     const seen = fresh();
-    let state: MontageJob["state"] = "queued";
-    let versions: MontageProjectDetail["versions"] = [];
+    let state: VideoCutJob["state"] = "queued";
+    let versions: VideoCutProjectDetail["versions"] = [];
     serve(
       () => project({ versions }),
       () => job(state, state === "done" ? { version: saved[0], versions: saved } : {}),
@@ -246,7 +246,7 @@ describe("剪辑中心", () => {
   });
 
   it("shows the first 方案 as soon as it is saved, while the second is still planned", async () => {
-    let versions: MontageProjectDetail["versions"] = [];
+    let versions: VideoCutProjectDetail["versions"] = [];
     const going = () => job("waiting", { waitReason: "vnas", step: "pick-2", versions: versions.slice(0, 1) });
     serve(() => project({ versions, job: going() }), going, fresh());
     const page = await openProject();

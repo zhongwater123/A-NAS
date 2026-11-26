@@ -57,7 +57,7 @@ const VALIDATED = [
   "getContainerSnapshot",
   "listFamilyHints",
   "listTodoReminders",
-  "listMontageNotices",
+  "listVideoCutNotices",
 ];
 
 const [bundlePath, outPath] = process.argv.slice(2);

@@ -2,12 +2,12 @@ import { call, client } from "../../api/client";
 import { requestKey } from "../../api/requestKey";
 import type { components, operations } from "../../api.generated";
 
-export type MontageProject = components["schemas"]["MontageProjectSummary"];
-export type MontageProjectDetail = components["schemas"]["MontageProject"];
-export type MontageJob = components["schemas"]["MontageJob"];
-export type MontageSong = components["schemas"]["MontageSong"];
-export type MontageNotice = components["schemas"]["MontageNotice"];
-export type MontageVersion = components["schemas"]["MontageVersion"];
+export type VideoCutProject = components["schemas"]["VideoCutProjectSummary"];
+export type VideoCutProjectDetail = components["schemas"]["VideoCutProject"];
+export type VideoCutJob = components["schemas"]["VideoCutJob"];
+export type VideoCutSong = components["schemas"]["VideoCutSong"];
+export type VideoCutNotice = components["schemas"]["VideoCutNotice"];
+export type VideoCutVersion = components["schemas"]["VideoCutVersion"];
 
 const project = (projectId: string) => ({ params: { path: { projectId } } });
 const job = (jobId: string) => ({ params: { path: { jobId } } });
@@ -15,9 +15,9 @@ const job = (jobId: string) => ({ params: { path: { jobId } } });
 // desktop's own keys work on plain LAN HTTP too, where crypto.randomUUID is
 // not there.
 const key = requestKey;
-export type ProjectChange = operations["updateMontageProject"]["requestBody"]["content"]["application/json"];
+export type ProjectChange = operations["updateVideoCutProject"]["requestBody"]["content"]["application/json"];
 
-export async function listProjects(signal?: AbortSignal): Promise<MontageProject[]> {
+export async function listProjects(signal?: AbortSignal): Promise<VideoCutProject[]> {
   return (await call(client.GET("/api/v1/montage/projects", { signal }))).items;
 }
 
@@ -66,7 +66,7 @@ export const chooseSong = (projectId: string, trackId: string) =>
 export const songAudioURL = (projectId: string, start?: number) =>
   `/api/v1/montage/projects/${encodeURIComponent(projectId)}/song/audio${start === undefined ? "" : `?start=${start.toFixed(2)}`}`;
 
-export async function listNotices(signal?: AbortSignal): Promise<MontageNotice[]> {
+export async function listNotices(signal?: AbortSignal): Promise<VideoCutNotice[]> {
   return (await call(client.GET("/api/v1/montage/notices", { signal }))).items;
 }
 

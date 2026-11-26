@@ -1097,7 +1097,7 @@ func writeFile(t *testing.T, path, content string) {
 // its socket for members' scheduled tasks stops before it: a round of a
 // member's tasks that connects there would start the montage service again
 // while its database is restored.
-func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
+func TestRestoringTheDatabasesTakesTheVideoCutServiceAlong(t *testing.T) {
 	host := newFakeHost()
 	service, _ := newService(t, host)
 	if err := service.restoreDatabases(context.Background(), "20261118T000000Z-1"); err != nil {
@@ -1122,7 +1122,7 @@ func TestRestoringTheDatabasesTakesTheMontageServiceAlong(t *testing.T) {
 // the restore go on without stopping it; any other failure to stop the
 // service, or the socket that would start it again, stops the restore before
 // a journal is deleted (ADR 0038).
-func TestRestoringTheDatabasesNeedsTheMontageServiceStopped(t *testing.T) {
+func TestRestoringTheDatabasesNeedsTheVideoCutServiceStopped(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		fails    map[string]error

@@ -86,19 +86,19 @@ type Config struct {
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
-	// MontageEnabled mounts /api/v1/montage, 剪辑中心 (ADR 0038). It stays off
+	// VideoCutEnabled mounts /api/v1/montage, 剪辑中心 (ADR 0038). It stays off
 	// until the first film can be made end to end; while off the desktop
 	// shows no entry, and hiding the entry alone would not stop the API.
-	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
-	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	VideoCutEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
+	VideoCutSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
 	// WorkspaceSocket is the shared workspace's service (ADR 0040).
 	WorkspaceSocket string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
-	// MontageMusicSocket and MontageComputeSocket reach the montage
+	// VideoCutMusicSocket and VideoCutComputeSocket reach the montage
 	// center's Workers in development, where the montage center runs in
 	// this process; without them its songs wait.
-	MontagePlanAnswers   string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
-	MontageMusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET"`
-	MontageComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET"`
+	VideoCutPlanAnswers   string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
+	VideoCutMusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET"`
+	VideoCutComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET"`
 	// ModuleSocketDir holds the API sockets of installed removable modules
 	// (ADR 0037).
 	ModuleSocketDir string `env:"ANAS_MODULE_SOCKET_DIR" envDefault:"/run/a-nas-modules"`
@@ -258,7 +258,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.VideoCutSocket},
 		{"ANAS_WORKSPACE_SOCKET", &c.WorkspaceSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
 		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
@@ -479,9 +479,9 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	return c, nil
 }
 
-// montageServiceConfig configures the montage service (ADR 0038), which runs
+// videoCutServiceConfig configures the montage service (ADR 0038), which runs
 // from this binary as its own process and identity.
-type montageServiceConfig struct {
+type videoCutServiceConfig struct {
 	Root          string `env:"ANAS_MONTAGE_ROOT" envDefault:"/srv/a-nas/data/montage"`
 	Socket        string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
 	SessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
@@ -509,12 +509,12 @@ type montageServiceConfig struct {
 	PlanMarkers     string `env:"ANAS_MONTAGE_PLAN_MARKERS" envDefault:"/run/a-nas-montage/plans"`
 }
 
-// loadMontageServiceConfig resolves and validates the montage service's
+// loadVideoCutServiceConfig resolves and validates the montage service's
 // configuration, reporting every problem at once.
-func loadMontageServiceConfig(environment map[string]string) (montageServiceConfig, error) {
-	c, err := envconfig.Parse[montageServiceConfig](environment)
+func loadVideoCutServiceConfig(environment map[string]string) (videoCutServiceConfig, error) {
+	c, err := envconfig.Parse[videoCutServiceConfig](environment)
 	if err != nil {
-		return montageServiceConfig{}, err
+		return videoCutServiceConfig{}, err
 	}
 	problems := absolutePaths(map[string]*string{
 		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
@@ -523,7 +523,7 @@ func loadMontageServiceConfig(environment map[string]string) (montageServiceConf
 		"ANAS_MONTAGE_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_MONTAGE_PLAN_MARKERS": &c.PlanMarkers,
 	})
 	if len(problems) > 0 {
-		return montageServiceConfig{}, errors.Join(problems...)
+		return videoCutServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

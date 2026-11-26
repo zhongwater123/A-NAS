@@ -30,7 +30,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
-import { montageEnabled } from "../videocut/lib/status";
+import { videoCutEnabled } from "../videocut/lib/status";
 import { useWebSearch } from "../websearch/status";
 import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
@@ -194,7 +194,7 @@ export function Desktop({
   // when the page comes back into view: a member an administrator just chose
   // finds them, one taken out loses them, and a failed read is tried again.
   const scoring = useReadOnShow(scoringAccess, noScoring, session.user.id, sameScoring);
-  const montage = useReadOnShow(montageEnabled, false, session.user.id);
+  const montage = useReadOnShow(videoCutEnabled, false, session.user.id);
   const workspace = useReadOnShow(workspaceAccess, null, session.user.id, sameWorkspace);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.

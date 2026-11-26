@@ -190,7 +190,7 @@ func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
 // (scripts/lib/assistant-units.sh), which no check of the text shows to be the YAML it should
 // be: here the package's own function makes it from the files the package ships, and it is read
 // as the Host Agent reads it.
-func TestThePlanPolicyIsThePolicyWithTheMontageServerAndReviews(t *testing.T) {
+func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	// The root integration tests run this package's test binary in a container
 	// that has no checkout (scripts/root-integration-test.sh); make test runs it
 	// from the checkout, where the files must be there.

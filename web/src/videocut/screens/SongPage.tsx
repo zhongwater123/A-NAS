@@ -6,19 +6,19 @@ import { errorText } from "../../api/errorMessages";
 import { coverURL, listTracks, streamURL } from "../../music/api";
 import { clock } from "../../photos/model";
 import { Spinner } from "../../ui/workspace";
-import { chooseSong, type MontageSong, songAudioURL, updateProject } from "../api/client";
+import { chooseSong, songAudioURL, updateProject, type VideoCutSong } from "../api/client";
 import { songKey, songQuery } from "../app/queries";
 import { useShown } from "../app/shown";
 import { Failed } from "../ui/Failed";
 import styles from "./videocut.module.css";
 
-// Why a song is not ready yet, or cannot be used (MontageSong.waiting, .reason).
-const songWaits: Record<NonNullable<MontageSong["waiting"]>, string> = {
+// Why a song is not ready yet, or cannot be used (VideoCutSong.waiting, .reason).
+const songWaits: Record<NonNullable<VideoCutSong["waiting"]>, string> = {
   analyzer_unavailable: "等配乐分析服务就绪，几分钟后自动重试",
   compute_unavailable: "等计算服务就绪，几分钟后自动重试",
   media_unavailable: "等媒体服务就绪，几分钟后自动重试",
 };
-const songReasons: Record<NonNullable<MontageSong["reason"]>, string> = {
+const songReasons: Record<NonNullable<VideoCutSong["reason"]>, string> = {
   undecodable: "这首歌解码不了",
   few_bars: "这首歌太短，不到 16 小节",
   no_excerpt: "找不到 30 秒到 150 秒的一段",
@@ -163,7 +163,7 @@ export function SongPage({ id, onBack }: { id: string; onBack: () => void }) {
 // fragment #t=from,to starts and stops the player there. The copy browsers
 // play is addressed by the song's own time; the one the NAS decodes starts
 // at ?start= already, and cannot seek, so its fragment counts from there.
-export function excerptAudio(projectId: string, song: MontageSong, excerpt: number[]): string {
+export function excerptAudio(projectId: string, song: VideoCutSong, excerpt: number[]): string {
   const [from, to] = excerpt;
   return song.transcode
     ? `${songAudioURL(projectId, from)}#t=0,${(to - from).toFixed(2)}`
@@ -172,7 +172,7 @@ export function excerptAudio(projectId: string, song: MontageSong, excerpt: numb
 
 // Chosen is the song the project uses: how far its analysis got, and the
 // excerpt the film is cut to, which the member may move and listen to.
-function Chosen({ projectId, song }: { projectId: string; song: MontageSong }) {
+function Chosen({ projectId, song }: { projectId: string; song: VideoCutSong }) {
   const client = useQueryClient();
   const excerpt = song.selection?.excerpt;
   const [start, setStart] = useState<number>();

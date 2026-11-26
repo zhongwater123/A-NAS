@@ -23,13 +23,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-const montageServiceCommand = "montage-service"
+const videoCutServiceCommand = "montage-service"
 
-func runMontageService(logger *slog.Logger) error {
+func runVideoCutService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
 		return errors.New("the montage service must run as its own identity, never root")
 	}
-	config, err := loadMontageServiceConfig(envconfig.Environment())
+	config, err := loadVideoCutServiceConfig(envconfig.Environment())
 	if err != nil {
 		return err
 	}
@@ -62,7 +62,7 @@ func planner(answers string) app.Planner {
 	return external.FixedPlanner{Dir: answers}
 }
 
-// configuredMontage returns the montage API, nil while ANAS_MONTAGE_ENABLED
+// configuredVideoCut returns the montage API, nil while ANAS_MONTAGE_ENABLED
 // is off: then /api/v1/montage is not mounted and the desktop shows no
 // entry. A NAS forwards it to the montage service; development serves it in
 // this process from a directory on the development volume, with the grants
@@ -70,16 +70,16 @@ func planner(answers string) app.Planner {
 // does (app.Store.Upkeep). Deleted accounts leave the montage store
 // whatever the switch: the service runs either way, and rows from a time it
 // was on must not stay.
-func configuredMontage(ctx context.Context, config Config, grants app.Grants, media app.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
+func configuredVideoCut(ctx context.Context, config Config, grants app.Grants, media app.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {
 	if config.Live() {
 		remove := func(ctx context.Context, userID string) error {
-			_, err := accountremoval.Request(ctx, config.MontageSocket, userID)
+			_, err := accountremoval.Request(ctx, config.VideoCutSocket, userID)
 			return err
 		}
-		if !config.MontageEnabled {
+		if !config.VideoCutEnabled {
 			return nil, remove, func() {}, nil
 		}
-		return videocut.Proxy(config.MontageSocket, logger), remove, func() {}, nil
+		return videocut.Proxy(config.VideoCutSocket, logger), remove, func() {}, nil
 	}
 	root := filepath.Join(config.DataMount, "montage")
 	if err := os.MkdirAll(root, 0o700); err != nil {
@@ -88,13 +88,13 @@ func configuredMontage(ctx context.Context, config Config, grants app.Grants, me
 	// Development has no music analysis or compute Worker of its own unless
 	// their sockets are given; songs wait for them.
 	editing, _ := media.(app.Editing)
-	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.MontagePlanAnswers),
+	options := app.Options{Grants: grants, Media: media, Editing: editing, Planner: planner(config.VideoCutPlanAnswers),
 		WindowSearch: videocut.WindowSearchOf(grants), Logger: logger}
-	if config.MontageMusicSocket != "" {
-		options.Music = external.MusicWorker{Socket: config.MontageMusicSocket}
+	if config.VideoCutMusicSocket != "" {
+		options.Music = external.MusicWorker{Socket: config.VideoCutMusicSocket}
 	}
-	if config.MontageComputeSocket != "" {
-		client := videocutcompute.Client{SocketPath: config.MontageComputeSocket}
+	if config.VideoCutComputeSocket != "" {
+		client := videocutcompute.Client{SocketPath: config.VideoCutComputeSocket}
 		options.Compute, options.JobCompute = client, client
 	}
 	store, err := app.Open(ctx, root, options)
@@ -106,7 +106,7 @@ func configuredMontage(ctx context.Context, config Config, grants app.Grants, me
 		stopUpkeep()
 		_ = store.Close()
 	}
-	if !config.MontageEnabled {
+	if !config.VideoCutEnabled {
 		return nil, store.RemoveAccount, closeStore, nil
 	}
 	if err := store.StartWorkers(ctx); err != nil {

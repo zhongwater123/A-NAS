@@ -16,7 +16,7 @@ import (
 
 // A deleted account leaves the montage store while the switch is off too:
 // rows from a time it was on must not stay (ADR 0038).
-func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
+func TestDeletedAccountsLeaveTheVideoCutStoreWhateverTheSwitch(t *testing.T) {
 	// Unix socket paths are short; t.TempDir can exceed the limit.
 	dir, err := os.MkdirTemp("", "montage")
 	if err != nil {
@@ -37,7 +37,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{Mode: ModeAgent, MontageEnabled: enabled, MontageSocket: socket}, nil, nil, nil)
+		api, remove, closeVideoCut, err := configuredVideoCut(t.Context(), Config{Mode: ModeAgent, VideoCutEnabled: enabled, VideoCutSocket: socket}, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 		if err := remove(t.Context(), "user:bob"); err != nil {
 			t.Fatalf("switch %t: %v", enabled, err)
 		}
-		closeMontage()
+		closeVideoCut()
 	}
 	if want := "POST " + accountremoval.Path + "user:bob"; len(asked) != 2 || asked[0] != want || asked[1] != want {
 		t.Fatalf("the montage service was asked %q", asked)
@@ -55,7 +55,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 
 	// Development keeps the store in this process, switched off or on.
 	for _, enabled := range []bool{false, true} {
-		api, remove, closeMontage, err := configuredMontage(t.Context(), Config{MontageEnabled: enabled, DataMount: dir}, idleGrants{}, nil, nil)
+		api, remove, closeVideoCut, err := configuredVideoCut(t.Context(), Config{VideoCutEnabled: enabled, DataMount: dir}, idleGrants{}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func TestDeletedAccountsLeaveTheMontageStoreWhateverTheSwitch(t *testing.T) {
 		if err := remove(t.Context(), "user:bob"); err != nil {
 			t.Fatalf("development, switch %t: %v", enabled, err)
 		}
-		closeMontage()
+		closeVideoCut()
 	}
 }
 
