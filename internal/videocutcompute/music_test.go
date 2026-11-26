@@ -7,18 +7,18 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // song is a downbeat every two seconds for 200 seconds, the choruses louder.
-func song() (app.Structure, []float32) {
-	structure := app.Structure{BPM: 120}
+func song() (videocutcompute.Structure, []float32) {
+	structure := videocutcompute.Structure{BPM: 120}
 	for k := 0; k <= 100; k++ {
 		structure.Downbeats = append(structure.Downbeats, float64(2*k))
 		structure.Beats = append(structure.Beats, float64(2*k))
 	}
 	for _, s := range [][3]any{{"intro", 0, 16}, {"verse", 16, 48}, {"chorus", 48, 80}, {"verse", 80, 112}, {"chorus", 112, 144}, {"outro", 144, 200}} {
-		structure.Segments = append(structure.Segments, app.Section{Label: s[0].(string), Start: float64(s[1].(int)), End: float64(s[2].(int))})
+		structure.Segments = append(structure.Segments, videocutcompute.Section{Label: s[0].(string), Start: float64(s[1].(int)), End: float64(s[2].(int))})
 	}
 	loudness := make([]float32, 200*22050/512)
 	for i := range loudness {
@@ -37,7 +37,7 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 	client := startWorker(t, "")
 	structure, loudness := song()
 	ctx := context.Background()
-	selection, err := client.Music(ctx, app.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	selection, err := client.Music(ctx, videocutcompute.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,13 +45,13 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 		t.Fatalf("selection = %+v", selection)
 	}
 	start := 21.0 // Equidistant downbeats snap to the earlier one, as in montage.nearest.
-	dragged, err := client.Music(ctx, app.MusicRequest{Structure: structure, Loudness: loudness, Target: 90, Start: &start})
+	dragged, err := client.Music(ctx, videocutcompute.MusicRequest{Structure: structure, Loudness: loudness, Target: 90, Start: &start})
 	if err != nil || dragged.Excerpt != [2]float64{20, 110} || dragged.Seconds != 90 {
 		t.Fatalf("dragged = %+v, %v", dragged, err)
 	}
 	broken := structure
 	broken.Downbeats = []float64{3, 1}
-	if _, err := client.Music(ctx, app.MusicRequest{Structure: broken, Loudness: loudness, Target: 90}); !errors.Is(err, app.ErrWorkerRefused) {
+	if _, err := client.Music(ctx, videocutcompute.MusicRequest{Structure: broken, Loudness: loudness, Target: 90}); !errors.Is(err, videocutcompute.ErrWorkerRefused) {
 		t.Fatalf("a broken structure = %v; want refused", err)
 	}
 }
@@ -62,8 +62,8 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
 	client := startWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")
 	structure, loudness := song()
-	_, err := client.Music(context.Background(), app.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
-	if !errors.Is(err, app.ErrWorkerFailed) {
+	_, err := client.Music(context.Background(), videocutcompute.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	if !errors.Is(err, videocutcompute.ErrWorkerFailed) {
 		t.Fatalf("Music() from a Worker that breaks = %v; want failed", err)
 	}
 }
@@ -74,8 +74,8 @@ func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
 func TestAWorkerWithoutTheMusicOperationIsWaitedFor(t *testing.T) {
 	client := startWorker(t, "del worker.OPS['music']")
 	structure, loudness := song()
-	_, err := client.Music(context.Background(), app.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
-	if !errors.Is(err, app.ErrWorkerUnavailable) || errors.Is(err, app.ErrWorkerRefused) {
+	_, err := client.Music(context.Background(), videocutcompute.MusicRequest{Structure: structure, Loudness: loudness, Target: 90})
+	if !errors.Is(err, videocutcompute.ErrWorkerUnavailable) || errors.Is(err, videocutcompute.ErrWorkerRefused) {
 		t.Fatalf("Music() without the operation = %v; want unavailable", err)
 	}
 }

@@ -70,22 +70,22 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	card := app.Card{ID: "c1", Video: "v", Start: 0, End: 20, Times: []float64{3, 12}, Frames: []string{"f1", "f2"},
+	card := videocutcompute.CatalogCard{ID: "c1", Video: "v", Start: 0, End: 20, Times: []float64{3, 12}, Frames: []string{"f1", "f2"},
 		Answer: json.RawMessage(`{"beats":[{"shot_size":"远景","what":"海"},{"shot_size":"全景","what":"船"}]}`)}
-	usable, err := client.Catalog(ctx, app.CatalogRequest{Cards: []app.Card{card}, Measures: map[string]json.RawMessage{}})
+	usable, err := client.Catalog(ctx, videocutcompute.CatalogRequest{Cards: []videocutcompute.CatalogCard{card}, Measures: map[string]json.RawMessage{}})
 	if err != nil || len(usable) != 1 || usable[0] != "c1" {
 		t.Fatalf("Catalog() = %v, %v", usable, err)
 	}
 
 	const dims = 8
-	request := app.FillRequest{FPS: 30, Cards: map[string]app.Card{"c1": card}, Catalog: []string{"c1"},
+	request := videocutcompute.FillRequest{FPS: 30, Cards: map[string]videocutcompute.CatalogCard{"c1": card}, Catalog: []string{"c1"},
 		Music:   json.RawMessage(`{"parts":[{"level":"主歌"}]}`),
 		Planned: json.RawMessage(`{"answer":{"parts":[{"name":"开场","pictures":[{"beats":["c1/1","c1/2"],"shows":"海","link":""}]}]},"slots":[[[[0.0,2.0],[2.0,4.0]]]]}`),
 		Picked:  json.RawMessage(`{"parts":[{"scenes":[{"cards":["c1"],"query":"海边"}]}]}`),
 		Known:   map[string][2]float64{}}
 	var vectors []float32
 	for i := range 10 {
-		request.Rows = append(request.Rows, app.FillRow{Video: "v", Start: float64(2 * i), End: float64(2*i + 2)})
+		request.Rows = append(request.Rows, videocutcompute.FillRow{Video: "v", Start: float64(2 * i), End: float64(2*i + 2)})
 		row := make([]float32, dims)
 		var norm float64
 		for d := range dims {
@@ -100,7 +100,7 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 		}
 		vectors = append(vectors, row...)
 	}
-	var answer app.FillAnswer
+	var answer videocutcompute.FillAnswer
 	for range 10 {
 		if answer, err = client.Fill(ctx, request, vectors, dims); err != nil {
 			t.Fatal(err)
@@ -109,9 +109,9 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 			break
 		}
 		// The keyframe's whole span is clear.
-		key := make([]byte, app.FrameWidth*app.FrameHeight)
+		key := make([]byte, videocutcompute.FrameWidth*videocutcompute.FrameHeight)
 		after := make([]byte, 3*len(key))
-		span, err := client.Clear(ctx, app.ClearRequest{Key: answer.Need.Key, Lo: answer.Need.Lo, Hi: answer.Need.Hi}, key, after, nil, 3, 0)
+		span, err := client.Clear(ctx, videocutcompute.ClearRequest{Key: answer.Need.Key, Lo: answer.Need.Lo, Hi: answer.Need.Hi}, key, after, nil, 3, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +136,7 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	}
 
 	// Pinned the other way round (#596), each slot is led by its pin.
-	request.Pins = []app.FillPin{{Part: 1, Picture: 1, Slot: [2]float64{0, 2}, Beat: "c1/2"}, {Part: 1, Picture: 1, Slot: [2]float64{2, 4}, Beat: "c1/1"}}
+	request.Pins = []videocutcompute.FillPin{{Part: 1, Picture: 1, Slot: [2]float64{0, 2}, Beat: "c1/2"}, {Part: 1, Picture: 1, Slot: [2]float64{2, 4}, Beat: "c1/1"}}
 	request.Known = map[string][2]float64{}
 	for range 10 {
 		if answer, err = client.Fill(ctx, request, vectors, dims); err != nil {
@@ -162,7 +162,7 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 		t.Fatalf("Fill() with pins = %v, %+v", leads, answer)
 	}
 	request.Pins[1].Slot = [2]float64{2.5, 4}
-	if _, err := client.Fill(ctx, request, vectors, dims); !errors.Is(err, app.ErrWorkerRefused) {
+	if _, err := client.Fill(ctx, request, vectors, dims); !errors.Is(err, videocutcompute.ErrWorkerRefused) {
 		t.Fatalf("Fill() with a gap between pins = %v", err)
 	}
 

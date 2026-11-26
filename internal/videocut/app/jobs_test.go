@@ -21,6 +21,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // The photo library's side of jobs: every video is ten seconds, five
@@ -171,7 +172,7 @@ type compute struct {
 	onBrief func(step string)
 }
 
-func (c *compute) Catalog(_ context.Context, request app.CatalogRequest) ([]string, error) {
+func (c *compute) Catalog(_ context.Context, request videocutcompute.CatalogRequest) ([]string, error) {
 	var ids []string
 	for _, card := range request.Cards {
 		ids = append(ids, card.ID)
@@ -179,25 +180,25 @@ func (c *compute) Catalog(_ context.Context, request app.CatalogRequest) ([]stri
 	return ids, nil
 }
 
-func (c *compute) Fill(_ context.Context, request app.FillRequest, vectors []float32, dimensions int) (app.FillAnswer, error) {
+func (c *compute) Fill(_ context.Context, request videocutcompute.FillRequest, vectors []float32, dimensions int) (videocutcompute.FillAnswer, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.fills++
 	if c.failFill > 0 {
 		c.failFill--
-		return app.FillAnswer{}, errors.New("the montage compute worker is not available: killed")
+		return videocutcompute.FillAnswer{}, errors.New("the montage compute worker is not available: killed")
 	}
 	if c.refuse {
-		return app.FillAnswer{}, fmt.Errorf("%w: the arrays are larger than the Worker takes", app.ErrWorkerRefused)
+		return videocutcompute.FillAnswer{}, fmt.Errorf("%w: the arrays are larger than the Worker takes", videocutcompute.ErrWorkerRefused)
 	}
 	if dimensions != 768 || len(vectors) != len(request.Rows)*768 {
-		return app.FillAnswer{}, fmt.Errorf("%d vectors for %d rows", len(vectors), len(request.Rows))
+		return videocutcompute.FillAnswer{}, fmt.Errorf("%d vectors for %d rows", len(vectors), len(request.Rows))
 	}
 	// The first card of each video first, then the others.
-	var firsts, rest []app.Card
+	var firsts, rest []videocutcompute.CatalogCard
 	for _, id := range request.Catalog {
 		card := request.Cards[id]
-		if slices.ContainsFunc(firsts, func(c app.Card) bool { return c.Video == card.Video }) {
+		if slices.ContainsFunc(firsts, func(c videocutcompute.CatalogCard) bool { return c.Video == card.Video }) {
 			rest = append(rest, card)
 		} else {
 			firsts = append(firsts, card)
@@ -208,7 +209,7 @@ func (c *compute) Fill(_ context.Context, request app.FillRequest, vectors []flo
 	for i, card := range firsts[:min(2, len(firsts))] {
 		name := fmt.Sprintf("%s/1@%.2f-%.2f", card.ID, card.Start, card.End)
 		if _, ok := request.Known[name]; !ok {
-			return app.FillAnswer{Need: &app.FillNeed{Name: name, Beat: card.ID + "/1", Video: card.Video,
+			return videocutcompute.FillAnswer{Need: &videocutcompute.FillNeed{Name: name, Beat: card.ID + "/1", Video: card.Video,
 				Key: card.Times[0], Lo: card.Start, Hi: card.End}}, nil
 		}
 		video := card.Video
@@ -219,13 +220,13 @@ func (c *compute) Fill(_ context.Context, request app.FillRequest, vectors []flo
 			Slot: [2]float64{float64(2 * i), float64(2*i + 2)}, Share: 2})
 		clips = append(clips, clip)
 	}
-	return app.FillAnswer{Clips: clips}, nil
+	return videocutcompute.FillAnswer{Clips: clips}, nil
 }
 
 // Likeness is how many of the dimensions both beats' first windows share.
 func (c *compute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
 	if dimensions <= 0 || len(a) < dimensions || len(b) < dimensions {
-		return 0, fmt.Errorf("%w: no windows", app.ErrWorkerRefused)
+		return 0, fmt.Errorf("%w: no windows", videocutcompute.ErrWorkerRefused)
 	}
 	var dot float64
 	for d := range dimensions {
@@ -238,7 +239,7 @@ func (c *compute) Likeness(_ context.Context, a, b []float32, dimensions int) (f
 // parts, each a name of at most the catalog's card ids. As the Worker's
 // plan_brief, it reads each card's beats by their number among the card's
 // times, and the second step's from the outline taken.
-func (c *compute) PlanBrief(_ context.Context, request app.PlanBriefRequest) (app.PlanBrief, error) {
+func (c *compute) PlanBrief(_ context.Context, request videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error) {
 	c.mu.Lock()
 	if c.briefs == nil {
 		c.briefs = map[string]int{}
@@ -256,16 +257,16 @@ func (c *compute) PlanBrief(_ context.Context, request app.PlanBriefRequest) (ap
 			Beats []json.RawMessage `json:"beats"`
 		}
 		if err := json.Unmarshal(card.Answer, &answer); err != nil || len(answer.Beats) == 0 || len(answer.Beats) != len(card.Times) {
-			return app.PlanBrief{}, fmt.Errorf("%w: card %s has %d beats for %d times", app.ErrWorkerRefused, card.ID, len(answer.Beats), len(card.Times))
+			return videocutcompute.PlanBrief{}, fmt.Errorf("%w: card %s has %d beats for %d times", videocutcompute.ErrWorkerRefused, card.ID, len(answer.Beats), len(card.Times))
 		}
 	}
 	if request.Step == "shots" && !outlined(request.Picked) {
-		return app.PlanBrief{}, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", app.ErrWorkerRefused)
+		return videocutcompute.PlanBrief{}, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", videocutcompute.ErrWorkerRefused)
 	}
 	enum, _ := json.Marshal(ids)
 	schema := `{"type":"object","required":["parts"],"properties":{"parts":{"type":"array","minItems":1,"items":{"type":"object",
 		"required":["name","cards"],"properties":{"name":{"type":"string"},"cards":{"type":"array","items":{"enum":` + string(enum) + `}}}}}}}`
-	brief := app.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v2"}
+	brief := videocutcompute.PlanBrief{Data: json.RawMessage(`{"step":"` + request.Step + `"}`), Schema: json.RawMessage(schema), Template: "plan-v2"}
 	if request.Step == "shots" {
 		brief.Slots, brief.Pictures = json.RawMessage(`[[[[0,2],[2,4]]]]`), []int{1}
 	}
@@ -283,7 +284,7 @@ func outlined(picked json.RawMessage) bool {
 
 func (c *compute) ShotsAnswer(_ context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error) {
 	if !outlined(picked) || len(pictures) == 0 {
-		return nil, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", app.ErrWorkerRefused)
+		return nil, fmt.Errorf("%w: TypeError: 'NoneType' object is not subscriptable", videocutcompute.ErrWorkerRefused)
 	}
 	c.mu.Lock()
 	c.turned = append(c.turned, string(picked))
@@ -291,7 +292,7 @@ func (c *compute) ShotsAnswer(_ context.Context, answer, picked json.RawMessage,
 	return answer, nil
 }
 
-func (c *compute) Clear(_ context.Context, request app.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
+func (c *compute) Clear(_ context.Context, request videocutcompute.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
 	if len(key) != 256*144 || len(after) != afterCount*256*144 || len(before) != beforeCount*256*144 {
 		return [2]float64{}, errors.New("frames of the wrong size")
 	}
@@ -1216,7 +1217,7 @@ func TestABeatIsPlacedAtTheKeyFrameItsDescriptionNames(t *testing.T) {
 	if done := env.settle(t, env.generate(t, "first").ID); done.State != app.JobDone {
 		t.Fatalf("job = %+v", done)
 	}
-	cards := map[string]app.Card{}
+	cards := map[string]videocutcompute.CatalogCard{}
 	for _, card := range env.planner.last.Cards {
 		cards[card.ID] = card
 	}

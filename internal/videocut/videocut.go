@@ -22,6 +22,14 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/storeservice"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
+)
+
+// The compute Worker's client provides what the jobs ask of it; these checks
+// move to internal/videocut/external/compute.go in #665.
+var (
+	_ app.Compute       = videocutcompute.Client{}
+	_ app.MusicComputer = videocutcompute.Client{}
 )
 
 type Config struct {

@@ -11,6 +11,8 @@ import (
 	"math"
 	"os"
 	"strconv"
+
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // What a job asks of its project's song: the store is the jobs' Music
@@ -193,15 +195,15 @@ func (s *Store) Excerpt(ctx context.Context, owner, songID string, start float64
 		}
 		if kept == nil {
 			if s.compute == nil {
-				return Excerpt{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
+				return Excerpt{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 			}
 			loudness, err := decodeLoudness(row.loudness)
 			if err != nil {
 				return Excerpt{}, err
 			}
-			dragged, err := s.compute.Music(ctx, MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
+			dragged, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
 			switch {
-			case errors.Is(err, ErrWorkerRefused):
+			case errors.Is(err, videocutcompute.ErrWorkerRefused):
 				return Excerpt{}, fmt.Errorf("%w: %v", ErrSongUnusable, err)
 			case err != nil:
 				return Excerpt{}, err

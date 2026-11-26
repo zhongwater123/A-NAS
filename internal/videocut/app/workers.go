@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // The music analysis Worker speaks the AI Worker's framing
@@ -54,7 +55,7 @@ func callWorker(ctx context.Context, socket string, timeout time.Duration, reque
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", socket)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrWorkerUnavailable, err)
+		return fmt.Errorf("%w: %v", videocutcompute.ErrWorkerUnavailable, err)
 	}
 	defer func() { _ = conn.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -63,7 +64,7 @@ func callWorker(ctx context.Context, socket string, timeout time.Duration, reque
 	err = unixmsg.WriteFiles(unixConn, request, files, maxWorkerFrame)
 	runtime.KeepAlive(files)
 	if err != nil {
-		return fmt.Errorf("%w: sending: %v", ErrWorkerUnavailable, err)
+		return fmt.Errorf("%w: sending: %v", videocutcompute.ErrWorkerUnavailable, err)
 	}
 	type reply struct {
 		raw json.RawMessage
@@ -85,36 +86,36 @@ func callWorker(ctx context.Context, socket string, timeout time.Duration, reque
 			return err
 		}
 		if err := unixmsg.Write(unixConn, streamsComplete, nil, maxWorkerFrame); err != nil {
-			return fmt.Errorf("%w: confirming the streams: %v", ErrWorkerFailed, err)
+			return fmt.Errorf("%w: confirming the streams: %v", videocutcompute.ErrWorkerFailed, err)
 		}
 		got = <-answered
 	}
 	if got.err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return fmt.Errorf("%w: %w: %v", ErrWorkerFailed, ctxErr, got.err)
+			return fmt.Errorf("%w: %w: %v", videocutcompute.ErrWorkerFailed, ctxErr, got.err)
 		}
-		return fmt.Errorf("%w: reading: %v", ErrWorkerFailed, got.err)
+		return fmt.Errorf("%w: reading: %v", videocutcompute.ErrWorkerFailed, got.err)
 	}
 	var status struct {
 		OK    bool         `json:"ok"`
 		Error *workerError `json:"error"`
 	}
 	if err := json.Unmarshal(got.raw, &status); err != nil {
-		return fmt.Errorf("%w: %v", ErrWorkerFailed, err)
+		return fmt.Errorf("%w: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	if !status.OK {
 		switch {
 		case status.Error == nil:
-			return fmt.Errorf("%w: failed without a reason", ErrWorkerFailed)
+			return fmt.Errorf("%w: failed without a reason", videocutcompute.ErrWorkerFailed)
 		case status.Error.Code == workerInvalidInput:
-			return fmt.Errorf("%w: %s", ErrWorkerRefused, status.Error.Message)
+			return fmt.Errorf("%w: %s", videocutcompute.ErrWorkerRefused, status.Error.Message)
 		case status.Error.Code == workerUnavailable:
-			return fmt.Errorf("%w: %s", ErrWorkerUnavailable, status.Error.Message)
+			return fmt.Errorf("%w: %s", videocutcompute.ErrWorkerUnavailable, status.Error.Message)
 		}
-		return fmt.Errorf("%w: %s: %s", ErrWorkerFailed, status.Error.Code, status.Error.Message)
+		return fmt.Errorf("%w: %s: %s", videocutcompute.ErrWorkerFailed, status.Error.Code, status.Error.Message)
 	}
 	if err := json.Unmarshal(got.raw, answer); err != nil {
-		return fmt.Errorf("%w: %v", ErrWorkerFailed, err)
+		return fmt.Errorf("%w: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	return nil
 }
@@ -131,7 +132,7 @@ type MusicWorker struct {
 
 // musicAnswer is the Worker's answer to analyze.
 type musicAnswer struct {
-	Structure
+	videocutcompute.Structure
 	// Loudness is base64 of little-endian float32.
 	Loudness string  `json:"loudness"`
 	Seconds  float64 `json:"seconds"`
@@ -154,11 +155,11 @@ func (w MusicWorker) Analyze(ctx context.Context, stereo, mono *os.File, whole <
 	}
 	raw, err := base64.StdEncoding.DecodeString(answer.Loudness)
 	if err != nil {
-		return Analysis{}, fmt.Errorf("%w: loudness: %v", ErrWorkerFailed, err)
+		return Analysis{}, fmt.Errorf("%w: loudness: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	loudness, err := decodeLoudness(raw)
 	if err != nil || len(answer.Downbeats) == 0 && len(answer.Beats) == 0 && len(loudness) == 0 {
-		return Analysis{}, fmt.Errorf("%w: the answer has no song in it: %v", ErrWorkerFailed, err)
+		return Analysis{}, fmt.Errorf("%w: the answer has no song in it: %v", videocutcompute.ErrWorkerFailed, err)
 	}
 	return Analysis{Structure: answer.Structure, Loudness: loudness, Seconds: answer.Seconds}, nil
 }

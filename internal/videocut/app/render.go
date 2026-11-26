@@ -22,6 +22,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 const (
@@ -29,8 +30,6 @@ const (
 	maxNeeds = 2000
 	// maxClips is the most shots a film has (assemble's limit).
 	maxClips = 100
-	// The compute Worker bounds the sum of its input arrays (worker.MAX_ARRAY_BYTES).
-	MaxComputeArrayBytes = 64 << 20
 	// filmBytesPerFrame is room enough for a frame of the segments and
 	// the film both (about 8 Mbit/s each, with headroom).
 	filmBytesPerFrame = 80 << 10
@@ -68,7 +67,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	request := FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]Card{}, Catalog: run.catalog.Catalog,
+	request := videocutcompute.FillRequest{FPS: FilmRate, Rows: rows, Cards: map[string]videocutcompute.CatalogCard{}, Catalog: run.catalog.Catalog,
 		Music: run.excerpt.Music, Planned: run.planned, Picked: run.picked, Known: known, Pins: run.pins()}
 	for _, id := range run.catalog.Catalog {
 		request.Cards[id] = run.catalog.Cards[id]
@@ -100,9 +99,9 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 }
 
 // fillRows are the windows beneath the catalog's cards, with their vectors.
-func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32, int, error) {
+func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]videocutcompute.FillRow, []float32, int, error) {
 	spans := catalogSpans(run.catalog)
-	rows := []FillRow{}
+	rows := []videocutcompute.FillRow{}
 	var vectors []float32
 	dimensions := 0
 	for _, video := range run.analysis.Videos {
@@ -133,11 +132,11 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]FillRow, []float32
 		if err != nil {
 			return nil, nil, 0, failed("%v", err)
 		}
-		if len(vectors)+len(beneath) > MaxComputeArrayBytes/4 {
+		if len(vectors)+len(beneath) > videocutcompute.MaxComputeArrayBytes/4 {
 			return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
 		}
 		for _, window := range windows {
-			rows = append(rows, FillRow{Video: video.AssetID, Start: float64(window.StartMs) / 1000, End: float64(window.EndMs) / 1000})
+			rows = append(rows, videocutcompute.FillRow{Video: video.AssetID, Start: float64(window.StartMs) / 1000, End: float64(window.EndMs) / 1000})
 		}
 		vectors = append(vectors, beneath...)
 	}
@@ -185,7 +184,7 @@ func overlaps(spans [][2]float64, start, end float64) bool {
 // clearSpan finds the clear span the fill needs, from grey frames of the
 // keyframe and every half second around it. The FFmpeg Worker's slot is
 // let go before the compute Worker is asked.
-func (s *Store) clearSpan(ctx context.Context, run *jobRun, need FillNeed) ([2]float64, error) {
+func (s *Store) clearSpan(ctx context.Context, run *jobRun, need videocutcompute.FillNeed) ([2]float64, error) {
 	if _, ok := run.assetOf(need.Video); !ok {
 		return [2]float64{}, failed("the fill needs a video not in the job: %s", need.Video)
 	}
@@ -195,11 +194,11 @@ func (s *Store) clearSpan(ctx context.Context, run *jobRun, need FillNeed) ([2]f
 			return nil, 0, err
 		}
 		defer func() { _ = file.Close() }()
-		request.Format, request.Width, request.Height, request.Turned = ffmpegworker.FormatGray, FrameWidth, FrameHeight, need.Turned
+		request.Format, request.Width, request.Height, request.Turned = ffmpegworker.FormatGray, videocutcompute.FrameWidth, videocutcompute.FrameHeight, need.Turned
 		var frames []byte
 		count := 0
 		_, err = s.editing.Frames(ctx, file, request, func(frame []byte) error {
-			if len(frame) != FrameWidth*FrameHeight {
+			if len(frame) != videocutcompute.FrameWidth*videocutcompute.FrameHeight {
 				return fmt.Errorf("a grey frame of %d bytes", len(frame))
 			}
 			frames, count = append(frames, frame...), count+1
@@ -218,16 +217,16 @@ func (s *Store) clearSpan(ctx context.Context, run *jobRun, need FillNeed) ([2]f
 	var after, before []byte
 	var afterCount, beforeCount int
 	if need.Hi-need.Key > half {
-		if after, afterCount, err = grab(ffmpegworker.FramesRequest{Start: need.Key, End: need.Hi, Rate: FrameRate}); err != nil {
+		if after, afterCount, err = grab(ffmpegworker.FramesRequest{Start: need.Key, End: need.Hi, Rate: videocutcompute.FrameRate}); err != nil {
 			return [2]float64{}, err
 		}
 	}
 	if need.Key-need.Lo > half {
-		if before, beforeCount, err = grab(ffmpegworker.FramesRequest{Start: need.Lo, End: need.Key, Rate: FrameRate}); err != nil {
+		if before, beforeCount, err = grab(ffmpegworker.FramesRequest{Start: need.Lo, End: need.Key, Rate: videocutcompute.FrameRate}); err != nil {
 			return [2]float64{}, err
 		}
 	}
-	return s.jobCompute.Clear(ctx, ClearRequest{Key: need.Key, Lo: need.Lo, Hi: need.Hi}, key, after, before, afterCount, beforeCount)
+	return s.jobCompute.Clear(ctx, videocutcompute.ClearRequest{Key: need.Key, Lo: need.Lo, Hi: need.Hi}, key, after, before, afterCount, beforeCount)
 }
 
 // openVideo opens a job's video through the grant, still the content the
@@ -270,7 +269,7 @@ func finite(values ...float64) bool {
 // validateTimeline checks the filled timeline before anything is rendered
 // (docs/architecture/montage-center.md, 校验): a timeline that fails is the
 // job's failure, never a film.
-func validateTimeline(run *jobRun, answer FillAnswer) error {
+func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	if len(answer.Short) > 0 {
 		if pins := run.pins(); pins != nil {
 			return shortOfPins(pins, answer.Short)
@@ -392,7 +391,7 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 // card has no footage left around its keyframe, as when the shots beside it
 // took it; a film that silently shows another beat there is not the draft,
 // so the member is told which shots to change.
-func checkPinnedSlots(pins []FillPin, filled [][2]int, beats [][]string) error {
+func checkPinnedSlots(pins []videocutcompute.FillPin, filled [][2]int, beats [][]string) error {
 	if len(pins) != len(filled) {
 		return failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
 	}
@@ -413,7 +412,7 @@ func checkPinnedSlots(pins []FillPin, filled [][2]int, beats [][]string) error {
 
 // shortOfPins says which of an edit's shots the fill could not fill: short
 // are the fill's unfilled slots, each [part, picture, start, end, frames].
-func shortOfPins(pins []FillPin, short []json.RawMessage) error {
+func shortOfPins(pins []videocutcompute.FillPin, short []json.RawMessage) error {
 	var shots []string
 	for _, raw := range short {
 		var slot []float64

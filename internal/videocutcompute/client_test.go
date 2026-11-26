@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -230,14 +229,14 @@ func TestLikenessFailsAsARequestAMemberWaitsOn(t *testing.T) {
 		client videocutcompute.Client
 		want   error
 	}{
-		{"no Worker", videocutcompute.Client{SocketPath: filepath.Join(dir, "none.sock")}, app.ErrWorkerUnavailable},
-		{"a Worker from before the operation", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "unknown operation 'likeness'"}}`)), app.ErrWorkerUnavailable},
-		{"a Worker that refuses the vectors", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "a and b differ in dimension"}}`)), app.ErrWorkerRefused},
-		{"a Worker that ends without answering", standIn(t, hungUp), app.ErrWorkerFailed},
+		{"no Worker", videocutcompute.Client{SocketPath: filepath.Join(dir, "none.sock")}, videocutcompute.ErrWorkerUnavailable},
+		{"a Worker from before the operation", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "unknown operation 'likeness'"}}`)), videocutcompute.ErrWorkerUnavailable},
+		{"a Worker that refuses the vectors", standIn(t, replying(`{"ok": false, "error": {"code": "invalid_input", "message": "a and b differ in dimension"}}`)), videocutcompute.ErrWorkerRefused},
+		{"a Worker that ends without answering", standIn(t, hungUp), videocutcompute.ErrWorkerFailed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := c.client.Likeness(ctx, vector, vector, 2)
-			for _, kind := range []error{app.ErrWorkerUnavailable, app.ErrWorkerRefused, app.ErrWorkerFailed} {
+			for _, kind := range []error{videocutcompute.ErrWorkerUnavailable, videocutcompute.ErrWorkerRefused, videocutcompute.ErrWorkerFailed} {
 				if errors.Is(err, kind) != errors.Is(c.want, kind) {
 					t.Fatalf("Likeness() = %v, want only %v", err, c.want)
 				}
@@ -245,7 +244,7 @@ func TestLikenessFailsAsARequestAMemberWaitsOn(t *testing.T) {
 		})
 	}
 	// Vectors that are not rows of the dimension are refused before any call.
-	if _, err := (videocutcompute.Client{SocketPath: filepath.Join(dir, "none.sock")}).Likeness(ctx, vector[:3], vector, 2); !errors.Is(err, app.ErrWorkerRefused) {
+	if _, err := (videocutcompute.Client{SocketPath: filepath.Join(dir, "none.sock")}).Likeness(ctx, vector[:3], vector, 2); !errors.Is(err, videocutcompute.ErrWorkerRefused) {
 		t.Fatalf("Likeness() of a row cut short = %v", err)
 	}
 	if alike, err := standIn(t, replying(`{"ok": true, "likeness": 0.5}`)).Likeness(ctx, vector, vector, 2); err != nil || alike != 0.5 {

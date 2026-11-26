@@ -26,6 +26,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // shortVideos reads every file as a short video.
@@ -280,26 +281,26 @@ func (g *planGrants) RegisterAssistantPlan(ctx context.Context) (string, error) 
 // idleCompute lets jobs be queued; no job runs in this test.
 type idleCompute struct{}
 
-func (idleCompute) Catalog(context.Context, app.CatalogRequest) ([]string, error) {
+func (idleCompute) Catalog(context.Context, videocutcompute.CatalogRequest) ([]string, error) {
 	return nil, errors.New("no job runs here")
 }
 
-func (idleCompute) Fill(context.Context, app.FillRequest, []float32, int) (app.FillAnswer, error) {
-	return app.FillAnswer{}, errors.New("no job runs here")
+func (idleCompute) Fill(context.Context, videocutcompute.FillRequest, []float32, int) (videocutcompute.FillAnswer, error) {
+	return videocutcompute.FillAnswer{}, errors.New("no job runs here")
 }
 
 func (idleCompute) Likeness(context.Context, []float32, []float32, int) (float64, error) {
 	return 0, errors.New("no job runs here")
 }
 
-func (idleCompute) PlanBrief(context.Context, app.PlanBriefRequest) (app.PlanBrief, error) {
-	return app.PlanBrief{}, errors.New("no job runs here")
+func (idleCompute) PlanBrief(context.Context, videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error) {
+	return videocutcompute.PlanBrief{}, errors.New("no job runs here")
 }
 
 func (idleCompute) ShotsAnswer(context.Context, json.RawMessage, json.RawMessage, []int) (json.RawMessage, error) {
 	return nil, errors.New("no job runs here")
 }
 
-func (idleCompute) Clear(context.Context, app.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
+func (idleCompute) Clear(context.Context, videocutcompute.ClearRequest, []byte, []byte, []byte, int, int) ([2]float64, error) {
 	return [2]float64{}, errors.New("no job runs here")
 }

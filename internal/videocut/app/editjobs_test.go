@@ -15,6 +15,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Saving a draft as a new version (#601): the edit job fills the draft's
@@ -41,16 +42,16 @@ func (g *editGrants) SaveFilm(_ context.Context, grantID, versionKey, _ string, 
 
 // Fill answers a pinned fill as the Worker would for beats that fill their
 // slots: each slot one piece of its beat, from a third before its keyframe.
-func (*editCompute) Fill(_ context.Context, request FillRequest, _ []float32, _ int) (FillAnswer, error) {
+func (*editCompute) Fill(_ context.Context, request videocutcompute.FillRequest, _ []float32, _ int) (videocutcompute.FillAnswer, error) {
 	if request.Pins == nil {
-		return FillAnswer{}, errors.New("an edit's fill without pins")
+		return videocutcompute.FillAnswer{}, errors.New("an edit's fill without pins")
 	}
-	var answer FillAnswer
+	var answer videocutcompute.FillAnswer
 	for _, pin := range request.Pins {
 		id, n, _ := strings.Cut(pin.Beat, "/")
 		card, ok := request.Cards[id]
 		if !ok || !slices.Contains(request.Catalog, id) {
-			return FillAnswer{}, fmt.Errorf("pin %s outside the catalog", pin.Beat)
+			return videocutcompute.FillAnswer{}, fmt.Errorf("pin %s outside the catalog", pin.Beat)
 		}
 		beat := int(n[0] - '1')
 		length := pin.Slot[1] - pin.Slot[0]
@@ -380,7 +381,7 @@ func TestAnEditOfAMissingVideoNeedsTheMember(t *testing.T) {
 // A timeline that does not show a beat where the draft has it is not the
 // draft's film: the member is told which shots to change (#609 review).
 func TestAnEditsTimelineIsCutWithTheDraftsBeats(t *testing.T) {
-	pins := []FillPin{
+	pins := []videocutcompute.FillPin{
 		{Part: 1, Picture: 1, Slot: [2]float64{0, 4}, Beat: "c1/1"},
 		{Part: 1, Picture: 1, Slot: [2]float64{4, 8}, Beat: "c1/2"},
 		{Part: 2, Picture: 1, Slot: [2]float64{8, 14}, Beat: "c2/2"},

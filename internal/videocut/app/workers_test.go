@@ -15,6 +15,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/unixmsg"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // worker answers one connection on a socket in dir as a Worker would, with
@@ -115,18 +116,18 @@ func TestAWorkerThatRefusesOrIsAwayOrFailsSaysSo(t *testing.T) {
 	stereo, _, _ := os.Pipe()
 	mono, _, _ := os.Pipe()
 	writing := make(chan error)
-	for code, want := range map[string]error{"invalid_input": app.ErrWorkerRefused, "unavailable": app.ErrWorkerUnavailable, "internal": app.ErrWorkerFailed} {
+	for code, want := range map[string]error{"invalid_input": videocutcompute.ErrWorkerRefused, "unavailable": videocutcompute.ErrWorkerUnavailable, "internal": videocutcompute.ErrWorkerFailed} {
 		if _, err := (app.MusicWorker{Socket: worker(t, failure(code))}).Analyze(context.Background(), stereo, mono, writing); !errors.Is(err, want) {
 			t.Fatalf("Analyze() answered %s = %v; want %v", code, err, want)
 		}
 	}
 	away := filepath.Join(t.TempDir(), "none.sock")
-	if _, err := (app.MusicWorker{Socket: away}).Analyze(context.Background(), stereo, mono, writing); !errors.Is(err, app.ErrWorkerUnavailable) {
+	if _, err := (app.MusicWorker{Socket: away}).Analyze(context.Background(), stereo, mono, writing); !errors.Is(err, videocutcompute.ErrWorkerUnavailable) {
 		t.Fatalf("Analyze() = %v; want unavailable", err)
 	}
 	// A Worker that stops in the middle of a song, as one out of memory.
 	gone := worker(t, func(map[string]any, []*os.File, *net.UnixConn) any { return nil })
-	if _, err := (app.MusicWorker{Socket: gone}).Analyze(context.Background(), stereo, mono, written(nil)); !errors.Is(err, app.ErrWorkerFailed) {
+	if _, err := (app.MusicWorker{Socket: gone}).Analyze(context.Background(), stereo, mono, written(nil)); !errors.Is(err, videocutcompute.ErrWorkerFailed) {
 		t.Fatalf("Analyze() with a worker that stopped = %v; want failed", err)
 	}
 }

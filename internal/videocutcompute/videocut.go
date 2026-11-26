@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 )
 
 // What the montage service asks of the Worker (app.Compute): the
@@ -26,15 +24,15 @@ func (c Client) withBody(ctx context.Context, op string, request any, arrays []A
 	for _, array := range arrays {
 		size += len(array.Float32)*4 + len(array.Uint8)
 	}
-	if size > app.MaxComputeArrayBytes {
-		return fmt.Errorf("%w: 素材与规划数据超过 64 MiB", app.ErrWorkerRefused)
+	if size > MaxComputeArrayBytes {
+		return fmt.Errorf("%w: 素材与规划数据超过 64 MiB", ErrWorkerRefused)
 	}
 	return jobComputeError(c.Call(ctx, op, nil, append(arrays, Array{Name: "body", Shape: []int{len(body)}, Uint8: nonNil(body)}), answer))
 }
 
 func jobComputeError(err error) error {
 	if errors.Is(err, ErrRefused) {
-		return fmt.Errorf("%w: %w", app.ErrWorkerRefused, err)
+		return fmt.Errorf("%w: %w", ErrWorkerRefused, err)
 	}
 	return err
 }
@@ -47,7 +45,7 @@ func nonNil(b []byte) []byte {
 }
 
 // Catalog lists the cards that may go into the film.
-func (c Client) Catalog(ctx context.Context, request app.CatalogRequest) ([]string, error) {
+func (c Client) Catalog(ctx context.Context, request CatalogRequest) ([]string, error) {
 	var answer struct {
 		Cards []string `json:"cards"`
 	}
@@ -56,11 +54,11 @@ func (c Client) Catalog(ctx context.Context, request app.CatalogRequest) ([]stri
 }
 
 // Fill fills the music's slots, or names the clear span it needs.
-func (c Client) Fill(ctx context.Context, request app.FillRequest, vectors []float32, dimensions int) (app.FillAnswer, error) {
+func (c Client) Fill(ctx context.Context, request FillRequest, vectors []float32, dimensions int) (FillAnswer, error) {
 	if dimensions <= 0 || len(vectors) != len(request.Rows)*dimensions {
-		return app.FillAnswer{}, fmt.Errorf("%w: %d values for %d rows of %d", ErrRefused, len(vectors), len(request.Rows), dimensions)
+		return FillAnswer{}, fmt.Errorf("%w: %d values for %d rows of %d", ErrRefused, len(vectors), len(request.Rows), dimensions)
 	}
-	var answer app.FillAnswer
+	var answer FillAnswer
 	err := c.withBody(ctx, "fill", request, []Array{{Name: "vectors", Shape: []int{len(request.Rows), dimensions}, Float32: nonNilFloats(vectors)}}, &answer)
 	return answer, err
 }
@@ -73,24 +71,22 @@ func nonNilFloats(v []float32) []float32 {
 }
 
 // Clear finds the clear span around a keyframe from grey frames.
-func (c Client) Clear(ctx context.Context, request app.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
+func (c Client) Clear(ctx context.Context, request ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error) {
 	var answer struct {
 		Span [2]float64 `json:"span"`
 	}
-	frame := []int{app.FrameHeight, app.FrameWidth}
+	frame := []int{FrameHeight, FrameWidth}
 	err := c.Call(ctx, "clear", request, []Array{
 		{Name: "key", Shape: frame, Uint8: nonNil(key)},
-		{Name: "after", Shape: []int{afterCount, app.FrameHeight, app.FrameWidth}, Uint8: nonNil(after)},
-		{Name: "before", Shape: []int{beforeCount, app.FrameHeight, app.FrameWidth}, Uint8: nonNil(before)},
+		{Name: "after", Shape: []int{afterCount, FrameHeight, FrameWidth}, Uint8: nonNil(after)},
+		{Name: "before", Shape: []int{beforeCount, FrameHeight, FrameWidth}, Uint8: nonNil(before)},
 	}, &answer)
 	return answer.Span, jobComputeError(err)
 }
 
-var _ app.Compute = Client{}
-
 // PlanBrief is a planning step's data and exact schema.
-func (c Client) PlanBrief(ctx context.Context, request app.PlanBriefRequest) (app.PlanBrief, error) {
-	var answer app.PlanBrief
+func (c Client) PlanBrief(ctx context.Context, request PlanBriefRequest) (PlanBrief, error) {
+	var answer PlanBrief
 	err := c.withBody(ctx, "plan_brief", request, nil, &answer)
 	return answer, err
 }
@@ -110,7 +106,7 @@ func (c Client) ShotsAnswer(ctx context.Context, answer, picked json.RawMessage,
 // handler answers: a Worker that cannot be reached is one to wait for.
 func (c Client) Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error) {
 	if dimensions <= 0 || len(a) == 0 || len(b) == 0 || len(a)%dimensions != 0 || len(b)%dimensions != 0 {
-		return 0, fmt.Errorf("%w: %d and %d values of dimension %d", app.ErrWorkerRefused, len(a), len(b), dimensions)
+		return 0, fmt.Errorf("%w: %d and %d values of dimension %d", ErrWorkerRefused, len(a), len(b), dimensions)
 	}
 	var answer struct {
 		Likeness float64 `json:"likeness"`

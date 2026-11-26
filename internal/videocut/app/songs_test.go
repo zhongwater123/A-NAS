@@ -18,6 +18,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // A test song is text: "song <seconds> <name>", read by songMedia as audio
@@ -108,7 +109,7 @@ func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-cha
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.down {
-		return app.Analysis{}, fmt.Errorf("%w: connection refused", app.ErrWorkerUnavailable)
+		return app.Analysis{}, fmt.Errorf("%w: connection refused", videocutcompute.ErrWorkerUnavailable)
 	}
 	for _, stream := range []*os.File{stereo, mono} {
 		data, err := io.ReadAll(stream)
@@ -122,14 +123,14 @@ func (a *analyzer) Analyze(_ context.Context, stereo, mono *os.File, whole <-cha
 	}
 	a.songs++
 	if a.fails {
-		return app.Analysis{}, fmt.Errorf("%w: internal: the operation failed", app.ErrWorkerFailed)
+		return app.Analysis{}, fmt.Errorf("%w: internal: the operation failed", videocutcompute.ErrWorkerFailed)
 	}
 	var downbeats []float64
 	for t := 0.0; t <= 200; t += 2 {
 		downbeats = append(downbeats, t)
 	}
-	return app.Analysis{Structure: app.Structure{Model: "stand-in", BPM: 120, Beats: downbeats, Downbeats: downbeats,
-		Segments: []app.Section{{Start: 0, End: 40, Label: "verse"}, {Start: 40, End: 80, Label: "chorus"}, {Start: 80, End: 200, Label: "outro"}}},
+	return app.Analysis{Structure: videocutcompute.Structure{Model: "stand-in", BPM: 120, Beats: downbeats, Downbeats: downbeats,
+		Segments: []videocutcompute.Section{{Start: 0, End: 40, Label: "verse"}, {Start: 40, End: 80, Label: "chorus"}, {Start: 80, End: 200, Label: "outro"}}},
 		Loudness: []float32{0.1, 0.2, 0.1}}, nil
 }
 
@@ -143,20 +144,20 @@ type cutter struct {
 	fails    bool
 	unusable string
 	chorus   bool
-	asked    []app.MusicRequest
+	asked    []videocutcompute.MusicRequest
 }
 
-func (c *cutter) Music(_ context.Context, request app.MusicRequest) (app.Selection, error) {
+func (c *cutter) Music(_ context.Context, request videocutcompute.MusicRequest) (videocutcompute.Selection, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.down {
-		return app.Selection{}, fmt.Errorf("%w: connection refused", app.ErrWorkerUnavailable)
+		return videocutcompute.Selection{}, fmt.Errorf("%w: connection refused", videocutcompute.ErrWorkerUnavailable)
 	}
 	if c.refuses {
-		return app.Selection{}, fmt.Errorf("%w: structure has no segments", app.ErrWorkerRefused)
+		return videocutcompute.Selection{}, fmt.Errorf("%w: structure has no segments", videocutcompute.ErrWorkerRefused)
 	}
 	if c.fails {
-		return app.Selection{}, fmt.Errorf("%w: internal: the operation failed", app.ErrWorkerFailed)
+		return videocutcompute.Selection{}, fmt.Errorf("%w: internal: the operation failed", videocutcompute.ErrWorkerFailed)
 	}
 	c.asked = append(c.asked, request)
 	start := 40.0
@@ -168,10 +169,10 @@ func (c *cutter) Music(_ context.Context, request app.MusicRequest) (app.Selecti
 		if reason == "" {
 			reason = app.UnusableNoExcerpt
 		}
-		return app.Selection{Unusable: reason, Chorus: c.chorus}, nil
+		return videocutcompute.Selection{Unusable: reason, Chorus: c.chorus}, nil
 	}
-	return app.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, start + request.Target}, Seconds: request.Target, Chorus: c.chorus,
-		Parts: []app.Part{{Start: 0, End: request.Target, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, 2}, {2, request.Target}}}},
+	return videocutcompute.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, start + request.Target}, Seconds: request.Target, Chorus: c.chorus,
+		Parts: []videocutcompute.Part{{Start: 0, End: request.Target, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, 2}, {2, request.Target}}}},
 		Music: fmt.Appendf(nil, `{"song":%q,"excerpt":[%g,%g]}`, request.Song, start, start+request.Target)}, nil
 }
 

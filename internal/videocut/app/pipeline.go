@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // What a job's steps work with besides the photo library's grants
@@ -19,119 +20,23 @@ import (
 type Compute interface {
 	// Catalog lists the cards that may go into the film, in the order
 	// given.
-	Catalog(ctx context.Context, request CatalogRequest) ([]string, error)
+	Catalog(ctx context.Context, request videocutcompute.CatalogRequest) ([]string, error)
 	// Fill fills the music's slots from the planned shots, or names the
 	// clear span of a keyframe it needs first (FillAnswer.Need).
-	Fill(ctx context.Context, request FillRequest, vectors []float32, dimensions int) (FillAnswer, error)
+	Fill(ctx context.Context, request videocutcompute.FillRequest, vectors []float32, dimensions int) (videocutcompute.FillAnswer, error)
 	// Clear finds how far around a keyframe nothing covers the picture,
 	// from grey frames FrameWidth × FrameHeight: the keyframe, then the
 	// frames every half second after it up to hi, and from lo up to it.
-	Clear(ctx context.Context, request ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error)
+	Clear(ctx context.Context, request videocutcompute.ClearRequest, key, after, before []byte, afterCount, beforeCount int) ([2]float64, error)
 	// PlanBrief is a planning step's data and exact schema for the
 	// member's VNAS (ai/anas_montage/brief.py).
-	PlanBrief(ctx context.Context, request PlanBriefRequest) (PlanBrief, error)
+	PlanBrief(ctx context.Context, request videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error)
 	// ShotsAnswer turns the second step's answer back into the outline's
 	// pictures, as the fill reads them.
 	ShotsAnswer(ctx context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error)
 	// Likeness is how alike two beats look: the cosine of the means of the
 	// window vectors each covers, a and b of dimensions values a window.
 	Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error)
-}
-
-// PlanBriefRequest asks for a planning step's brief: the catalog's cards in
-// shooting order, the excerpt, the member's settings and, for the second
-// step, the outline taken.
-type PlanBriefRequest struct {
-	Step          string          `json:"step"`
-	Cards         []Card          `json:"cards"`
-	Music         json.RawMessage `json:"music"`
-	Ask           string          `json:"ask"`
-	Chronological bool            `json:"chronological"`
-	Picked        json.RawMessage `json:"picked,omitempty"`
-	// Change and Base, for a recut (#596): the member's sentence, and the
-	// outline and shots of the version it starts from.
-	Change string          `json:"change,omitempty"`
-	Base   json.RawMessage `json:"base,omitempty"`
-}
-
-// PlanBrief is a step's brief: Data and Schema go to the model; Slots and
-// Pictures stay here, for the fill and to turn the answer back.
-type PlanBrief struct {
-	Data     json.RawMessage `json:"data"`
-	Schema   json.RawMessage `json:"schema"`
-	Template string          `json:"template"`
-	Slots    json.RawMessage `json:"slots,omitempty"`
-	Pictures []int           `json:"pictures,omitempty"`
-}
-
-// Grey frames for Clear: 256 × 144, two a second (picture.STEP).
-const (
-	FrameWidth  = 256
-	FrameHeight = 144
-	FrameRate   = 2
-)
-
-// Card is a card as the compute Worker's domain reads it: its video, its
-// bounds, its keyframes and the reader's description (answer).
-type Card struct {
-	ID     string          `json:"id"`
-	Video  string          `json:"video"`
-	Start  float64         `json:"start"`
-	End    float64         `json:"end"`
-	Times  []float64       `json:"times"`
-	Frames []string        `json:"frames"`
-	Answer json.RawMessage `json:"answer"`
-}
-
-// CatalogRequest asks which described cards may go into the film; Measures
-// holds each card's quality as the photo library measured it.
-type CatalogRequest struct {
-	Cards    []Card                     `json:"cards"`
-	Measures map[string]json.RawMessage `json:"measures"`
-}
-
-// FillRow is one window whose vector the fill reads.
-type FillRow struct {
-	Video string  `json:"video"`
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-}
-
-// FillRequest is the fill's input: the catalog's cards, the windows beneath
-// them, the excerpt, the plans and the clear spans already found. Pins,
-// for a film edited after it was made (#596), list its slots in film order
-// with the beat that leads each; without them the fill is the eighth
-// version's.
-type FillRequest struct {
-	FPS     int                   `json:"fps"`
-	Rows    []FillRow             `json:"rows"`
-	Cards   map[string]Card       `json:"cards"`
-	Catalog []string              `json:"catalog"`
-	Music   json.RawMessage       `json:"music"`
-	Planned json.RawMessage       `json:"planned"`
-	Picked  json.RawMessage       `json:"picked"`
-	Known   map[string][2]float64 `json:"known"`
-	Pins    []FillPin             `json:"pins,omitempty"`
-}
-
-// FillPin is one slot of an edited film: the plan's part and picture it
-// belongs to, its span in the film and the beat ("card/n") that leads it.
-type FillPin struct {
-	Part    int        `json:"part"`
-	Picture int        `json:"picture"`
-	Slot    [2]float64 `json:"slot"`
-	Beat    string     `json:"beat"`
-}
-
-// FillNeed is the clear span the fill needs next.
-type FillNeed struct {
-	Name   string  `json:"name"`
-	Beat   string  `json:"beat"`
-	Video  string  `json:"video"`
-	Key    float64 `json:"key"`
-	Lo     float64 `json:"lo"`
-	Hi     float64 `json:"hi"`
-	Turned bool    `json:"turned"`
 }
 
 // Clip is one shot of the film: Start to End seconds of Video, shown for
@@ -148,21 +53,6 @@ type Clip struct {
 	Slow  float64    `json:"slow,omitempty"`
 }
 
-// FillAnswer is the fill's answer: what it needs, or the clips and the
-// slots it could not fill.
-type FillAnswer struct {
-	Need  *FillNeed         `json:"need,omitempty"`
-	Clips []json.RawMessage `json:"clips,omitempty"`
-	Short []json.RawMessage `json:"short,omitempty"`
-}
-
-// ClearRequest is the keyframe and the span around it to search.
-type ClearRequest struct {
-	Key float64 `json:"key"`
-	Lo  float64 `json:"lo"`
-	Hi  float64 `json:"hi"`
-}
-
 // Editing is what rendering asks of the FFmpeg Worker; ffmpegworker.Client
 // provides it.
 type Editing interface {
@@ -175,10 +65,10 @@ type Editing interface {
 type PlanInput struct {
 	JobID string `json:"jobId"`
 	// Plan is which of the job's 方案 is planned, from 1.
-	Plan     int             `json:"plan"`
-	Cards    []Card          `json:"cards"`
-	Music    json.RawMessage `json:"music"`
-	Settings JobSettings     `json:"settings"`
+	Plan     int                           `json:"plan"`
+	Cards    []videocutcompute.CatalogCard `json:"cards"`
+	Music    json.RawMessage               `json:"music"`
+	Settings JobSettings                   `json:"settings"`
 	// Picked is the first step's answer, for the second step.
 	Picked json.RawMessage `json:"picked,omitempty"`
 	// StepKey is the input key of the step being planned and PickKey the

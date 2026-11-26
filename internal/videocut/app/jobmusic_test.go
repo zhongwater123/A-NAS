@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 func TestAJobFindsItsProjectsSong(t *testing.T) {
@@ -64,7 +65,7 @@ func TestAJobFindsItsProjectsSong(t *testing.T) {
 		t.Fatalf("dragged = %+v (%s), %v", dragged, dragged.Music, err)
 	}
 	// A start no project keeps is the compute Worker's to cut.
-	if _, err := f.store.Excerpt(ctx, "user:alice", id, 60); !errors.Is(err, app.ErrWorkerUnavailable) {
+	if _, err := f.store.Excerpt(ctx, "user:alice", id, 60); !errors.Is(err, videocutcompute.ErrWorkerUnavailable) {
 		t.Fatalf("Excerpt() from a start no project keeps, without the worker = %v", err)
 	}
 	f.compute.down = false

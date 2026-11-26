@@ -8,8 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 )
 
 // unknownOperation is how a Worker refuses an operation it does not have
@@ -19,22 +17,22 @@ const unknownOperation = "unknown operation"
 // Music asks for a song's excerpt and slots (ai/anas_montage/music_ops.py,
 // op_music): the eighth version's from allin1's structure and the song's
 // loudness, or from the start the member dragged it to.
-func (c Client) Music(ctx context.Context, request app.MusicRequest) (app.Selection, error) {
+func (c Client) Music(ctx context.Context, request MusicRequest) (Selection, error) {
 	if len(request.Loudness) == 0 {
-		return app.Selection{}, fmt.Errorf("%w: no loudness", app.ErrWorkerRefused)
+		return Selection{}, fmt.Errorf("%w: no loudness", ErrWorkerRefused)
 	}
 	fields := map[string]any{"structure": request.Structure, "target": request.Target, "start": request.Start, "song": request.Song}
 	var answer map[string]json.RawMessage
 	err := c.Call(ctx, "music", fields, []Array{{Name: "loudness", Shape: []int{len(request.Loudness)}, Float32: request.Loudness}}, &answer)
-	var selection app.Selection
+	var selection Selection
 	if err == nil {
 		err = decodeSelection(answer, &selection)
 	}
 	if err := waitedError(err); err != nil {
-		return app.Selection{}, err
+		return Selection{}, err
 	}
 	if selection.Unusable == "" && (len(selection.Parts) == 0 || selection.Seconds <= 0) {
-		return app.Selection{}, fmt.Errorf("%w: an empty excerpt", app.ErrWorkerRefused)
+		return Selection{}, fmt.Errorf("%w: an empty excerpt", ErrWorkerRefused)
 	}
 	return selection, nil
 }
@@ -50,20 +48,20 @@ func waitedError(err error) error {
 		// A Worker from before the operation existed, still running while
 		// the device is updated: one to wait for. It says nothing of the
 		// input.
-		return fmt.Errorf("%w: %v", app.ErrWorkerUnavailable, err)
+		return fmt.Errorf("%w: %v", ErrWorkerUnavailable, err)
 	case errors.Is(err, ErrRefused):
-		return fmt.Errorf("%w: %v", app.ErrWorkerRefused, err)
+		return fmt.Errorf("%w: %v", ErrWorkerRefused, err)
 	case errors.Is(err, ErrFailed):
 		// The Worker took the request and broke on it, or stopped: for a
 		// song the montage center counts these, and gives it up after a few.
-		return fmt.Errorf("%w: %v", app.ErrWorkerFailed, err)
+		return fmt.Errorf("%w: %v", ErrWorkerFailed, err)
 	}
-	return fmt.Errorf("%w: %v", app.ErrWorkerUnavailable, err)
+	return fmt.Errorf("%w: %v", ErrWorkerUnavailable, err)
 }
 
 // decodeSelection reads the answer, and keeps the excerpt as the domain
 // reads it (from_structure's dict) for the jobs that cut to it.
-func decodeSelection(answer map[string]json.RawMessage, selection *app.Selection) error {
+func decodeSelection(answer map[string]json.RawMessage, selection *Selection) error {
 	encoded, err := json.Marshal(answer)
 	if err != nil {
 		return err
@@ -77,5 +75,3 @@ func decodeSelection(answer map[string]json.RawMessage, selection *app.Selection
 	selection.Music, err = json.Marshal(answer)
 	return err
 }
-
-var _ app.MusicComputer = Client{}

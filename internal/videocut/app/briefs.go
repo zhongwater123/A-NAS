@@ -13,6 +13,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // What the montage tools do (docs/architecture/montage-center.md, MCP 服务器):
@@ -153,7 +154,7 @@ func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error
 	if err := json.Unmarshal([]byte(songJSON), &excerpt); err != nil {
 		return PlanInput{}, err
 	}
-	input.Cards = make([]Card, 0, len(catalog.Catalog))
+	input.Cards = make([]videocutcompute.CatalogCard, 0, len(catalog.Catalog))
 	for _, id := range catalog.Catalog {
 		input.Cards = append(input.Cards, catalog.Cards[id])
 	}
@@ -167,38 +168,38 @@ func (s *Store) storedInput(ctx context.Context, jobID string) (PlanInput, error
 // job's step builds it before a round can ask (planned), and the tools read
 // what is kept, building the second step's only when the model asks for it
 // before the job came to that step.
-func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func() (PlanInput, error)) (PlanBrief, error) {
-	var brief PlanBrief
+func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func() (PlanInput, error)) (videocutcompute.PlanBrief, error) {
+	var brief videocutcompute.PlanBrief
 	var kept string
 	err := s.db.QueryRowContext(ctx, "SELECT brief_json FROM plan_briefs WHERE job_id = ? AND step = ? AND input_key = ?", jobID, step, key).Scan(&kept)
 	if err == nil && json.Unmarshal([]byte(kept), &brief) == nil {
 		return brief, nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return PlanBrief{}, err
+		return videocutcompute.PlanBrief{}, err
 	}
 	in, err := input()
 	if err != nil {
-		return PlanBrief{}, err
+		return videocutcompute.PlanBrief{}, err
 	}
-	request := PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
+	request := videocutcompute.PlanBriefRequest{Step: step, Cards: in.Cards, Music: in.Music, Ask: in.Settings.Ask,
 		Chronological: in.Settings.Chronological, Picked: in.Picked}
 	if recut := in.Settings.Recut; recut != nil {
 		request.Change = recut.Change
 		if request.Base, err = alignBase(recut.Base, recut.Cards, in.Cards); err != nil {
-			return PlanBrief{}, err
+			return videocutcompute.PlanBrief{}, err
 		}
 	}
 	brief, err = s.jobCompute.PlanBrief(ctx, request)
 	if err != nil {
-		return PlanBrief{}, err
+		return videocutcompute.PlanBrief{}, err
 	}
 	if want := templateOf(in.Settings); brief.Template != want {
-		return PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, want)
+		return videocutcompute.PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, want)
 	}
 	encoded, err := json.Marshal(brief)
 	if err != nil {
-		return PlanBrief{}, err
+		return videocutcompute.PlanBrief{}, err
 	}
 	// The same inputs give the same brief, whoever built it first.
 	_, err = s.db.ExecContext(ctx, `INSERT INTO plan_briefs(job_id, step, input_key, brief_json) VALUES(?, ?, ?, ?)
@@ -242,18 +243,18 @@ func (s *Store) currentPlan(ctx context.Context, call roundCall) (int, error) {
 // key. The second step's are those of the outline taken; before one is, the
 // model is told to hand the outline in first. The outline's brief is the
 // same for every 方案 and kept under the first's key (planned).
-func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step string) (PlanBrief, string, *ToolAnswer, error) {
+func (s *Store) stepBrief(ctx context.Context, call roundCall, plan int, step string) (videocutcompute.PlanBrief, string, *ToolAnswer, error) {
 	key := planKey(call.pickKey, plan)
 	briefKey := call.pickKey
 	var picked json.RawMessage
 	if step == StepShots {
 		outline, taken, err := s.planAnswer(ctx, s.db, call.jobID, StepOutline, key)
 		if err != nil {
-			return PlanBrief{}, "", nil, err
+			return videocutcompute.PlanBrief{}, "", nil, err
 		}
 		if !taken {
 			answer := toolAnswer(ToolOutlineFirst)
-			return PlanBrief{}, "", &answer, nil
+			return videocutcompute.PlanBrief{}, "", &answer, nil
 		}
 		picked, key = outline, shotsKey(key, outline)
 		briefKey = key

@@ -12,6 +12,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // A job makes the films of a project to choose from, 方案一 and 方案二
@@ -99,9 +100,9 @@ type RecutSettings struct {
 
 // EditSettings is the draft an edit job renders, as it stood when saved.
 type EditSettings struct {
-	Job  string    `json:"job"`
-	Plan int       `json:"plan"`
-	Pins []FillPin `json:"pins"`
+	Job  string                    `json:"job"`
+	Plan int                       `json:"plan"`
+	Pins []videocutcompute.FillPin `json:"pins"`
 }
 
 // The kinds of job and of version (#596).

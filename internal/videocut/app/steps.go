@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Each step first works out its input key (docs/architecture/montage-
@@ -325,7 +326,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 			return err
 		}
 		result, err := st.do(ctx, run)
-		if errors.Is(err, ErrWorkerRefused) {
+		if errors.Is(err, videocutcompute.ErrWorkerRefused) {
 			return failed("计算服务拒绝处理此素材或规划: %v", err)
 		}
 		if err != nil {
@@ -603,8 +604,8 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 // analysedVideo is one video's analysis as the job uses it.
 type analysedVideo struct {
 	videoHead
-	Cards    []Card                     `json:"cards"`
-	Measures map[string]json.RawMessage `json:"measures"`
+	Cards    []videocutcompute.CatalogCard `json:"cards"`
+	Measures map[string]json.RawMessage    `json:"measures"`
 }
 
 // videoHead is a video's analysis without its cards and their measures:
@@ -770,7 +771,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			for i := range seen {
 				frames[i] = beatID(id, i+1)
 			}
-			video.Cards = append(video.Cards, Card{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
+			video.Cards = append(video.Cards, videocutcompute.CatalogCard{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
 				End: float64(card.EndMs) / 1000, Times: seen, Frames: frames, Answer: answer})
 			if card.Quality != nil {
 				measured, err := json.Marshal(card.Quality)
@@ -818,8 +819,8 @@ func (s *Store) analyse(_ context.Context, run *jobRun) (any, error) { return ru
 // --- catalog ---
 
 type catalogResult struct {
-	Cards   map[string]Card `json:"cards"`
-	Catalog []string        `json:"catalog"`
+	Cards   map[string]videocutcompute.CatalogCard `json:"cards"`
+	Catalog []string                               `json:"catalog"`
 }
 
 // makeCatalog lists the cards that may go into the film, in shooting order.
@@ -836,8 +837,8 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 		}
 		return a.TakenAt.Compare(*b.TakenAt)
 	})
-	request := CatalogRequest{Cards: []Card{}, Measures: map[string]json.RawMessage{}}
-	result := catalogResult{Cards: map[string]Card{}}
+	request := videocutcompute.CatalogRequest{Cards: []videocutcompute.CatalogCard{}, Measures: map[string]json.RawMessage{}}
+	result := catalogResult{Cards: map[string]videocutcompute.CatalogCard{}}
 	for _, video := range videos {
 		for _, card := range video.Cards {
 			request.Cards = append(request.Cards, card)
@@ -870,7 +871,7 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 			}
 		}
 	}
-	if values > MaxComputeArrayBytes/4 {
+	if values > videocutcompute.MaxComputeArrayBytes/4 {
 		return nil, failed("目录中的素材窗口向量超过计算服务的 64 MiB 上限")
 	}
 	return result, nil
@@ -913,7 +914,7 @@ func (s *Store) excerptOf(ctx context.Context, run *jobRun) (any, error) {
 // --- planning ---
 
 func (s *Store) planInput(run *jobRun, step string) PlanInput {
-	cards := make([]Card, 0, len(run.catalog.Catalog))
+	cards := make([]videocutcompute.CatalogCard, 0, len(run.catalog.Catalog))
 	for _, id := range run.catalog.Catalog {
 		cards = append(cards, run.catalog.Cards[id])
 	}
@@ -979,7 +980,7 @@ func voidPlans(ctx context.Context, tx *sql.Tx, jobID string, at time.Time) erro
 
 // pins are an edit's slots with their beats (#596), nil for a job that
 // plans.
-func (run *jobRun) pins() []FillPin {
+func (run *jobRun) pins() []videocutcompute.FillPin {
 	if run.settings.Edit == nil {
 		return nil
 	}

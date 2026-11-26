@@ -9,18 +9,20 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Recutting a version from a sentence (#602).
 
 // PlanBrief briefs as the compute Worker does: a recut's with plan-v3.
-func (c *editCompute) PlanBrief(_ context.Context, request PlanBriefRequest) (PlanBrief, error) {
+func (c *editCompute) PlanBrief(_ context.Context, request videocutcompute.PlanBriefRequest) (videocutcompute.PlanBrief, error) {
 	c.briefed = append(c.briefed, request)
 	template := "plan-v2"
 	if request.Change != "" && !c.stale {
 		template = "plan-v3"
 	}
-	return PlanBrief{Data: json.RawMessage(`{}`), Schema: json.RawMessage(`{}`), Template: template}, nil
+	return videocutcompute.PlanBrief{Data: json.RawMessage(`{}`), Schema: json.RawMessage(`{}`), Template: template}, nil
 }
 
 func TestARecutPlansAgainFromTheVersionsPlan(t *testing.T) {
@@ -228,7 +230,7 @@ func TestARecutsBriefNamesTheCardsAsTheyAreNumberedNow(t *testing.T) {
 	}
 	// Video A was taken out, and video B's second card cut anew: its first
 	// card (c3) is n1 now.
-	now := map[string]Card{
+	now := map[string]videocutcompute.CatalogCard{
 		"n1": card("n1", videoB, 0, 10, []float64{1, 5}, "山路", "近景", "特写"),
 		"n2": card("n2", videoB, 10, 12, []float64{11}, "山路", "全景"),
 	}

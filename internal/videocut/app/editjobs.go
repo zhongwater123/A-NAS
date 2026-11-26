@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Saving a draft as a new version (#596, ADR 0039 decisions 4–6): an edit
@@ -63,7 +64,7 @@ func (s *Store) SaveDraft(ctx context.Context, owner, draftID, requestKey string
 	used := map[string]string{}
 	for _, shot := range state.Shots {
 		first := state.Slots[shot.First]
-		edit.Pins = append(edit.Pins, FillPin{Part: first.Part, Picture: first.Picture,
+		edit.Pins = append(edit.Pins, videocutcompute.FillPin{Part: first.Part, Picture: first.Picture,
 			Slot: [2]float64{first.Start, state.Slots[shot.Last].End}, Beat: shot.Beat})
 		card, _, _ := src.beat(shot.Beat)
 		used[card.Video] = src.videos[card.Video].ObjectID

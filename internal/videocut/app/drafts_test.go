@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // The edit of a film after it was made (#596): a project with one job whose
@@ -133,7 +134,7 @@ func (g *editGrants) Open(_ context.Context, _, assetID string) (*os.File, strin
 // keeps the briefs asked for, and briefs a recut for plan-v2 when stale.
 type editCompute struct {
 	Compute
-	briefed []PlanBriefRequest
+	briefed []videocutcompute.PlanBriefRequest
 	stale   bool
 }
 
@@ -184,14 +185,14 @@ func (e *editFrames) Frames(_ context.Context, _ *os.File, request ffmpegworker.
 	return ffmpegworker.FramesResult{Times: request.Times}, each([]byte("\xff\xd8jpeg"))
 }
 
-func card(id, video string, start, end float64, times []float64, scene string, sizes ...string) Card {
+func card(id, video string, start, end float64, times []float64, scene string, sizes ...string) videocutcompute.CatalogCard {
 	var beats []map[string]any
 	for n := range times {
 		beats = append(beats, map[string]any{"shot_size": sizes[n], "what": id + " 的第 " + string(rune('1'+n)) + " 拍", "frames": []int{n + 1}})
 	}
 	answer, _ := json.Marshal(map[string]any{"scene": scene, "beats": beats})
 	frames := make([]string, len(times))
-	return Card{ID: id, Video: video, Start: start, End: end, Times: times, Frames: frames, Answer: answer}
+	return videocutcompute.CatalogCard{ID: id, Video: video, Start: start, End: end, Times: times, Frames: frames, Answer: answer}
 }
 
 func clipJSON(beat, video string, start, end float64, slot [2]float64, part, picture int) json.RawMessage {
@@ -230,7 +231,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	t.Cleanup(func() { _ = store.Close() })
 	store.search = env.search
 	env.store = store
-	cards := map[string]Card{
+	cards := map[string]videocutcompute.CatalogCard{
 		"c1": card("c1", videoA, 0, 20, []float64{2, 8, 14}, "海边", "远景", "全景", "近景"),
 		"c2": card("c2", videoA, 20, 40, []float64{22, 30}, "海边", "全景", "中景"),
 		"c3": card("c3", videoB, 0, 10, []float64{1, 5}, "山路", "近景", "特写"),
@@ -1039,7 +1040,7 @@ func TestDeletingAShotWhileItsVideosAreAnalysedAgain(t *testing.T) {
 // and never runs past the video's.
 func TestThePreviewStaysWithinTheCard(t *testing.T) {
 	src := &editSource{
-		cards:  map[string]Card{"c1": {ID: "c1", Video: "v", Start: 2, End: 6, Times: []float64{3}}},
+		cards:  map[string]videocutcompute.CatalogCard{"c1": {ID: "c1", Video: "v", Start: 2, End: 6, Times: []float64{3}}},
 		videos: map[string]analysedVideo{"v": {Duration: 10}},
 		clips:  []timelineClip{{Card: "c1", Beat: "c1/1", Video: "v", Start: 3, End: 5, Slot: [2]float64{0, 4}}},
 	}

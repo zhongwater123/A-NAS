@@ -12,18 +12,19 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 func TestTimelineUsesEveryPlannedSlotAndOnlyAvailableFootage(t *testing.T) {
 	run := &jobRun{
 		analysis: analysisResult{Videos: []analysedVideo{{AssetID: "video", Duration: 12}}},
-		catalog:  catalogResult{Cards: map[string]Card{"card": {Video: "video", End: 12}, "filtered": {Video: "video", End: 12}}, Catalog: []string{"card"}},
+		catalog:  catalogResult{Cards: map[string]videocutcompute.CatalogCard{"card": {Video: "video", End: 12}, "filtered": {Video: "video", End: 12}}, Catalog: []string{"card"}},
 		excerpt:  Excerpt{Frames: 120},
 		planned:  json.RawMessage(`{"slots":[[[[0,2],[2,4]]]]}`),
 	}
 	base := []Clip{{Video: "video", Card: "card", Slot: [2]float64{0, 2}, Share: 2, End: 2}, {Video: "video", Card: "card", Slot: [2]float64{2, 4}, Start: 2, End: 4, Share: 2}}
 	check := func(clips []Clip) error {
-		answer := FillAnswer{}
+		answer := videocutcompute.FillAnswer{}
 		for _, clip := range clips {
 			raw, err := json.Marshal(clip)
 			if err != nil {
@@ -114,7 +115,7 @@ func TestJobGrantRequestsRespectPhotoBatchBound(t *testing.T) {
 // everyCard is a compute Worker whose catalog keeps every card.
 type everyCard struct{ Compute }
 
-func (everyCard) Catalog(_ context.Context, request CatalogRequest) ([]string, error) {
+func (everyCard) Catalog(_ context.Context, request videocutcompute.CatalogRequest) ([]string, error) {
 	ids := make([]string, len(request.Cards))
 	for i, card := range request.Cards {
 		ids[i] = card.ID
@@ -130,12 +131,12 @@ func TestACatalogWhoseWindowsOutgrowTheComputeWorkerFailsTheJob(t *testing.T) {
 	catalog := func(dimensions int) error {
 		run := &jobRun{analysis: analysisResult{Videos: []analysedVideo{{AssetID: "video", Dimensions: dimensions,
 			Windows: []photos.Window{{StartMs: 0, EndMs: 2000}, {Index: 1, StartMs: 2000, EndMs: 4000}, {Index: 2, StartMs: 4000, EndMs: 6000}},
-			Cards:   []Card{{ID: "card", Video: "video", Start: 0, End: 4}}}}}}
+			Cards:   []videocutcompute.CatalogCard{{ID: "card", Video: "video", Start: 0, End: 4}}}}}}
 		_, err := s.makeCatalog(t.Context(), run)
 		return err
 	}
 	// Two of the three windows lie beneath the card.
-	most := MaxComputeArrayBytes / 4 / 2
+	most := videocutcompute.MaxComputeArrayBytes / 4 / 2
 	if err := catalog(most); err != nil {
 		t.Fatalf("a catalog that just fits = %v", err)
 	}

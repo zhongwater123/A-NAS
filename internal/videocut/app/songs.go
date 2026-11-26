@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // A member picks a song for a project from the music library while the
@@ -119,28 +120,11 @@ type Media interface {
 	Audio(ctx context.Context, file *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error)
 }
 
-// Section is a part of a song as allin1 labels it.
-type Section struct {
-	Start float64 `json:"start"`
-	End   float64 `json:"end"`
-	Label string  `json:"label"`
-}
-
-// Structure is allin1's result for a song, as the eighth version keeps it
-// (structure-<song>.json), with the model that found it.
-type Structure struct {
-	Model     string    `json:"model"`
-	BPM       float64   `json:"bpm"`
-	Beats     []float64 `json:"beats"`
-	Downbeats []float64 `json:"downbeats"`
-	Segments  []Section `json:"segments"`
-}
-
 // Analysis is what the music analysis Worker answers for a song: its
 // structure and its loudness, the eighth version's RMS curve (frames of
 // 2048 samples every 512 at 22050 Hz).
 type Analysis struct {
-	Structure Structure
+	Structure videocutcompute.Structure
 	Loudness  []float32
 	// Seconds is how long the Worker took.
 	Seconds float64
@@ -156,64 +140,10 @@ type MusicAnalyzer interface {
 	Analyze(ctx context.Context, stereo, mono *os.File, whole <-chan error) (Analysis, error)
 }
 
-// Part is a section of an excerpt: its level in the film, and the slots the
-// shots fill, in seconds from the excerpt's start.
-type Part struct {
-	Start  float64      `json:"start"`
-	End    float64      `json:"end"`
-	Level  string       `json:"level"`
-	Label  string       `json:"label"`
-	Allin1 string       `json:"allin1,omitempty"`
-	Slots  [][2]float64 `json:"slots"`
-}
-
-// Selection is the compute Worker's music operation: the eighth version's
-// excerpt and slots (domain.music.from_structure), with whether a chorus was
-// found and why the song cannot be used.
-type Selection struct {
-	Tempo   float64    `json:"tempo"`
-	Bar     float64    `json:"bar"`
-	Excerpt [2]float64 `json:"excerpt"`
-	Seconds float64    `json:"seconds"`
-	Parts   []Part     `json:"parts"`
-	// Chorus is false when allin1 found no chorus and the loudest section
-	// stood in for it: the member is asked to listen.
-	Chorus   bool   `json:"chorus"`
-	Unusable string `json:"unusable,omitempty"`
-	// Music is the excerpt as the compute Worker's domain reads it
-	// (domain.music.from_structure's dict), which jobs cut the film to.
-	Music json.RawMessage `json:"-"`
-}
-
-// MusicRequest asks for the excerpt of a song: from the eighth version's
-// rule, or from Start, a downbeat the member dragged it to.
-type MusicRequest struct {
-	// Song names the song in the plan's music note.
-	Song      string
-	Structure Structure
-	Loudness  []float32
-	Target    float64
-	Start     *float64
-}
-
 // MusicComputer is the compute Worker's music operation.
 type MusicComputer interface {
-	Music(ctx context.Context, request MusicRequest) (Selection, error)
+	Music(ctx context.Context, request videocutcompute.MusicRequest) (videocutcompute.Selection, error)
 }
-
-// ErrWorkerUnavailable reports that a Worker could not be reached or could
-// not serve; the montage center tries again later.
-var ErrWorkerUnavailable = errors.New("the worker is not available")
-
-// ErrWorkerFailed reports that a Worker took the request and could not
-// finish it: it reported an error of its own, stopped answering or ran out
-// of time. The same request may work later, but every attempt costs what the
-// work costs, so the montage center counts them.
-var ErrWorkerFailed = errors.New("the worker failed")
-
-// ErrWorkerRefused reports that a Worker refused the input; the same input
-// would fail again.
-var ErrWorkerRefused = errors.New("the worker refused the input")
 
 // SongDetail is a project's song as the music page shows it.
 type SongDetail struct {
@@ -224,25 +154,25 @@ type SongDetail struct {
 	Duration float64 `json:"duration"`
 	// Transcode: browsers cannot play the copy; /song/audio decodes it to
 	// FLAC from ?start= and cannot seek by Range.
-	Transcode bool      `json:"transcode"`
-	State     string    `json:"state"`
-	Reason    string    `json:"reason,omitempty"`
-	Waiting   string    `json:"waiting,omitempty"`
-	Tempo     float64   `json:"tempo,omitempty"`
-	Beats     []float64 `json:"beats,omitempty"`
-	Downbeats []float64 `json:"downbeats,omitempty"`
-	Sections  []Section `json:"sections,omitempty"`
+	Transcode bool                      `json:"transcode"`
+	State     string                    `json:"state"`
+	Reason    string                    `json:"reason,omitempty"`
+	Waiting   string                    `json:"waiting,omitempty"`
+	Tempo     float64                   `json:"tempo,omitempty"`
+	Beats     []float64                 `json:"beats,omitempty"`
+	Downbeats []float64                 `json:"downbeats,omitempty"`
+	Sections  []videocutcompute.Section `json:"sections,omitempty"`
 	// DefaultStart is where the eighth version's rule starts the excerpt;
 	// Selection follows the project's own start when the member dragged it.
-	DefaultStart *float64   `json:"defaultStart,omitempty"`
-	Selection    *Selection `json:"selection,omitempty"`
+	DefaultStart *float64                   `json:"defaultStart,omitempty"`
+	Selection    *videocutcompute.Selection `json:"selection,omitempty"`
 }
 
 // songAnalysis is what a song row keeps of its analysis.
 type songAnalysis struct {
-	Structure *Structure `json:"structure,omitempty"`
-	Seconds   float64    `json:"seconds,omitempty"`
-	Selection *Selection `json:"selection,omitempty"`
+	Structure *videocutcompute.Structure `json:"structure,omitempty"`
+	Seconds   float64                    `json:"seconds,omitempty"`
+	Selection *videocutcompute.Selection `json:"selection,omitempty"`
 	// Music is the default excerpt as the domain reads it (Selection.Music).
 	Music json.RawMessage `json:"music,omitempty"`
 }
@@ -259,7 +189,7 @@ type songRow struct {
 // shows, and the excerpt as the domain reads it, which the project's jobs
 // cut the film to without asking the compute Worker again.
 type keptSelection struct {
-	Selection
+	videocutcompute.Selection
 	Music json.RawMessage `json:"music,omitempty"`
 }
 
@@ -278,7 +208,7 @@ func SongTitle(title string) string {
 // defaultDownbeat is the downbeat that stands for the default excerpt's
 // start. That start is a section's bound kept to two decimals, and need not
 // be a downbeat itself; a start the member drags always is one.
-func defaultDownbeat(st *Structure, selection *Selection) float64 {
+func defaultDownbeat(st *videocutcompute.Structure, selection *videocutcompute.Selection) float64 {
 	return nearest(st.Downbeats, selection.Excerpt[0])
 }
 
@@ -625,14 +555,14 @@ func (s *Store) SongStart(ctx context.Context, owner, projectID string, at float
 	var keptStart, kept any
 	if def := row.analysis.Selection; def == nil || start != defaultDownbeat(st, def) {
 		if s.compute == nil {
-			return SongDetail{}, fmt.Errorf("%w: no compute worker", ErrWorkerUnavailable)
+			return SongDetail{}, fmt.Errorf("%w: no compute worker", videocutcompute.ErrWorkerUnavailable)
 		}
 		loudness, err := decodeLoudness(row.loudness)
 		if err != nil {
 			return SongDetail{}, err
 		}
-		selection, err := s.compute.Music(ctx, MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
-		if errors.Is(err, ErrWorkerRefused) {
+		selection, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *st, Loudness: loudness, Target: SongTarget, Start: &start})
+		if errors.Is(err, videocutcompute.ErrWorkerRefused) {
 			// The Worker takes the song but no excerpt from there.
 			return SongDetail{}, fmt.Errorf("%w: %w", ErrSongStart, err)
 		}

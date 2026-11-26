@@ -24,6 +24,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // songMedia stands in for the media worker as the montage center uses it:
@@ -53,21 +54,21 @@ func (songStructure) Analyze(_ context.Context, stereo, mono *os.File, whole <-c
 	for t := 0.0; t < 120; t += 2 {
 		downbeats = append(downbeats, t)
 	}
-	return app.Analysis{Structure: app.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
-		Segments: []app.Section{{Start: 0, End: 30, Label: "intro"}, {Start: 30, End: 90, Label: "chorus"}, {Start: 90, End: 120, Label: "outro"}}},
+	return app.Analysis{Structure: videocutcompute.Structure{BPM: 120, Beats: downbeats, Downbeats: downbeats,
+		Segments: []videocutcompute.Section{{Start: 0, End: 30, Label: "intro"}, {Start: 30, End: 90, Label: "chorus"}, {Start: 90, End: 120, Label: "outro"}}},
 		Loudness: []float32{0.2, 0.3}}, nil
 }
 
 type songExcerpt struct{}
 
-func (songExcerpt) Music(_ context.Context, request app.MusicRequest) (app.Selection, error) {
+func (songExcerpt) Music(_ context.Context, request videocutcompute.MusicRequest) (videocutcompute.Selection, error) {
 	start := 30.0
 	if request.Start != nil {
 		start = *request.Start
 	}
 	end := min(start+request.Target, 120)
-	return app.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, end}, Seconds: end - start, Chorus: true,
-		Parts: []app.Part{{Start: 0, End: end - start, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, end - start}}}}}, nil
+	return videocutcompute.Selection{Tempo: 120, Bar: 2, Excerpt: [2]float64{start, end}, Seconds: end - start, Chorus: true,
+		Parts: []videocutcompute.Part{{Start: 0, End: end - start, Level: "高潮", Label: "chorus", Slots: [][2]float64{{0, end - start}}}}}, nil
 }
 
 // TestASongComesFromTheMembersMusicLibrary chooses a song for a project

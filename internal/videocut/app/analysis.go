@@ -14,6 +14,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // A song is analysed once per content: the songs of several members with
@@ -132,7 +133,7 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 		case err != nil && ctx.Err() != nil:
 			// The service is stopping; the song is as due as it was.
 			return
-		case errors.Is(err, ErrNotAudio), errors.Is(err, ErrWorkerRefused):
+		case errors.Is(err, ErrNotAudio), errors.Is(err, videocutcompute.ErrWorkerRefused):
 			s.logger.InfoContext(ctx, "a song cannot be analysed", "song", sha, "error", err)
 			s.finish(ctx, sha, SongUnusable, UnusableUndecodable, songAnalysis{}, nil)
 			return
@@ -140,7 +141,7 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 			s.logger.WarnContext(ctx, "the media worker is away; the song waits", "error", err)
 			s.wait(ctx, sha, WaitMedia)
 			return
-		case errors.Is(err, ErrWorkerFailed):
+		case errors.Is(err, videocutcompute.ErrWorkerFailed):
 			s.logger.WarnContext(ctx, "the music analysis worker failed on a song", "song", sha, "error", err)
 			s.failed(ctx, sha, WaitAnalyzer, songAnalysis{}, nil)
 			return
@@ -165,17 +166,17 @@ func (s *Store) analyze(ctx context.Context, sha string) {
 	}
 	// The excerpt is every member's who chose this content, so it names no
 	// song: each member's own title joins it when a job asks (Excerpt).
-	selection, err := s.compute.Music(ctx, MusicRequest{Structure: *analysis.Structure, Loudness: loudness, Target: SongTarget})
+	selection, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *analysis.Structure, Loudness: loudness, Target: SongTarget})
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return
-	case errors.Is(err, ErrWorkerRefused):
+	case errors.Is(err, videocutcompute.ErrWorkerRefused):
 		// Not one of the reasons the operation names (few_bars and the
 		// others arrive in its answer): it cannot read what allin1 found.
 		s.logger.WarnContext(ctx, "the compute worker refused a song's structure", "song", sha, "error", err)
 		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
 		return
-	case errors.Is(err, ErrWorkerFailed):
+	case errors.Is(err, videocutcompute.ErrWorkerFailed):
 		// It took the structure and broke on it, or stopped. That may be
 		// the Worker's moment or this song's, so it counts as an attempt.
 		s.logger.WarnContext(ctx, "the compute worker failed on a song's structure", "song", sha, "error", err)
@@ -224,7 +225,7 @@ func (s *Store) findStructure(ctx context.Context, sha string) (Analysis, error)
 		return Analysis{}, ErrMediaUnavailable
 	}
 	if s.music == nil {
-		return Analysis{}, fmt.Errorf("%w: no music analysis worker", ErrWorkerUnavailable)
+		return Analysis{}, fmt.Errorf("%w: no music analysis worker", videocutcompute.ErrWorkerUnavailable)
 	}
 	file, err := os.Open(s.songPath(sha))
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 const PathPrefix = "/api/v1/montage"
@@ -153,7 +154,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, app.ErrMediaUnavailable):
 		h.logger.WarnContext(r.Context(), "media worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
-	case errors.Is(err, app.ErrWorkerUnavailable), errors.Is(err, app.ErrWorkerFailed), errors.Is(err, app.ErrWorkerRefused):
+	case errors.Is(err, videocutcompute.ErrWorkerUnavailable), errors.Is(err, videocutcompute.ErrWorkerFailed), errors.Is(err, videocutcompute.ErrWorkerRefused):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
 	case errors.Is(err, app.ErrPhotosUnavailable):

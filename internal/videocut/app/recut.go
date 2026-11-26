@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Recutting a version from a sentence (#596, ADR 0039 decision 7): the
@@ -120,7 +122,7 @@ type CardPlace struct {
 	Times []float64 `json:"times"`
 }
 
-func placeOf(card Card) CardPlace {
+func placeOf(card videocutcompute.CatalogCard) CardPlace {
 	return CardPlace{Video: card.Video, Start: card.Start, End: card.End, Times: card.Times}
 }
 
@@ -209,7 +211,7 @@ func renameIn(object map[string]any, field string, to func(string) (string, bool
 // footage now. A card no longer in its place (its video gone, or cut or
 // described anew) is left out, and its scenes and pictures are picked again;
 // the rest stay as they were planned.
-func alignBase(base json.RawMessage, places map[string]CardPlace, cards []Card) (json.RawMessage, error) {
+func alignBase(base json.RawMessage, places map[string]CardPlace, cards []videocutcompute.CatalogCard) (json.RawMessage, error) {
 	now := map[string]string{}
 	for _, card := range cards {
 		now[placeOf(card).key()] = card.ID

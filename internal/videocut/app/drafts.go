@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // Editing a film after it was made (#596, ADR 0039;
@@ -146,7 +147,7 @@ type editSource struct {
 	// answered, whole: picked and planned read only what editing shows.
 	pickedRaw, plannedRaw json.RawMessage
 	clips                 []timelineClip
-	cards                 map[string]Card
+	cards                 map[string]videocutcompute.CatalogCard
 	about                 map[string]cardAbout
 	catalog               []string
 	videos                map[string]analysedVideo
@@ -370,11 +371,11 @@ func splitBeat(beat string) (card string, n int, ok bool) {
 // beat is a beat's card and its number from 1, and reports whether it is a
 // beat of a described card. Only the catalog's cards may be cut from
 // (cuttable): the fill is given no other.
-func (src *editSource) beat(beat string) (Card, int, bool) {
+func (src *editSource) beat(beat string) (videocutcompute.CatalogCard, int, bool) {
 	id, n, ok := splitBeat(beat)
 	card, described := src.cards[id]
 	if !ok || !described || n > len(card.Times) {
-		return Card{}, 0, false
+		return videocutcompute.CatalogCard{}, 0, false
 	}
 	return card, n, true
 }
