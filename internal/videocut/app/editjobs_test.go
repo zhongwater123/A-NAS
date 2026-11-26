@@ -392,7 +392,7 @@ func TestAnEditsTimelineIsCutWithTheDraftsBeats(t *testing.T) {
 		t.Fatalf("a timeline with every pin = %v", err)
 	}
 	err := checkPinnedSlots(pins, slots, [][]string{{"c1/1"}, {"c1/3"}, {"c3/2"}})
-	var stopped *stepFailed
+	var stopped *domain.StepFailed
 	if !errors.As(err, &stopped) || !strings.Contains(err.Error(), "第 2、3 镜选的节拍放不进它的位置") {
 		t.Fatalf("a timeline without two pins = %v", err)
 	}

@@ -299,7 +299,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 		}
 		result, err := st.do(ctx, run)
 		if errors.Is(err, videocutcompute.ErrWorkerRefused) {
-			return failed("计算服务拒绝处理此素材或规划: %v", err)
+			return domain.Failed("计算服务拒绝处理此素材或规划: %v", err)
 		}
 		if err != nil {
 			return err
@@ -476,7 +476,7 @@ func jobGrantError(err error, ids []string) error {
 	case photosapi.GrantOwnerInactive, photosapi.GrantUnavailable:
 		return &stepWait{reason: WaitPhotos, delay: waitPoll}
 	case photosapi.GrantInvalid, photosapi.GrantTooMany:
-		return failed("photo library refused the job's inputs: %v", err)
+		return domain.Failed("photo library refused the job's inputs: %v", err)
 	}
 	return err
 }
@@ -786,7 +786,7 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 	}
 	for _, id := range usable {
 		if _, ok := result.Cards[id]; !ok {
-			return nil, failed("the catalog names card %q it was not given", id)
+			return nil, domain.Failed("the catalog names card %q it was not given", id)
 		}
 	}
 	result.Catalog = usable
@@ -800,7 +800,7 @@ func (s *Store) makeCatalog(ctx context.Context, run *jobRun) (any, error) {
 		}
 	}
 	if values > videocutcompute.MaxComputeArrayBytes/4 {
-		return nil, failed("目录中的素材窗口向量超过计算服务的 64 MiB 上限")
+		return nil, domain.Failed("目录中的素材窗口向量超过计算服务的 64 MiB 上限")
 	}
 	return result, nil
 }
@@ -878,7 +878,7 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	case errors.Is(err, domain.ErrPlanFailed):
 		// Planned as many rounds as a job is, none finished: the job fails
 		// and says why, and the member plans it again with one click (Replan).
-		return nil, &stepFailed{err: err, reason: FailPlanning}
+		return nil, &domain.StepFailed{Err: err, Reason: FailPlanning}
 	case err != nil:
 		return nil, err
 	}

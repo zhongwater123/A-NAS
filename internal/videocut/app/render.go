@@ -84,7 +84,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 			return timelineResult{Clips: answer.Clips, Known: known}, nil
 		}
 		if _, seen := known[answer.Need.Name]; seen {
-			return nil, failed("the fill asked again for %s", answer.Need.Name)
+			return nil, domain.Failed("the fill asked again for %s", answer.Need.Name)
 		}
 		span, err := s.clearSpan(ctx, run, *answer.Need)
 		if err != nil {
@@ -95,7 +95,7 @@ func (s *Store) fill(ctx context.Context, run *jobRun) (any, error) {
 			return nil, err
 		}
 	}
-	return nil, failed("the fill asked for more than %d spans", maxNeeds)
+	return nil, domain.Failed("the fill asked for more than %d spans", maxNeeds)
 }
 
 // fillRows are the windows beneath the catalog's cards, with their vectors.
@@ -117,7 +117,7 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]videocutcompute.Fi
 			// The version was cut with windows the library has analysed
 			// again with another model since: it is played or recut now,
 			// not edited, and trying again changes nothing.
-			return nil, nil, 0, failed("%s", AnalysisChangedReason)
+			return nil, nil, 0, domain.Failed("%s", AnalysisChangedReason)
 		}
 		if !video.sameWindows(analysis) {
 			// Made again since the job's first step looked: that step
@@ -125,15 +125,15 @@ func (s *Store) fillRows(ctx context.Context, run *jobRun) ([]videocutcompute.Fi
 			return nil, nil, 0, errors.New("the photo library's analysis changed while the job ran")
 		}
 		if dimensions != 0 && dimensions != analysis.Dimensions {
-			return nil, nil, 0, failed("window vectors have incompatible dimensions")
+			return nil, nil, 0, domain.Failed("window vectors have incompatible dimensions")
 		}
 		dimensions = analysis.Dimensions
 		windows, beneath, err := windowVectors(analysis, raw, func(start, end float64) bool { return overlaps(within, start, end) })
 		if err != nil {
-			return nil, nil, 0, failed("%v", err)
+			return nil, nil, 0, domain.Failed("%v", err)
 		}
 		if len(vectors)+len(beneath) > videocutcompute.MaxComputeArrayBytes/4 {
-			return nil, nil, 0, failed("素材窗口向量超过计算服务的 64 MiB 上限")
+			return nil, nil, 0, domain.Failed("素材窗口向量超过计算服务的 64 MiB 上限")
 		}
 		for _, window := range windows {
 			rows = append(rows, videocutcompute.FillRow{Video: video.AssetID, Start: float64(window.StartMs) / 1000, End: float64(window.EndMs) / 1000})
@@ -186,7 +186,7 @@ func overlaps(spans [][2]float64, start, end float64) bool {
 // let go before the compute Worker is asked.
 func (s *Store) clearSpan(ctx context.Context, run *jobRun, need videocutcompute.FillNeed) ([2]float64, error) {
 	if _, ok := run.assetOf(need.Video); !ok {
-		return [2]float64{}, failed("the fill needs a video not in the job: %s", need.Video)
+		return [2]float64{}, domain.Failed("the fill needs a video not in the job: %s", need.Video)
 	}
 	grab := func(request ffmpegworker.FramesRequest) ([]byte, int, error) {
 		file, err := s.openVideo(ctx, run, need.Video)
@@ -274,10 +274,10 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 		if pins := run.pins(); pins != nil {
 			return shortOfPins(pins, answer.Short)
 		}
-		return failed("%d slots were left empty", len(answer.Short))
+		return domain.Failed("%d slots were left empty", len(answer.Short))
 	}
 	if len(answer.Clips) == 0 || len(answer.Clips) > maxClips {
-		return failed("the timeline has %d shots", len(answer.Clips))
+		return domain.Failed("the timeline has %d shots", len(answer.Clips))
 	}
 	total := 0
 	var slots [][2]int
@@ -287,40 +287,40 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 	for i, raw := range answer.Clips {
 		var clip domain.Clip
 		if err := json.Unmarshal(raw, &clip); err != nil {
-			return failed("shot %d: %v", i+1, err)
+			return domain.Failed("shot %d: %v", i+1, err)
 		}
 		video, ok := run.assetOf(clip.Video)
 		if !ok {
-			return failed("shot %d uses a video outside the project", i+1)
+			return domain.Failed("shot %d uses a video outside the project", i+1)
 		}
 		card, ok := run.catalog.Cards[clip.Card]
 		if !ok || card.Video != clip.Video || !slices.Contains(run.catalog.Catalog, clip.Card) {
-			return failed("shot %d uses a card outside the catalog", i+1)
+			return domain.Failed("shot %d uses a card outside the catalog", i+1)
 		}
 		if !finite(clip.Start, clip.End, clip.Share, clip.Slow, clip.Slot[0], clip.Slot[1]) || clip.Start < 0 || clip.Start >= clip.End {
-			return failed("shot %d runs from %v to %v", i+1, clip.Start, clip.End)
+			return domain.Failed("shot %d runs from %v to %v", i+1, clip.Start, clip.End)
 		}
 		if video.Duration > 0 && clip.End > video.Duration+0.05 {
-			return failed("shot %d ends at %.3f, after its video's %.3f seconds", i+1, clip.End, video.Duration)
+			return domain.Failed("shot %d ends at %.3f, after its video's %.3f seconds", i+1, clip.End, video.Duration)
 		}
 		if clip.Slow != 0 && (clip.Slow < 1 || clip.Slow > 2.5) {
-			return failed("shot %d is slowed %v times", i+1, clip.Slow)
+			return domain.Failed("shot %d is slowed %v times", i+1, clip.Slow)
 		}
 		frames := clipFrames(clip)
 		if frames <= 0 || clip.Slot[0] >= clip.Slot[1] {
-			return failed("shot %d is empty", i+1)
+			return domain.Failed("shot %d is empty", i+1)
 		}
 		// FFmpeg consumes frames / slow from Start. The Worker rounds Slow
 		// to three decimal places, so allow that rounding in the span.
 		slow := max(1, clip.Slow)
 		if clip.Start < card.Start-0.001 || clip.End > card.End+0.001 ||
 			float64(frames)/FilmRate > (clip.End-clip.Start)*(slow+0.0005)+0.000001 {
-			return failed("shot %d reads beyond its source span", i+1)
+			return domain.Failed("shot %d reads beyond its source span", i+1)
 		}
 		thisSlot := [2]int{filmFrame(clip.Slot[0]), filmFrame(clip.Slot[1])}
 		if thisSlot != slot || len(slots) == 0 {
 			if thisSlot[0] != total || thisSlot[0] != slot[1] || thisSlot[1] <= thisSlot[0] {
-				return failed("slot %v does not follow frame %d", clip.Slot, total)
+				return domain.Failed("slot %v does not follow frame %d", clip.Slot, total)
 			}
 			slots = append(slots, thisSlot)
 			beats = append(beats, nil)
@@ -329,11 +329,11 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 		beats[len(beats)-1] = append(beats[len(beats)-1], clip.Beat)
 		total += frames
 		if total > slot[1] {
-			return failed("shot %d overfills its slot", i+1)
+			return domain.Failed("shot %d overfills its slot", i+1)
 		}
 	}
 	if total != slot[1] {
-		return failed("the last slot ends at frame %d, filled to %d", slot[1], total)
+		return domain.Failed("the last slot ends at frame %d, filled to %d", slot[1], total)
 	}
 	if pins := run.pins(); pins != nil {
 		// An edit keeps its draft's slots, in the draft's order.
@@ -344,7 +344,7 @@ func validateTimeline(run *jobRun, answer videocutcompute.FillAnswer) error {
 		return err
 	}
 	if total != run.excerpt.Frames {
-		return failed("the shots take %d frames, the excerpt %d", total, run.excerpt.Frames)
+		return domain.Failed("the shots take %d frames, the excerpt %d", total, run.excerpt.Frames)
 	}
 	return nil
 }
@@ -357,13 +357,13 @@ func filmFrame(seconds float64) int { return int(math.RoundToEven(seconds * Film
 func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 	var layout struct{ Slots [][][][2]float64 }
 	if err := json.Unmarshal(plan, &layout); err != nil {
-		return failed("invalid planned slots: %v", err)
+		return domain.Failed("invalid planned slots: %v", err)
 	}
 	at := 0
 	for _, part := range layout.Slots {
 		for _, picture := range part {
 			if len(picture) == 0 || len(picture) > len(filled)-at {
-				return failed("the picture has unfilled slots")
+				return domain.Failed("the picture has unfilled slots")
 			}
 			lengths := map[int]int{}
 			for _, slot := range picture {
@@ -372,7 +372,7 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 			for _, slot := range filled[at : at+len(picture)] {
 				length := slot[1] - slot[0]
 				if lengths[length] == 0 {
-					return failed("unexpected %d-frame slot in picture", length)
+					return domain.Failed("unexpected %d-frame slot in picture", length)
 				}
 				lengths[length]--
 			}
@@ -380,7 +380,7 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 		}
 	}
 	if at != len(filled) {
-		return failed("the timeline has %d unplanned slots", len(filled)-at)
+		return domain.Failed("the timeline has %d unplanned slots", len(filled)-at)
 	}
 	return nil
 }
@@ -393,19 +393,19 @@ func checkPlannedSlots(plan json.RawMessage, filled [][2]int) error {
 // so the member is told which shots to change.
 func checkPinnedSlots(pins []videocutcompute.FillPin, filled [][2]int, beats [][]string) error {
 	if len(pins) != len(filled) {
-		return failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
+		return domain.Failed("the timeline has %d slots, the draft %d", len(filled), len(pins))
 	}
 	var passed []string
 	for i, pin := range pins {
 		if want := [2]int{filmFrame(pin.Slot[0]), filmFrame(pin.Slot[1])}; filled[i] != want {
-			return failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
+			return domain.Failed("slot %d is %v, the draft's %v", i+1, filled[i], want)
 		}
 		if !slices.Contains(beats[i], pin.Beat) {
 			passed = append(passed, strconv.Itoa(i+1))
 		}
 	}
 	if len(passed) > 0 {
-		return failed("第 %s 镜选的节拍放不进它的位置：同一段录像里相邻的镜头已经用到了那段画面。换一个节拍后再存", strings.Join(passed, "、"))
+		return domain.Failed("第 %s 镜选的节拍放不进它的位置：同一段录像里相邻的镜头已经用到了那段画面。换一个节拍后再存", strings.Join(passed, "、"))
 	}
 	return nil
 }
@@ -426,9 +426,9 @@ func shortOfPins(pins []videocutcompute.FillPin, short []json.RawMessage) error 
 		}
 	}
 	if len(shots) == 0 {
-		return failed("%d slots were left empty", len(short))
+		return domain.Failed("%d slots were left empty", len(short))
 	}
-	return failed("第 %s 镜选的节拍不够长，也没有别的画面能补上。换一个节拍后再存", strings.Join(shots, "、"))
+	return domain.Failed("第 %s 镜选的节拍不够长，也没有别的画面能补上。换一个节拍后再存", strings.Join(shots, "、"))
 }
 
 // --- render ---
@@ -465,7 +465,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	clips := make([]domain.Clip, len(run.timeline.Clips))
 	for i, raw := range run.timeline.Clips {
 		if err := json.Unmarshal(raw, &clips[i]); err != nil {
-			return nil, failed("shot %d: %v", i+1, err)
+			return nil, domain.Failed("shot %d: %v", i+1, err)
 		}
 	}
 	dir := s.jobDir(run.id)
@@ -602,14 +602,14 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 	}
 	want := float64(frames) / FilmRate
 	if !finite(probe.Format.Duration) || math.Abs(probe.Format.Duration-want) > durationTolerance {
-		return failed("the film lasts %.3f seconds, the timeline %.3f", probe.Format.Duration, want)
+		return domain.Failed("the film lasts %.3f seconds, the timeline %.3f", probe.Format.Duration, want)
 	}
 	var picture, sound bool
 	for _, stream := range probe.Streams {
 		switch stream.Type {
 		case "video":
 			if stream.Width != FilmWidth || stream.Height != FilmHeight || !finite(stream.FrameRate) || math.Abs(stream.FrameRate-FilmRate) > 0.01 {
-				return failed("the film is %d×%d at %v frames a second", stream.Width, stream.Height, stream.FrameRate)
+				return domain.Failed("the film is %d×%d at %v frames a second", stream.Width, stream.Height, stream.FrameRate)
 			}
 			picture = true
 		case "audio":
@@ -617,7 +617,7 @@ func (s *Store) checkFilm(ctx context.Context, path string, frames int) error {
 		}
 	}
 	if !picture || !sound {
-		return failed("the film has picture %v and sound %v", picture, sound)
+		return domain.Failed("the film has picture %v and sound %v", picture, sound)
 	}
 	return nil
 }
@@ -662,7 +662,7 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 		}
 		if run.replayingSave && code == photosapi.GrantNotFound {
 			// Revocation prevents the service from reading even the old receipt.
-			return nil, &saveRefusal{failed("相册授权已撤销，无法确认上次存回的结果，请在相册中核对成片")}
+			return nil, &saveRefusal{domain.Failed("相册授权已撤销，无法确认上次存回的结果，请在相册中核对成片")}
 		}
 		switch code {
 		case photosapi.GrantNoSpace:

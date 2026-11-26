@@ -4,7 +4,10 @@
 // 代码结构).
 package domain
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Draft errors.
 var (
@@ -110,3 +113,17 @@ var (
 	// ErrMediaUnavailable: the media worker did not answer (503).
 	ErrMediaUnavailable = errors.New("the media worker is not available")
 )
+
+// StepFailed: the step's input or output is wrong and would be wrong again;
+// the job fails without retrying.
+type StepFailed struct {
+	Err error
+	// Reason, when set, is the job's reason for failing, which the page and
+	// the member's way out of it read (app.FailPlanning).
+	Reason string
+}
+
+func (f *StepFailed) Error() string { return f.Err.Error() }
+func (f *StepFailed) Unwrap() error { return f.Err }
+
+func Failed(format string, args ...any) error { return &StepFailed{Err: fmt.Errorf(format, args...)} }

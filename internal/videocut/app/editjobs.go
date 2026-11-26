@@ -154,14 +154,14 @@ const StepSource = "source"
 func (s *Store) editSourceKey(ctx context.Context, run *jobRun) (string, error) {
 	edit := run.settings.Edit
 	if edit == nil || len(edit.Pins) == 0 {
-		return "", failed("the edit job has no draft")
+		return "", domain.Failed("the edit job has no draft")
 	}
 	kept, ok, err := s.loadPlan(ctx, edit.Job, edit.Plan)
 	if err != nil {
 		return "", err
 	}
 	if !ok {
-		return "", failed("the version's plan is gone or was made again")
+		return "", domain.Failed("the version's plan is gone or was made again")
 	}
 	run.analysis, run.catalog, run.excerpt, run.picked, run.planned = kept.analysis, kept.catalog, kept.excerpt, kept.picked, kept.planned
 	ids := make([]string, len(run.analysis.Videos))

@@ -141,7 +141,7 @@ func TestACatalogWhoseWindowsOutgrowTheComputeWorkerFailsTheJob(t *testing.T) {
 	if err := catalog(most); err != nil {
 		t.Fatalf("a catalog that just fits = %v", err)
 	}
-	var bad *stepFailed
+	var bad *domain.StepFailed
 	if err := catalog(most + 1); !errors.As(err, &bad) {
 		t.Fatalf("a catalog one value over the bound = %v", err)
 	}
