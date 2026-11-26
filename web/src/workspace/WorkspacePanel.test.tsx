@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
+import { AgentTokens } from "../settings/AgentTokens";
 import { user as account, session } from "../test/fixtures";
 import {
   addVersion,
@@ -14,13 +15,15 @@ import {
   workspacePage,
   workspaceStore,
 } from "../test/handlers/workspace";
-import { http, server } from "../test/server";
+import { apiError, http, server } from "../test/server";
+import { agentTokenClient } from "./agentTokens";
 import type { FromFrame } from "./frame/protocol";
 import { WorkspacePanel } from "./WorkspacePanel";
 
 let store: WorkspaceStore;
 beforeEach(() => {
   setSession(session({ id: reader.id, username: reader.name, role: "member" }, { csrfToken: "csrf" }));
+  agentTokenClient.clear();
   store = workspaceStore([
     workspacePage("page_prd", "家庭相册分享 PRD", [version(1), version(2, { note: "" })]),
     workspacePage("page_old", "旧方案", [version(1, { savedBy: other })]),
@@ -52,6 +55,25 @@ describe("共享工作区", () => {
     expect(shown.getAttribute("src")).toBe("/api/v1/workspace/pages/page_prd/versions/2/view");
     await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_prd", version: 2 }));
     expect(screen.queryByRole("button", { name: "成员" })).toBeNull();
+  });
+
+  it("tells the member's agent which page is open until it closes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { unmount } = render(<WorkspacePanel userId={reader.id} admin={false} />);
+      await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_prd", version: 2 }));
+      // Said again every minute: the service forgets a desktop that goes quiet.
+      store.viewing = undefined;
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_prd", version: 2 }));
+      await user.click(await screen.findByRole("button", { name: /旧方案/ }));
+      await waitFor(() => expect(store.viewing).toEqual({ pageId: "page_old", version: 1 }));
+      unmount();
+      await waitFor(() => expect(store.viewing).toBeUndefined());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uploads an HTML file as a new page and opens it", async () => {
@@ -103,9 +125,7 @@ describe("共享工作区", () => {
     const pick = await screen.findByRole("button", { name: "选取" });
     await fromFrame({ type: "anas:ready", blocked: [] });
     const toFrame = vi.spyOn((await frame()).contentWindow as Window, "postMessage");
-    await user.click(pick);
-    expect(toFrame).toHaveBeenCalledWith({ type: "anas:pick", on: true }, "*");
-    await fromFrame({
+    const picked: FromFrame = {
       type: "anas:picked",
       at: 4321,
       generated: false,
@@ -115,12 +135,17 @@ describe("共享工作区", () => {
       rect: { x: 600, y: 400, w: 96, h: 36 },
       style: { "font-size": "16px" },
       rules: [".btn", ".btn-primary"],
-    });
+    };
+    // The page's own script can say "picked" too; unasked, it costs nothing.
+    await fromFrame(picked);
+    expect(toFrame).not.toHaveBeenCalled();
+    await user.click(pick);
+    expect(toFrame).toHaveBeenCalledWith({ type: "anas:pick", on: true }, "*");
+    await fromFrame(picked);
+    await fromFrame(picked);
     expect(toFrame).toHaveBeenCalledWith({ type: "anas:pick", on: false }, "*");
-    expect(toFrame).toHaveBeenCalledWith(
-      { type: "anas:capture", id: 1, rect: { x: 552, y: 352, w: 192, h: 132 } },
-      "*",
-    );
+    const captures = toFrame.mock.calls.filter(([message]) => (message as { type: string }).type === "anas:capture");
+    expect(captures).toEqual([[{ type: "anas:capture", id: 1, rect: { x: 552, y: 352, w: 192, h: 132 } }, "*"]]);
     await fromFrame({ type: "anas:captured", id: 1, image: "data:image/jpeg;base64,/9j/4AAQ" });
     await screen.findByText("你的 agent 能读到它");
     expect(store.selection).toMatchObject({
@@ -134,6 +159,21 @@ describe("共享工作区", () => {
     await user.click(screen.getByRole("button", { name: "清除选中" }));
     await waitFor(() => expect(store.selection).toBeUndefined());
     expect(toFrame).toHaveBeenCalledWith({ type: "anas:clear" }, "*");
+  });
+
+  it("empties the window when an administrator takes the member out", async () => {
+    const user = userEvent.setup();
+    render(<WorkspacePanel userId={reader.id} admin={false} />);
+    await frame();
+    server.use(
+      http.get("/api/v1/workspace/pages/{pageId}", ({ response }) =>
+        response(403).json(apiError("workspace_forbidden")),
+      ),
+    );
+    await user.click(await screen.findByRole("button", { name: /旧方案/ }));
+    expect(await screen.findByText("管理员没有让你使用共享工作区")).toBeTruthy();
+    expect(screen.queryByTitle(/^页面：/)).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "页面" })).toBeNull();
   });
 
   it("ignores messages from anything but the page's frame", async () => {
@@ -180,7 +220,13 @@ describe("共享工作区", () => {
 
   it("gives the command that connects Claude Code and waits for its first call", async () => {
     const user = userEvent.setup();
-    render(<WorkspacePanel userId={reader.id} admin={false} />);
+    // 设置 → 我的账号, open beside it, follows the same list.
+    render(
+      <>
+        <WorkspacePanel userId={reader.id} admin={false} />
+        <AgentTokens account={reader.id} />
+      </>,
+    );
     await user.click(screen.getByRole("button", { name: "连接 agent" }));
     const dialog = await screen.findByRole("dialog", { name: "连接 agent" });
     await user.type(within(dialog).getByRole("textbox", { name: "名字" }), "办公电脑");
@@ -192,8 +238,10 @@ describe("共享工作区", () => {
     );
     expect(store.tokens).toMatchObject([{ name: "办公电脑", kind: "claude-code" }]);
     within(dialog).getByText("等待 agent 第一次调用");
+    await screen.findByText("Claude Code · 还没用过");
     store.tokens = store.tokens.map((token) => ({ ...token, lastUsedAt: new Date().toISOString() }));
     await within(dialog).findByText("已连接", undefined, { timeout: 5_000 });
+    expect(screen.getByText("Claude Code · 刚刚使用")).toBeTruthy();
   });
 
   it("lets administrators choose who may use it", async () => {

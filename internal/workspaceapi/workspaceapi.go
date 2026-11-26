@@ -131,9 +131,10 @@ func New(store *workspace.Store, options Options) http.Handler {
 		"POST /pages/{pageID}/versions": h.saveVersion,
 		"GET /pages/{pageID}/versions/{version}/view": h.view,
 		"GET /pages/{pageID}/versions/{version}/file": h.file,
-		"PUT /viewing":      h.viewing,
-		"PUT /selection":    h.setSelection,
-		"DELETE /selection": h.clearSelection,
+		"PUT /viewing":             h.viewing,
+		"DELETE /viewing/{pageID}": h.stopViewing,
+		"PUT /selection":           h.setSelection,
+		"DELETE /selection":        h.clearSelection,
 	}
 	for pattern, serve := range members {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -430,6 +431,11 @@ func (h *handler) viewing(w http.ResponseWriter, r *http.Request, caller workspa
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *handler) stopViewing(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
+	h.store.ClearViewing(caller.Actor.AccountID, r.PathValue("pageID"))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // selectionRequest is what the desktop reports when a member picks an
 // element; the frame helper measured it (web/src/workspace/frame/protocol.ts).
 type selectionRequest struct {
@@ -542,6 +548,13 @@ func (h *handler) takeTransfer(w http.ResponseWriter, r *http.Request, direction
 }
 
 func (h *handler) download(w http.ResponseWriter, r *http.Request) {
+	// A GET pattern also matches HEAD; a link checker or `curl -I` must not
+	// spend the link.
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	transfer, ok := h.takeTransfer(w, r, workspace.Download)
 	if !ok {
 		return

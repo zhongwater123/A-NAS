@@ -39,7 +39,7 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 | `transfers` | 一次性地址：键的哈希、方向（下载或上传）、页面 ID（上传新页面时为空）、基线版本、账号 ID、签发令牌的 ID、说明、到期时间；用过即删 |
 | `audit_events` | 本服务的活动记录，与家庭服务相同的列与索引（`activity.IndexStatement`） |
 
-内存里按账号各存一份“正在看”（页面、版本、时间）与“选中”（见下）。服务重启后丢失，桌面下次上报时恢复。
+内存里按账号各存一份“正在看”（页面、版本、时间）与“选中”（见下）。服务重启后丢失，桌面下次上报时恢复。页面开着时桌面每分钟上报一次“正在看”，3 分钟没有上报就作废；关掉页面或换到别的页面时桌面撤回它，撤回只对同一个页面生效，所以另一个标签页开着的页面不受影响。
 
 `control.db` 新表 `agent_tokens`：令牌哈希（`accountid.TokenHash`）、`id`、账号（外键，`ON DELETE CASCADE`）、范围（`workspace`）、名字、种类、创建时间、上次使用时间。令牌原文形如 `anas_ws_` 加 32 字节随机数的 base32，只在签发时返回一次。上次使用时间由产品服务在核验时更新，同一令牌 10 分钟内只写一次。
 
@@ -55,11 +55,11 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 | `POST …/pages/{pageId}/versions` | mutation | 整份上传新版本，查询参数 `baseVersion`；不是最新时 `409 page_changed` 并给出最新版本 |
 | `GET …/pages/{pageId}/versions/{version}/view` | session | 隔离浏览（见“隔离浏览”）；查询参数 `highlight`、`scroll` |
 | `GET …/pages/{pageId}/versions/{version}/file` | session | 导出原文件 |
-| `PUT /api/v1/workspace/viewing`、`PUT|DELETE …/selection` | mutation | 上报正在看的页面与版本；上报或清除选中 |
+| `PUT /api/v1/workspace/viewing`、`DELETE …/viewing/{pageId}`、`PUT|DELETE …/selection` | mutation | 上报或撤回正在看的页面与版本；上报或清除选中 |
 | `GET /api/v1/workspace/admin/members`、`PUT|DELETE …/members/{accountId}` | admin | 可使用的成员；服务自己再核一次管理员 |
 | `GET /api/v1/session/agent-tokens`、`POST …`、`DELETE …/{tokenId}` | session、mutation | 产品服务自己的接口（`internal/accountsapi`），不经共享工作区服务 |
 
-agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/mcp`。一次性地址（public）：`GET|PUT /api/v1/workspace/transfers/{key}`。产品服务读活动记录：`GET /internal/workspace/activity`（只在服务的套接字上，不对外）。
+agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/mcp`。一次性地址（public）：`GET|PUT /api/v1/workspace/transfers/{key}`；下载只接受 `GET`，`HEAD`（如 `curl -I`、链接检查）回 `405`，不用掉地址。产品服务读活动记录：`GET /internal/workspace/activity`（只在服务的套接字上，不对外）。
 
 请求体：JSON 最多 1 MiB（选中带一张截图）；上传的 HTML 最多 20 MiB；MCP 最多 4 MiB。
 
@@ -95,7 +95,7 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 - 隔离浏览时，服务用 `golang.org/x/net/html` 的分词器逐个读出源码的记号，给每个开始标签在标签名之后加 ` data-anas-at="N"`，`N` 是这个 `<` 在这一版源码中的字节位置；其他字节原样输出。辅助脚本的 `<script>` 插在 doctype 之后、第一个标签之前，不带标记。
 - 元素的范围：读到结束标签时与同名的最近开始标签配对，中间没有配对的（如没写 `</p>`）在这里结束；没有结束标签的到文末。空元素与自闭合标签到标签结束。
 - 选中的元素有 `data-anas-at` 时，它就写在源码里；没有时是脚本生成的，取最近的有标记的祖先，再附上它的 DOM。
-- 样式规则：辅助脚本列出页面样式表里与元素匹配的选择器；服务在源码里找到“选择器 {”的位置与整条规则。找不到时只给选择器。
+- 样式规则：辅助脚本列出页面样式表里与元素匹配的选择器（浏览器写出的 `selectorText`）；服务用 `github.com/tdewolff/parse` 读源码里每个 `<style>` 的样式表，含 `@media` 等里面的规则，找到选择器的记号相同（组合符与逗号两边的空白不算）的第一条，给出它的行号与到它自己的 `}` 为止的原文，字符串、注释与 `url()` 里的括号不算。找不到时只给选择器。20 MB 的页面上最多约 0.3 秒（手写的逐字查找约 0.16 秒，但遇到满页的同名文字要 0.36 秒）。
 - 改动的位置：一次修改中每处新文的起点，换成新版本里包住它的最深元素的位置，存进版本记录。桌面换到新版本时把它们交给辅助脚本标出；只改了 `<style>` 这样不显示的元素时不滚动，保留成员原来的滚动位置。
 - fuzz 测试的性质：注入后的结果去掉注入的属性与脚本，等于原文；任意输入不 panic；每个位置都落在一个 `<` 上。
 
@@ -103,15 +103,17 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 
 `…/view` 的响应头：ADR 0040 决定 2 的 CSP、`X-Frame-Options: SAMEORIGIN`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cache-Control: no-store`。导出与一次性下载：`Content-Disposition: attachment`、`nosniff`、`Content-Security-Policy: sandbox; default-src 'none'`。
 
+页面的 CSP 管不到页面把自己的框架导航到别处：脚本改 `location`、`<meta http-equiv="refresh">`、点链接都会让框架重新载入一个地址。拦住它的是桌面页面自己的 CSP `frame-src 'self'`（`internal/webui`，有测试钉住）：框架只能载入桌面来源的地址。2026-11-26 用无头 Chrome 实测：去掉这一条，三种方式都连到了外面的地址；带上它，三种都被拦下。Firefox 与 Safari 没有测。沙箱没给 `allow-top-navigation`、`allow-popups`、`allow-forms`，所以页面也不能导航整个桌面、开新窗口或提交表单。
+
 辅助脚本：
 
 - 源码在 `web/src/workspace/frame/`，由单独的 Vite 配置构建成经典脚本（IIFE），输出 `internal/webui/dist/assets/workspace-frame.js`，在主构建之后运行，不清空目录、不写主构建的 manifest。模块脚本从不透明来源加载要走 CORS，所以不用模块。
 - `internal/webui` 照 `third-party-licenses.txt` 以 `no-cache` 提供这个固定名字，另带内容的 ETag，没变时回 `304`；它是公开的静态文件，因为隔离框架发出的请求不带会话。截图库打进这个脚本里，页面不另外加载。
-- 截图用 modern-screenshot（产品已在用，4.7.0）。这个库为了取默认样式会在页面里建一个 `srcdoc` 子框架再去读它，在隔离页面里子框架是另一个不透明来源，读取失败。辅助脚本先建上下文，再把它的 `sandbox` 换成本文档里一个不加样式的 shadow 容器。还要：跳过页面里的 iframe；截图前把吸顶与固定定位的元素钉在当前位置；用页面的背景色铺底；画布不小于视口。整页画好再按需要裁剪。
+- 截图用 modern-screenshot（产品已在用，4.7.0）。这个库为了取默认样式会在页面里建一个 `srcdoc` 子框架再去读它，在隔离页面里子框架是另一个不透明来源，读取失败。辅助脚本先建上下文，再把它的 `sandbox` 换成本文档里一个不加样式的 shadow 容器。还要：跳过页面里的 iframe；截图前把吸顶与固定定位的元素钉在当前位置；用页面的背景色铺底。整个文档按原尺寸排版，但只画要截的区域（改库生成的 SVG 的 `viewBox`），所以页面再宽再高，画布也只有截图那么大。辅助脚本一次只画一张。
 
 ## 隔离框架的消息
 
-格式只定义在 `web/src/workspace/frame/protocol.ts`，桌面与辅助脚本都从这里导入类型与校验，两边的测试读同一组样例（`frame/samples.json`）。桌面只接受 `event.source` 是这个框架、`event.origin` 是 `"null"` 的消息，并经 `readFromFrame` 丢掉格式不对的、截断过长的；辅助脚本只接受来自父窗口、来源是桌面（脚本地址的来源）的消息。桌面发给框架时目标来源只能写 `"*"`：不透明来源没有可写的值，消息里也没有机密。
+格式只定义在 `web/src/workspace/frame/protocol.ts`，桌面与辅助脚本都从这里导入类型与校验，两边的测试读同一组样例（`frame/samples.json`）。桌面只接受 `event.source` 是这个框架、`event.origin` 是 `"null"` 的消息，并经 `readFromFrame` 丢掉格式不对的、截断过长的；页面自己的脚本也能发这些消息，所以 `anas:picked` 只在成员点了“选取”之后收一次，每次至多让框架截一张图；辅助脚本只接受来自父窗口、来源是桌面（脚本地址的来源）的消息。桌面发给框架时目标来源只能写 `"*"`：不透明来源没有可写的值，消息里也没有机密。
 
 | 方向 | 消息 |
 |---|---|

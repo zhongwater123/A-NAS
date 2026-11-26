@@ -221,23 +221,20 @@ func (s *server) context(ctx context.Context, caller workspace.Caller, _ context
 			return s.refusal(ctx, err)
 		}
 		if element, ok := workspace.Element(source, selection.At); ok {
-			text := element.Text
-			if cut := workspace.Cut(text, 4000); cut != text {
-				text = cut + "…(cut; read the lines with workspace_read_page)"
-			}
 			key := "source"
 			if selection.Generated {
 				key = "nearest_written_ancestor"
 				picked["made_by_script"] = selection.DOM
 			}
-			picked[key] = pickedSource{Lines: fmt.Sprintf("%d-%d", element.StartLine, element.EndLine), Text: text}
+			picked[key] = pickedSource{Lines: fmt.Sprintf("%d-%d", element.StartLine, element.EndLine), Text: cutSource(element.Text)}
 		} else {
 			picked["made_by_script"] = selection.DOM
 		}
 		var rules []cssRule
+		written := workspace.CSSRules(source, selection.Rules)
 		for _, selector := range selection.Rules {
-			if line, text, ok := workspace.CSSRule(source, selector); ok {
-				rules = append(rules, cssRule{Line: line, Text: text})
+			if rule, ok := written[selector]; ok {
+				rules = append(rules, cssRule{Line: rule.Line, Text: cutSource(rule.Text)})
 			} else {
 				rules = append(rules, cssRule{Selector: selector, Note: "not written like this in the source"})
 			}
@@ -254,6 +251,15 @@ func (s *server) context(ctx context.Context, caller workspace.Caller, _ context
 	body, _ := json.MarshalIndent(report, "", "  ")
 	result.Content = append([]mcp.Content{&mcp.TextContent{Text: string(body)}}, result.Content...)
 	return result
+}
+
+// cutSource keeps a piece of source short enough for the agent's context; the
+// rest is there to read by lines.
+func cutSource(text string) string {
+	if cut := workspace.Cut(text, 4000); cut != text {
+		return cut + "…(cut; read the lines with workspace_read_page)"
+	}
+	return text
 }
 
 type listInput struct {

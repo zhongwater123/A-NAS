@@ -50,6 +50,26 @@ func TestHandlerServesEmbeddedDesktopAndImmutableAssets(t *testing.T) {
 	}
 }
 
+// A shared page in 共享工作区 runs its scripts in a sandboxed frame, and only
+// this policy keeps it from navigating itself to an outside address: a
+// script setting location, a meta refresh or a link all load the frame
+// anew, and frame-src must allow nothing but the desktop
+// (docs/architecture/shared-workspace.md, 隔离浏览).
+func TestFramesOnlyLoadTheDesktopsOwnPages(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	newHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	policy := recorder.Header().Get("Content-Security-Policy")
+	for directive := range strings.SplitSeq(policy, ";") {
+		if name, value, _ := strings.Cut(strings.TrimSpace(directive), " "); name == "frame-src" || name == "child-src" {
+			if value != "'self'" {
+				t.Fatalf("%s %s lets frames load more than the desktop", name, value)
+			}
+			return
+		}
+	}
+	t.Fatalf("Content-Security-Policy = %q has no frame-src", policy)
+}
+
 // Installed apps are served from other ports of the device's address, which
 // browsers count as the same site, so only the desktop itself may frame its
 // pages (issue #161).

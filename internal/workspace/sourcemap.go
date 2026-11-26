@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/tdewolff/parse/v2"
+	"github.com/tdewolff/parse/v2/css"
 	"golang.org/x/net/html"
 )
 
@@ -196,32 +198,136 @@ func Deepest(src []byte, positions []int) []int {
 	return result
 }
 
-// CSSRule finds the rule written for selector in src, as a stylesheet lists
-// it: the line and the rule's text up to its closing brace.
-func CSSRule(src []byte, selector string) (int, string, bool) {
-	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return 0, "", false
-	}
-	needle := []byte(selector)
-	for from := 0; from < len(src); {
-		i := bytes.Index(src[from:], needle)
-		if i < 0 {
-			return 0, "", false
-		}
-		at := from + i
-		rest := bytes.TrimLeft(src[at+len(needle):], " \t\r\n")
-		before := bytes.TrimRight(src[:at], " \t")
-		if bytes.HasPrefix(rest, []byte("{")) && (len(before) == 0 || bytes.ContainsAny(before[len(before)-1:], "}\n;,{>")) {
-			end := bytes.IndexByte(src[at:], '}')
-			if end < 0 {
-				return 0, "", false
+// CSSRuleSource is a style rule as a page's source writes it: the line it
+// starts on and its text through its closing brace.
+type CSSRuleSource struct {
+	Line int
+	Text string
+}
+
+// CSSRules finds, for each selector as a browser lists it (a CSSStyleRule's
+// selectorText), the first rule a <style> element in src writes for it,
+// inside at-rules such as @media too. A selector no rule is written for in
+// so many tokens is left out. The style sheets are read by
+// github.com/tdewolff/parse, so braces in strings, comments and url()
+// count for what they are.
+func CSSRules(src []byte, selectors []string) map[string]CSSRuleSource {
+	wanted := map[string]string{}
+	for _, selector := range selectors {
+		lexer := css.NewLexer(parse.NewInputString(selector))
+		var tokens []css.Token
+		for {
+			token, data := lexer.Next()
+			if token == css.ErrorToken {
+				break
 			}
-			return LineAt(src, at), string(src[at : at+end+1]), true
+			tokens = append(tokens, css.Token{TokenType: token, Data: data})
 		}
-		from = at + len(needle)
+		if key := appendSelectorKey(nil, tokens); len(key) > 0 {
+			wanted[string(key)] = selector
+		}
 	}
-	return 0, "", false
+	found := map[string]CSSRuleSource{}
+	if len(wanted) == 0 {
+		return found
+	}
+	inStyle := false
+	walk(src, func(token html.TokenType, raw []byte, offset int, name string) {
+		if token == html.TextToken && inStyle {
+			findRules(src, raw, offset, wanted, found)
+		}
+		inStyle = token == html.StartTagToken && name == "style"
+	})
+	return found
+}
+
+// findRules adds to found the first rule for each wanted selector in sheet,
+// a style sheet at offset in src.
+func findRules(src, sheet []byte, offset int, wanted map[string]string, found map[string]CSSRuleSource) {
+	// The parser writes a NUL just past what it reads: it gets a copy with
+	// room for one, never src.
+	parser := css.NewParser(parse.NewInputBytes(append(make([]byte, 0, len(sheet)+1), sheet...)), false)
+	// open are the rules and at-rules begun and not yet ended, innermost
+	// last: where a wanted rule starts, and the selector it is wanted for.
+	type block struct {
+		start    int
+		selector string
+	}
+	var open []block
+	var key []byte
+	ended := 0
+	for {
+		grammar, _, _ := parser.Next()
+		switch grammar {
+		case css.ErrorGrammar:
+			// A parse error skips what it can; anything else is the end.
+			if !parser.HasParseError() || parser.Offset() <= ended {
+				return
+			}
+		case css.BeginRulesetGrammar:
+			key = appendSelectorKey(key[:0], parser.Values())
+			rule := block{selector: wanted[string(key)]}
+			if _, ok := found[rule.selector]; ok {
+				rule.selector = ""
+			}
+			if rule.selector != "" {
+				// The rule starts at its selector, after any white space
+				// or comment since what came before.
+				rule.start = ended + firstToken(sheet[ended:parser.Offset()])
+			}
+			open = append(open, rule)
+		case css.BeginAtRuleGrammar:
+			open = append(open, block{})
+		case css.EndRulesetGrammar, css.EndAtRuleGrammar:
+			if len(open) == 0 {
+				break
+			}
+			rule := open[len(open)-1]
+			open = open[:len(open)-1]
+			if _, ok := found[rule.selector]; rule.selector != "" && !ok {
+				found[rule.selector] = CSSRuleSource{
+					Line: LineAt(src, offset+rule.start),
+					Text: string(sheet[rule.start:parser.Offset()]),
+				}
+			}
+		}
+		ended = parser.Offset()
+	}
+}
+
+// firstToken is where the first token in prelude starts that is neither
+// white space nor a comment.
+func firstToken(prelude []byte) int {
+	lexer := css.NewLexer(parse.NewInputBytes(bytes.Clone(prelude)))
+	at := 0
+	for {
+		token, data := lexer.Next()
+		if token != css.WhitespaceToken && token != css.CommentToken {
+			return at
+		}
+		at += len(data)
+	}
+}
+
+// appendSelectorKey appends a selector's tokens to key with white space only
+// where it is the descendant combinator: a browser writes ".a > .b" for
+// ".a>.b" and "h1, h2" for "h1,h2".
+func appendSelectorKey(key []byte, tokens []css.Token) []byte {
+	space, joined := false, true
+	for _, token := range tokens {
+		if token.TokenType == css.WhitespaceToken || token.TokenType == css.CommentToken {
+			space = true
+			continue
+		}
+		joins := token.TokenType == css.CommaToken ||
+			token.TokenType == css.DelimToken && len(token.Data) == 1 && strings.ContainsRune(">+~", rune(token.Data[0]))
+		if space && !joins && !joined {
+			key = append(key, ' ')
+		}
+		key = append(key, token.Data...)
+		space, joined = false, joins
+	}
+	return key
 }
 
 // Title is the text of src's first <title>, with runs of white space folded.

@@ -235,20 +235,26 @@ function canvasColor(doc: Document): string {
 // maxEdge is a screenshot's longer side at most.
 const maxEdge = 1280;
 
-// capture draws the whole document, as the page itself shows it, and crops
-// the part of the viewport in rect to a JPEG.
+// capture draws the part of the viewport in rect, as the page itself shows
+// it, to a JPEG. The whole document is laid out but only that part is
+// painted, so a page millions of pixels wide still makes a small picture.
 async function capture(doc: Document, skip: Node, rect: Rect): Promise<string> {
   const view = doc.defaultView;
   if (!view) throw new Error("no window");
   const root = doc.documentElement;
   const viewport = { w: root.clientWidth, h: root.clientHeight };
+  const page = { w: Math.max(root.scrollWidth, viewport.w), h: Math.max(root.scrollHeight, viewport.h) };
+  const left = Math.max(0, rect.x);
+  const top = Math.max(0, rect.y);
+  const width = Math.max(1, Math.min(viewport.w, rect.x + rect.w) - left);
+  const height = Math.max(1, Math.min(viewport.h, rect.y + rect.h) - top);
   const pins = pinsForNow(doc);
-  let full: HTMLCanvasElement;
+  let picture: HTMLCanvasElement;
   try {
     const context = await createContext(root, {
-      width: Math.max(root.scrollWidth, viewport.w),
-      height: Math.max(root.scrollHeight, viewport.h),
-      scale: 1,
+      width: page.w,
+      height: page.h,
+      scale: Math.min(1, maxEdge / Math.max(width, height)),
       autoDestruct: true,
       backgroundColor: canvasColor(doc),
       // A frame inside the page is another origin; reading it fails the picture.
@@ -260,26 +266,26 @@ async function capture(doc: Document, skip: Node, rect: Rect): Promise<string> {
         clone.removeAttribute(PIN);
         clone.style.cssText += `;${(pins.get(key) ?? "").replaceAll(";", " !important;")} !important`;
       },
+      // The document keeps its size; the picture, and the canvas made for
+      // it, show only the region.
+      onCreateForeignObjectSvg: (svg) => {
+        svg.querySelector("foreignObject")?.setAttribute("width", String(page.w));
+        svg.querySelector("foreignObject")?.setAttribute("height", String(page.h));
+        svg.setAttribute("viewBox", `${left + view.scrollX} ${top + view.scrollY} ${width} ${height}`);
+        svg.setAttribute("width", String(width));
+        svg.setAttribute("height", String(height));
+        context.width = width;
+        context.height = height;
+      },
     });
     (context as unknown as { sandbox: unknown }).sandbox = styleSandbox(doc);
-    full = await domToCanvas(context);
+    picture = await domToCanvas(context);
   } finally {
     for (const el of doc.querySelectorAll(`[${PIN}]`)) el.removeAttribute(PIN);
   }
-  const left = Math.max(0, rect.x);
-  const top = Math.max(0, rect.y);
-  const width = Math.max(1, Math.min(viewport.w, rect.x + rect.w) - left);
-  const height = Math.max(1, Math.min(viewport.h, rect.y + rect.h) - top);
-  const scale = Math.min(1, maxEdge / Math.max(width, height));
-  const out = doc.createElement("canvas");
-  out.width = Math.max(1, Math.round(width * scale));
-  out.height = Math.max(1, Math.round(height * scale));
-  out
-    .getContext("2d")
-    ?.drawImage(full, left + view.scrollX, top + view.scrollY, width, height, 0, 0, out.width, out.height);
   // A smaller picture when the first is too large for the service.
-  let image = out.toDataURL("image/jpeg", 0.85);
-  if (image.length > 600_000) image = out.toDataURL("image/jpeg", 0.6);
+  let image = picture.toDataURL("image/jpeg", 0.85);
+  if (image.length > 600_000) image = picture.toDataURL("image/jpeg", 0.6);
   return image;
 }
 
@@ -318,6 +324,8 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
   // hovered is what hover outlines: moving within it draws nothing again.
   let hovered: Element | undefined;
   let mark: HTMLElement | undefined;
+  // One picture at a time.
+  let drawing = Promise.resolve();
   const unhover = () => {
     layer().remove(hover);
     hovered = undefined;
@@ -364,9 +372,12 @@ export function startHelper(script: HTMLScriptElement, view: Window = window): (
       layer().remove(mark);
       mark = undefined;
     } else {
-      capture(doc, layer().host, message.rect).then(
-        (image) => post({ type: "anas:captured", id: message.id, image }),
-        () => post({ type: "anas:captured", id: message.id }),
+      const { id, rect } = message;
+      drawing = drawing.then(() =>
+        capture(doc, layer().host, rect).then(
+          (image) => post({ type: "anas:captured", id, image }),
+          () => post({ type: "anas:captured", id }),
+        ),
       );
     }
   });

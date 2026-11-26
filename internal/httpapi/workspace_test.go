@@ -331,6 +331,9 @@ func TestAnAgentMovesWholePagesThroughOneTimeLinks(t *testing.T) {
 	}
 
 	download := link("workspace_checkout", map[string]any{"page": page.ID})
+	if head, err := http.Head(download); err != nil || head.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("HEAD on a download link = %v %v", head, err)
+	}
 	response, err := http.Get(download)
 	if err != nil {
 		t.Fatal(err)
