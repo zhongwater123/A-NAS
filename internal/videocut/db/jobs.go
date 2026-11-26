@@ -12,32 +12,32 @@ import (
 // The reads and writes of jobs (docs/architecture/montage-center.md, 持久任务).
 
 const (
-	// FinishedStates are the states a job ends in, as SQL.
-	FinishedStates = "'done', 'failed', 'cancelled'"
-	// ActiveStateQuery holds for a job not finished.
-	ActiveStateQuery = "state NOT IN (" + FinishedStates + ")"
-	// DueStates holds for a job that may run once due.
-	DueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
+	// finishedStates are the states a job ends in, as SQL.
+	finishedStates = "'done', 'failed', 'cancelled'"
+	// activeStateQuery holds for a job not finished.
+	activeStateQuery = "state NOT IN (" + finishedStates + ")"
+	// dueStates holds for a job that may run once due.
+	dueStates = "state IN ('queued', 'waiting') AND cancel_requested = 0"
 )
 
 // --- planning (docs/architecture/montage-planning-session.md) ---
 
-// WantsRound is what makes a job one a round may be claimed for: it came to
+// wantsRound is what makes a job one a round may be claimed for: it came to
 // planning, waits there for VNAS (its wait reason waitVNAS), and asked for
 // a round. A job put back in the queue, by replanning or by taking videos
 // out, wants none until it comes to planning again (app's resume). It
 // reads the jobs as j.
-func WantsRound(waitVNAS string) string {
+func wantsRound(waitVNAS string) string {
 	return "j.plan_wanted = 1 AND j.state = 'waiting' AND j.wait_reason = '" + waitVNAS + "' AND j.cancel_requested = 0"
 }
 
-// KeepsMarker is what keeps a member's marker: a job that wants a round, or
+// keepsMarker is what keeps a member's marker: a job that wants a round, or
 // one that wanted it and is looking again right now (a waiting job runs for
 // an instant each time it looks, and leaves its marker as it goes back to
 // waiting). Without the second, a sync in that instant would take the
 // marker of a job that still waits. waitVNAS is the wait reason of a job
 // waiting for VNAS; it reads the jobs as j.
-func KeepsMarker(waitVNAS string) string {
+func keepsMarker(waitVNAS string) string {
 	return "j.plan_wanted = 1 AND j.cancel_requested = 0 AND (j.state = 'running' OR (j.state = 'waiting' AND j.wait_reason = '" + waitVNAS + "'))"
 }
 
@@ -89,11 +89,11 @@ func (d *DB) WantRound(ctx context.Context, jobID string, at time.Time) (string,
 }
 
 // MarkedUsernames are the usernames, registered since registeredSince, of
-// the members with a job that keeps their marker (KeepsMarker, with
+// the members with a job that keeps their marker (keepsMarker, with
 // waitVNAS).
 func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSince time.Time) (map[string]bool, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT g.username FROM jobs j JOIN plan_grants g ON g.owner_user_id = j.owner_user_id
-		WHERE `+KeepsMarker(waitVNAS)+` AND g.registered_at >= ?`,
+		WHERE `+keepsMarker(waitVNAS)+` AND g.registered_at >= ?`,
 		sqlitedb.FormatTime(registeredSince))
 	if err != nil {
 		return nil, err
@@ -114,12 +114,12 @@ func (d *DB) MarkedUsernames(ctx context.Context, waitVNAS string, registeredSin
 }
 
 // ClaimableJob is owner's earliest job a round may be claimed for
-// (WantsRound, with waitVNAS) and none is in progress for: its id, epoch,
+// (wantsRound, with waitVNAS) and none is in progress for: its id, epoch,
 // first step's input key and settings, encoded; sql.ErrNoRows when there
 // is none.
 func (tx *Tx) ClaimableJob(ctx context.Context, owner, waitVNAS string) (jobID string, epoch int, pickKey, settings string, err error) {
 	err = tx.tx.QueryRowContext(ctx, `SELECT j.id, j.plan_epoch, p.input_key, j.settings_json FROM jobs j JOIN steps p ON p.job_id = j.id AND p.name = 'pick'
-			WHERE j.owner_user_id = ? AND `+WantsRound(waitVNAS)+`
+			WHERE j.owner_user_id = ? AND `+wantsRound(waitVNAS)+`
 			AND NOT EXISTS (SELECT 1 FROM rounds r WHERE r.job_id = j.id AND r.state IN ('claimed', 'started'))
 			ORDER BY j.created_at, j.id LIMIT 1`, owner).Scan(&jobID, &epoch, &pickKey, &settings)
 	return jobID, epoch, pickKey, settings, err
@@ -149,10 +149,10 @@ func cancelRequested(ctx context.Context, q queryer, jobID string) (bool, error)
 }
 
 // DueLateRoundJobs makes the waiting jobs of the rounds out of time by the
-// bounds claimed, started and called (LateRounds) due at at.
+// bounds claimed, started and called (lateRounds) due at at.
 func (tx *Tx) DueLateRoundJobs(ctx context.Context, at, claimed, started, called time.Time) error {
 	bounds := []any{sqlitedb.FormatTime(claimed), sqlitedb.FormatTime(started), sqlitedb.FormatTime(called)}
-	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+LateRounds+")",
+	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET not_before = ? WHERE state = 'waiting' AND id IN (SELECT job_id FROM rounds WHERE `+lateRounds+")",
 		append([]any{sqlitedb.FormatTime(at)}, bounds...)...)
 	return err
 }
@@ -170,7 +170,7 @@ func (tx *Tx) MakeWaitingJobDue(ctx context.Context, jobID string, at time.Time)
 func (tx *Tx) CancelRequestedJobs(ctx context.Context, at time.Time) error {
 	now := sqlitedb.FormatTime(at)
 	_, err := tx.tx.ExecContext(ctx, `UPDATE jobs SET state = 'cancelled', lease_until = NULL, finished_at = ?, updated_at = ?
-			WHERE cancel_requested = 1 AND `+ActiveStateQuery, now, now)
+			WHERE cancel_requested = 1 AND `+activeStateQuery, now, now)
 	return err
 }
 
@@ -185,7 +185,7 @@ func (tx *Tx) RequeueRunningJobs(ctx context.Context, at time.Time) error {
 // JobActive reports whether jobID is a job that has not ended.
 func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 	var active bool
-	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+ActiveStateQuery+")", jobID).Scan(&active)
+	err := d.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE id = ? AND "+activeStateQuery+")", jobID).Scan(&active)
 	return active, err
 }
 
@@ -193,7 +193,7 @@ func (d *DB) JobActive(ctx context.Context, jobID string) (bool, error) {
 // (not valid when none is).
 func (d *DB) NextNotBefore(ctx context.Context) (sql.NullString, error) {
 	var next sql.NullString
-	err := d.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+DueStates).Scan(&next)
+	err := d.db.QueryRowContext(ctx, "SELECT MIN(not_before) FROM jobs WHERE "+dueStates).Scan(&next)
 	return next, err
 }
 
@@ -208,7 +208,7 @@ type DueJob struct {
 func (tx *Tx) DueJob(ctx context.Context, now time.Time) (DueJob, error) {
 	var job DueJob
 	err := tx.tx.QueryRowContext(ctx, `SELECT id, owner_user_id, project_id, kind, settings_json, plans FROM jobs
-			WHERE `+DueStates+` AND not_before <= ?
+			WHERE `+dueStates+` AND not_before <= ?
 			ORDER BY not_before, created_at LIMIT 1`, sqlitedb.FormatTime(now)).
 		Scan(&job.ID, &job.Owner, &job.ProjectID, &job.Kind, &job.Settings, &job.Plans)
 	return job, err
@@ -360,7 +360,7 @@ func keyedJob(ctx context.Context, q queryer, owner, requestKey, column string) 
 // ProjectJobActive reports whether a job of projectID has not ended.
 func (tx *Tx) ProjectJobActive(ctx context.Context, projectID string) (bool, error) {
 	var active bool
-	err := tx.tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+ActiveStateQuery+")", projectID).Scan(&active)
+	err := tx.tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM jobs WHERE project_id = ? AND "+activeStateQuery+")", projectID).Scan(&active)
 	return active, err
 }
 
@@ -436,7 +436,7 @@ func (d *DB) RequestCancel(ctx context.Context, owner, jobID string, at time.Tim
 	err := d.db.QueryRowContext(ctx, `UPDATE jobs SET cancel_requested = 1, updated_at = ?,
 		state = CASE WHEN state = 'running' THEN state ELSE 'cancelled' END,
 		finished_at = CASE WHEN state = 'running' THEN finished_at ELSE ? END
-		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+ActiveStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
+		WHERE id = ? AND owner_user_id = ? AND save_started = 0 AND `+activeStateQuery+" RETURNING state", now, now, jobID, owner).Scan(&state)
 	return state, err
 }
 

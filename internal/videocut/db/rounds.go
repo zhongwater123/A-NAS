@@ -11,14 +11,14 @@ import (
 // The reads and writes of rounds: the planning rounds the member's VNAS
 // claims, starts and ends (docs/architecture/montage-planning-session.md).
 
-// EndRound ends rounds: one only claimed never reached the model and is
+// endRound ends rounds: one only claimed never reached the model and is
 // abandoned, one started is over. Its arguments are the time and the
 // outcome; the rounds it ends follow.
-const EndRound = `UPDATE rounds SET ended_at = ?, outcome = ?, state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END`
+const endRound = `UPDATE rounds SET ended_at = ?, outcome = ?, state = CASE WHEN state = 'claimed' THEN 'abandoned' ELSE 'ended' END`
 
-// LateRounds picks the rounds out of time: claimed by the first bound and
+// lateRounds picks the rounds out of time: claimed by the first bound and
 // not started, or started by the second or last called by the third.
-const LateRounds = `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND (started_at <= ? OR called_at <= ?))`
+const lateRounds = `(state = 'claimed' AND claimed_at <= ?) OR (state = 'started' AND (started_at <= ? OR called_at <= ?))`
 
 // RoundStanding is a round as a tool call finds it, with its job: the
 // round's id, state, epoch and the first step's input key it plans for;
@@ -61,9 +61,9 @@ func (d *DB) MarkRoundCalled(ctx context.Context, id string, at time.Time) error
 	return err
 }
 
-// EndRoundByID ends round id at at with outcome (EndRound).
+// EndRoundByID ends round id at at with outcome (endRound).
 func (tx *Tx) EndRoundByID(ctx context.Context, id string, at time.Time, outcome string) error {
-	_, err := tx.tx.ExecContext(ctx, EndRound+" WHERE id = ?", sqlitedb.FormatTime(at), outcome, id)
+	_, err := tx.tx.ExecContext(ctx, endRound+" WHERE id = ?", sqlitedb.FormatTime(at), outcome, id)
 	return err
 }
 
@@ -96,9 +96,9 @@ func (d *DB) PastRounds(ctx context.Context, jobID string, epoch int, pickKey st
 
 // EndOtherRounds ends, at at with outcome, jobID's rounds in progress that
 // plan for another epoch than epoch or another input key than pickKey
-// (EndRound).
+// (endRound).
 func (d *DB) EndOtherRounds(ctx context.Context, jobID string, epoch int, pickKey string, at time.Time, outcome string) error {
-	_, err := d.db.ExecContext(ctx, EndRound+` WHERE job_id = ? AND state IN ('claimed', 'started') AND (epoch <> ? OR input_key <> ?)`,
+	_, err := d.db.ExecContext(ctx, endRound+` WHERE job_id = ? AND state IN ('claimed', 'started') AND (epoch <> ? OR input_key <> ?)`,
 		sqlitedb.FormatTime(at), outcome, jobID, epoch, pickKey)
 	return err
 }
@@ -125,7 +125,7 @@ func (tx *Tx) Round(ctx context.Context, owner, roundID string) (RoundRow, error
 }
 
 // EndRounds ends, at at with outcome, jobID's rounds in progress, whatever
-// they plan for (EndRound). Their conversations stay in the member's VNAS
+// they plan for (endRound). Their conversations stay in the member's VNAS
 // history; what they hand back from now on is not kept.
 func (d *DB) EndRounds(ctx context.Context, jobID string, at time.Time, outcome string) error {
 	return endRounds(ctx, d.db, jobID, at, outcome)
@@ -137,7 +137,7 @@ func (tx *Tx) EndRounds(ctx context.Context, jobID string, at time.Time, outcome
 }
 
 func endRounds(ctx context.Context, q queryer, jobID string, at time.Time, outcome string) error {
-	_, err := q.ExecContext(ctx, EndRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
+	_, err := q.ExecContext(ctx, endRound+" WHERE job_id = ? AND state IN ('claimed', 'started')", sqlitedb.FormatTime(at), outcome, jobID)
 	return err
 }
 
@@ -174,11 +174,11 @@ func (tx *Tx) MarkRoundReported(ctx context.Context, id string, at time.Time) er
 }
 
 // EndLateRounds ends, at at with outcome, the rounds out of time by the
-// bounds claimed, started and called (LateRounds; EndRound), and says how
+// bounds claimed, started and called (lateRounds; endRound), and says how
 // many it ended (0 when that is unknown).
 func (tx *Tx) EndLateRounds(ctx context.Context, at time.Time, outcome string, claimed, started, called time.Time) (int64, error) {
 	bounds := []any{sqlitedb.FormatTime(claimed), sqlitedb.FormatTime(started), sqlitedb.FormatTime(called)}
-	ended, err := tx.tx.ExecContext(ctx, EndRound+" WHERE "+LateRounds, append([]any{sqlitedb.FormatTime(at), outcome}, bounds...)...)
+	ended, err := tx.tx.ExecContext(ctx, endRound+" WHERE "+lateRounds, append([]any{sqlitedb.FormatTime(at), outcome}, bounds...)...)
 	if err != nil {
 		return 0, err
 	}

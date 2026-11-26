@@ -18,15 +18,15 @@ func PlanStepSQL(name, column string) string {
 	return "CASE WHEN " + column + " <= 1 THEN '" + name + "' ELSE '" + name + "-' || " + column + " END"
 }
 
-// VersionColumns are what Versions scans, of versions v.
-var VersionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
+// versionColumns are what Versions scans, of versions v.
+var versionColumns = `v.id, v.number, v.job_id, v.plan, v.film_asset_id, v.created_at,
 	v.timeline_json IS NOT NULL OR EXISTS (SELECT 1 FROM steps f WHERE f.job_id = v.job_id AND f.state = 'done'
 		AND f.name = ` + PlanStepSQL("fill", "v.plan") + ` AND f.result_json IS NOT NULL),
 	v.kind, IFNULL(v.source_version_id, ''), IFNULL((SELECT number FROM versions o WHERE o.id = v.source_version_id), 0), v.draft_revision,
 	CASE WHEN v.kind = 'recut' THEN IFNULL((SELECT json_extract(CASE WHEN json_valid(settings_json) THEN settings_json END, '$.recut.change')
 		FROM jobs WHERE id = v.job_id), '') ELSE '' END`
 
-// VersionRow is a version as Versions reads it (VersionColumns): whether
+// VersionRow is a version as Versions reads it (versionColumns): whether
 // it can be edited, the version it came from and its number, the draft's
 // revision it saved, and a recut's sentence.
 type VersionRow struct {
@@ -46,7 +46,7 @@ type VersionRow struct {
 
 // Versions lists the versions whose column is value, ordered by order.
 func (d *DB) Versions(ctx context.Context, column, value, order string) ([]VersionRow, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT "+VersionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
+	rows, err := d.db.QueryContext(ctx, "SELECT "+versionColumns+" FROM versions v WHERE v."+column+" = ? ORDER BY v."+order, value)
 	if err != nil {
 		return nil, err
 	}
