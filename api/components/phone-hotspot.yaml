@@ -8,7 +8,19 @@ schemas:
         enum: [unavailable, "off", starting, "on", stopping, failed]
       reason:
         type: string
-        enum: [dependencies_missing, no_wired_uplink, no_idle_radio, ap_failed, dhcp_failed, web_unavailable, tls_unavailable, isolation_failed, cleanup_failed, service_failed]
+        enum: [dependencies_missing, no_wired_uplink, no_idle_radio, ap_failed, dhcp_failed, web_unavailable, tls_unavailable, isolation_failed, cleanup_failed, service_failed, invalid_settings]
+      settings:
+        $ref: "#/schemas/PhoneHotspotSettings"
+      devices:
+        description: Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected.
+        type: array
+        items:
+          type: object
+          required: [mac]
+          properties:
+            mac: { type: string }
+            ip: { type: string }
+            name: { type: string }
       connection:
         description: Present when the hotspot is on. The response is not cacheable.
         type: object
@@ -17,9 +29,24 @@ schemas:
           ssid: { type: string }
           password: { type: string }
           url: { type: string }
+          portal: { type: boolean, description: Whether this running hotspot advertises a WebOS portal }
   PhoneHotspotRequest:
     type: object
     additionalProperties: false
     required: [enabled]
     properties:
       enabled: { type: boolean }
+  PhoneHotspotSettings:
+    type: object
+    required: [ssid, passwordConfigured, portal]
+    properties:
+      ssid: { type: string, description: Empty selects the device's default hotspot name }
+      passwordConfigured: { type: boolean }
+      portal: { type: boolean }
+  PhoneHotspotSettingsChange:
+    type: object
+    additionalProperties: false
+    properties:
+      ssid: { type: string, maxLength: 32, description: At most 32 UTF-8 bytes. Empty restores the device's default name. }
+      password: { type: string, maxLength: 63, description: Eight to 63 printable ASCII characters. Empty restores a fresh random password on each start. }
+      portal: { type: boolean, description: Advertise the WebOS entry via the mobile system's network sign-in prompt }

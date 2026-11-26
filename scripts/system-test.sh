@@ -818,6 +818,15 @@ check "the packaged phone hotspot starts off" \
   test "$(curl -fsS -b /tmp/owner.jar "$hotspot" | jq -r .state)" = off
 check "a household member cannot read the phone hotspot" \
   test "$(status_of -b /tmp/alice.jar "$hotspot")" = 403
+check "the administrator can save hotspot settings for the next start" \
+  jq -e '.ssid == "Guest Wi-Fi" and .passwordConfigured and .portal and (has("password") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -X PUT -d '{"ssid":"Guest Wi-Fi","password":"test-fixture-only","portal":true}' "$hotspot/settings")"
+check "the settings survive a fresh request while the hotspot is still off" \
+  jq -e '.state == "off" and .settings.ssid == "Guest Wi-Fi" and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "the hotspot settings file belongs to root alone" \
+  test "$(stat -c '%a:%u' /var/lib/a-nas-host/phone-hotspot.json)" = 600:0
 hotspot_routes=$(ip -4 route show default)
 check "the administrator can request the packaged hotspot" \
   quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \

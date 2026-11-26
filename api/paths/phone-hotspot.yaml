@@ -20,3 +20,17 @@
       "401": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+
+/api/v1/network/phone-hotspot/settings:
+  put:
+    operationId: savePhoneHotspotSettings
+    x-anas-posture: admin
+    summary: Save settings for the next time the phone hotspot starts
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotSettingsChange" } } } }
+    responses:
+      "200": { description: Saved settings without the password, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotSettings" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

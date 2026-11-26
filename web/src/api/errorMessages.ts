@@ -16,6 +16,8 @@ const messages: Record<string, string> = {
   authentication_required: "登录已失效或账号不可用，请重新登录",
   csrf_failed: "登录状态已变化，请刷新页面后重试",
   forbidden: "没有权限执行这项操作",
+  hotspot_invalid_ssid: "Wi-Fi 名称最多 32 字节，不能包含控制字符。",
+  hotspot_invalid_password: "Wi-Fi 密码须为 8–63 个可打印的英文字符。",
   not_found: "内容已不存在，请刷新后重试",
   insufficient_storage: "数据卷剩余空间不足",
   validation_failed: "填写的内容不符合要求",

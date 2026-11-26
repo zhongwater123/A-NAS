@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
@@ -38,6 +39,9 @@ func TestPhoneHotspotIsOnlyControlledAndReadByAdministrators(t *testing.T) {
 	f.client.do(http.MethodGet, path, "", nil, http.StatusUnauthorized)
 	member.do(http.MethodGet, path, "", nil, http.StatusForbidden)
 	member.do(http.MethodPut, path, `{"enabled":true}`, nil, http.StatusForbidden)
+	member.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"ssid":"guest"}`, nil, http.StatusForbidden)
+	owner.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"ssid":"guest\nignore"}`, nil, http.StatusBadRequest)
+	owner.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"password":"short"}`, nil, http.StatusBadRequest)
 	owner.do(http.MethodPut, path, `{"enabled":true}`, nil, http.StatusOK)
 	response := owner.do(http.MethodGet, path, "", nil, http.StatusOK)
 	var state phonehotspot.State
@@ -50,6 +54,14 @@ func TestPhoneHotspotIsOnlyControlledAndReadByAdministrators(t *testing.T) {
 	if response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("hotspot credentials must not be cacheable")
 	}
+	saved := owner.do(http.MethodPut, phonehotspotapi.SettingsPath, `{"ssid":"Guest Wi-Fi","password":"fixture-only-password","portal":true}`, nil, http.StatusOK)
+	if strings.Contains(saved.Body.String(), "fixture-only-password") || saved.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("the settings response exposed a password or allowed caching")
+	}
+	response = owner.do(http.MethodGet, path, "", nil, http.StatusOK)
+	if strings.Contains(response.Body.String(), "fixture-only-password") {
+		t.Fatal("saving settings changed active credentials before restart")
+	}
 	member.do(http.MethodGet, path, "", nil, http.StatusForbidden)
 	response = owner.do(http.MethodPut, path, `{"enabled":false}`, nil, http.StatusOK)
 	state = phonehotspot.State{}
@@ -58,5 +70,12 @@ func TestPhoneHotspotIsOnlyControlledAndReadByAdministrators(t *testing.T) {
 	}
 	if state.State != phonehotspot.Off || state.Connection != nil {
 		t.Fatal("an inactive hotspot must not return credentials")
+	}
+	response = owner.do(http.MethodPut, path, `{"enabled":true}`, nil, http.StatusOK)
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Connection == nil || state.Connection.SSID != "Guest Wi-Fi" || !state.Connection.Portal {
+		t.Fatal("reopening the hotspot did not apply the saved settings")
 	}
 }

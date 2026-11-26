@@ -1898,6 +1898,34 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/network/phone-hotspot/settings:
+    put:
+      operationId: savePhoneHotspotSettings
+      x-anas-posture: admin
+      summary: Save settings for the next time the phone hotspot starts
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneHotspotSettingsChange'
+      responses:
+        '200':
+          description: Saved settings without the password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotSettings'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
@@ -12720,6 +12748,23 @@ components:
             - isolation_failed
             - cleanup_failed
             - service_failed
+            - invalid_settings
+        settings:
+          $ref: '#/components/schemas/PhoneHotspotSettings'
+        devices:
+          description: Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected.
+          type: array
+          items:
+            type: object
+            required:
+              - mac
+            properties:
+              mac:
+                type: string
+              ip:
+                type: string
+              name:
+                type: string
         connection:
           description: Present when the hotspot is on. The response is not cacheable.
           type: object
@@ -12734,6 +12779,9 @@ components:
               type: string
             url:
               type: string
+            portal:
+              type: boolean
+              description: Whether this running hotspot advertises a WebOS portal
     PhoneHotspotRequest:
       type: object
       additionalProperties: false
@@ -18146,6 +18194,35 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PhoneHotspotSettings:
+      type: object
+      required:
+        - ssid
+        - passwordConfigured
+        - portal
+      properties:
+        ssid:
+          type: string
+          description: Empty selects the device's default hotspot name
+        passwordConfigured:
+          type: boolean
+        portal:
+          type: boolean
+    PhoneHotspotSettingsChange:
+      type: object
+      additionalProperties: false
+      properties:
+        ssid:
+          type: string
+          maxLength: 32
+          description: At most 32 UTF-8 bytes. Empty restores the device's default name.
+        password:
+          type: string
+          maxLength: 63
+          description: Eight to 63 printable ASCII characters. Empty restores a fresh random password on each start.
+        portal:
+          type: boolean
+          description: Advertise the WebOS entry via the mobile system's network sign-in prompt
     SystemUpdateImage:
       type: object
       additionalProperties: false
