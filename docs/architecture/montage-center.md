@@ -201,7 +201,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 区域 | 要改的地方 |
 |---|---|
 | 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-videocut`（否则连不上 0750 的 `/run/a-nas-videocut`） |
-| 包脚本 | preinst 检查 UID 31005 冲突、备份 `videocut.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（含 `domain/`） |
+| 包脚本 | preinst 检查 UID 31005 冲突、备份 `videocut.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（`ops/`、`algo/`；模板只装到 `assistant/videocut-prompts/`） |
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `videocut service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
 | anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("videocut")`） |
@@ -580,7 +580,7 @@ montage/
   - **规则**：与答案无关的说明，即第八版两步的 system 文字、体裁规则、开头结尾与音乐结构的规则，写进这次对话的提示词，一开始就给出。Hermes 把所有 MCP 工具的结果都包成“不可信数据”交给模型，规则放在工具结果里会被当成数据。
   - **数据**：卡片目录、音乐段落、成员的要求、第二步的画面与节拍，由两个 brief 工具在需要时返回。
   - **精确 Schema**：这一轮的枚举与数量限制也由 brief 工具返回。submit 工具的 inputSchema 只写通用结构，精确校验在剪辑中心做。
-- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__videocut__` 前缀）；软件包把它装进 `/usr/lib/a-nas/assistant/videocut-prompts/`。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
+- **规则是固定的模板**：源文件在 `ai/anas_videocut/prompts/`，按版本命名（现在是 `plan-v2.md`，一轮规划两个方案；工具名写全 `mcp__videocut__` 前缀）；软件包只把它装进规划进程读的 `/usr/lib/a-nas/assistant/videocut-prompts/`，不装进计算 Worker 的 `/usr/lib/a-nas/ai/anas_videocut/`（Worker 不读模板）。规划发起方按领取回答里的模板版本选取，只填进经过校验的几项：轮次与任务编号、token、目标秒数。所以剪辑中心决定不了提示词；它被攻破时还能经工具结果诱导模型，剩下的风险见“规划授权”。
 - 拆分改变了第八版的提示词，所以规划不在黄金比对之内，靠固定样本上的人工对比验收（规格的“剪辑行为迁移”）。
 - 后台对话里没有人回答审批，规划发起方对审批请求一律答拒绝。提示词仍要求不把描述写进记忆。
 

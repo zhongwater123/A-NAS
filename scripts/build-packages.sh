@@ -116,7 +116,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_videocut/ops" "$lib/ai/anas_videocut/algo" "$lib/ai/anas_videocut/prompts" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_videocut/ops" "$lib/ai/anas_videocut/algo" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -140,12 +140,12 @@ install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
 install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
 # The montage center's compute Worker runs in the same runtime (ADR 0038):
-# worker.py, its operations (ops/), the pure computation (algo/) and the
-# planning templates (prompts/).
+# worker.py, its operations (ops/) and the pure computation (algo/). Not the
+# planning templates (prompts/): the Worker never reads them; the planner
+# does, from assistant/videocut-prompts below.
 install -m 0644 "$repo"/ai/anas_videocut/*.py "$lib/ai/anas_videocut/"
 install -m 0644 "$repo"/ai/anas_videocut/ops/*.py "$lib/ai/anas_videocut/ops/"
 install -m 0644 "$repo"/ai/anas_videocut/algo/*.py "$lib/ai/anas_videocut/algo/"
-install -m 0644 "$repo"/ai/anas_videocut/prompts/*.md "$lib/ai/anas_videocut/prompts/"
 for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
