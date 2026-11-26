@@ -39,7 +39,15 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 | `transfers` | 一次性地址：键的哈希、方向（下载或上传）、页面 ID（上传新页面时为空）、基线版本、账号 ID、签发令牌的 ID、说明、到期时间；用过即删 |
 | `audit_events` | 本服务的活动记录，与家庭服务相同的列与索引（`activity.IndexStatement`） |
 
-内存里按账号各存一份“正在看”（页面、版本、时间）与“选中”（见下）。服务重启后丢失，桌面下次上报时恢复。页面的标签页开着时每分钟上报一次“正在看”，3 分钟没有上报就作废；标签页关闭时（`pagehide`，请求带 `keepalive`）撤回它，撤回只对同一个页面生效，所以另一个标签页开着的页面不受影响。
+内存里存三样东西（`internal/workspace/live.go`），服务重启后丢失，标签页与 agent 下次上报时恢复：
+
+- 每个账号开着的标签页（“正在看”）：标签页打开时给自己起一个随机名字，按名字分开存页面、版本、开始看的时间、最后一次上报与最后一次有焦点时上报的时间。标签页在前台时上报：显示出来、得到焦点、换了版本时立即，之后每分钟一次；切到后台或关闭（`pagehide`，请求带 `keepalive`）时撤回自己这一个。3 分钟没有上报的作废；每个账号最多记 32 个，超出时去掉最久没上报的。
+- 每个账号的“选中”（见下）。
+- 每个 agent 令牌最后读或下载的页面与版本：`workspace_context`、`workspace_read_page` 记为读，`workspace_checkout` 记为下载。这个令牌保存了这个页面，或 10 分钟后，不再算。
+
+agent 的“这个页面”是这个账号最后用的标签页：按最后有焦点时上报的时间比，从没有焦点的按开始看的时间；在一个页面上选取也算用了它的标签页。这样后台标签页每分钟的上报不会抢走“这个页面”，在甲里选取后切到终端说话也读到甲（Codex 对 #674 的评审）。
+
+列表与页面接口带上 `presence`：除去作废的，每个开着这个页面的账号（版本取它最后用的那个标签页，时间取最早开始看的）与在读这个页面的 agent。成员自己的头像由网页去掉。不锁页面，同时修改仍按版本处理。
 
 `control.db` 新表 `agent_tokens`：令牌哈希（`accountid.TokenHash`）、`id`、账号（外键，`ON DELETE CASCADE`）、范围（`workspace`）、名字、种类、创建时间、上次使用时间。令牌原文形如 `anas_ws_` 加 32 字节随机数的 base32，只在签发时返回一次。上次使用时间由产品服务在核验时更新，同一令牌 10 分钟内只写一次。
 
@@ -50,12 +58,12 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 | 操作 | 姿态 | 说明 |
 |---|---|---|
 | `GET /api/v1/workspace` | session | 能用时 `200 {admin}`，不能用时 `404`；桌面据此显示图标 |
-| `GET /api/v1/workspace/pages`、`POST …/pages` | session、mutation | 列表；上传新页面（请求体 `text/html`，查询参数 `name` 是文件名） |
-| `GET|PATCH|DELETE …/pages/{pageId}` | session、mutation | 页面与版本列表；改标题；删除（上传者与管理员） |
+| `GET /api/v1/workspace/pages`、`POST …/pages` | session、mutation | 列表，每页带谁在看、谁的 agent 在读（`presence`）；上传新页面（请求体 `text/html`，查询参数 `name` 是文件名） |
+| `GET|PATCH|DELETE …/pages/{pageId}` | session、mutation | 页面、版本列表与 `presence`；改标题；删除（上传者与管理员） |
 | `POST …/pages/{pageId}/versions` | mutation | 整份上传新版本，查询参数 `baseVersion`；不是最新时 `409 page_changed` 并给出最新版本 |
 | `GET …/pages/{pageId}/versions/{version}/view` | session | 隔离浏览（见“隔离浏览”）；查询参数 `highlight`、`scroll` |
 | `GET …/pages/{pageId}/versions/{version}/file` | session | 导出原文件 |
-| `PUT /api/v1/workspace/viewing`、`DELETE …/viewing/{pageId}`、`PUT|DELETE …/selection` | mutation | 上报或撤回正在看的页面与版本；上报或清除选中 |
+| `PUT /api/v1/workspace/viewing`、`DELETE …/viewing/{tab}`、`PUT|DELETE …/selection` | mutation | 一个标签页上报（页面、版本、标签页名字、是否有焦点）或撤回正在看；上报或清除选中 |
 | `GET /api/v1/workspace/admin/members`、`PUT|DELETE …/members/{accountId}` | admin | 可使用的成员；服务自己再核一次管理员 |
 | `GET /api/v1/session/agent-tokens`、`POST …`、`DELETE …/{tokenId}` | session、mutation | 产品服务自己的接口（`internal/accountsapi`），不经共享工作区服务 |
 
@@ -105,9 +113,10 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 
 - 地址是 `/workspace/{pageId}`，`internal/webui` 返回第二个网页入口 `workspace.html`（`web/src/workspace/tab.tsx`），与桌面的 `index.html` 一样不缓存、带桌面的 CSP 与 `X-Frame-Options: DENY`。它与桌面同源，所以带着桌面的会话；没有登录时请成员先在桌面登录。它不加载桌面的代码，不计入首屏体积。
 - 标签页里是顶部一条窄栏（标题、版本、选取、导出）和占满其余部分的隔离框架。页面不直接作为整个标签页打开：那样的页面虽然仍是不透明来源，却能把自己导航到外网地址，拦住它的 `frame-src 'self'` 只在框架外面是桌面来源的页面时才起作用（见“隔离浏览”）。
-- 每个页面的标签页有固定名字（`anas-workspace-{pageId}`），再点同一页面回到这个标签页。上传新页面后窗口提示“已上传”，点“打开”才开标签页：浏览器只在成员点击时允许打开新标签页。
+- 每个页面的标签页有固定名字（`anas-workspace-{pageId}`），再点同一页面回到这个标签页。上传新页面后窗口提示“已上传”，点“打开”才开标签页：浏览器只在成员点击时允许打开新标签页。打开时不带 `noopener`：带了它，浏览器不按名字找已开的标签页，每次点击都新开一个。标签页因此有了 opener（桌面），它的入口在框架载入之前先 `window.opener = null`，页面经 `top.opener` 碰不到桌面。
 - 改名、上传新版本、导出最新版本与删除在窗口列表每一行的菜单里；标签页每 3 秒读一次页面，跟上这些变化，页面被删除时说明“这个页面已被删除”。
-- 本机屏幕的 kiosk 浏览器没有标签栏：窗口在这里打开的地址带 `?local-console=1`，标签页据此在窄栏里放“关闭”，回到桌面。
+- 本机屏幕的 kiosk 浏览器没有标签栏：窗口在这里打开的地址带 `?local-console=1`，标签页据此在窄栏里放“关闭”，回到桌面。这时标签页就是屏幕上显示的东西，桌面藏到后面停了自己的计时，所以标签页按需加载同一个屏保（`desktop/LocalConsoleScreenSaver.tsx`，样式在它自己的 CSS 模块里）。框架里的输入到不了标签页的窗口：辅助脚本报来的滚动与选取经 `lib/localConsole.ts` 告诉屏保成员在用。
+- 窄栏与窗口每一行用 `workspace/Presence.tsx` 显示 `presence`；头像是桌面的 `people/PersonAvatar.tsx`，样式也在它自己的 CSS 模块里，标签页不必加载桌面的样式。
 - 被移出的成员：窗口与标签页都在收到 `workspace_forbidden` 时清空，只说明原因（`web/src/workspace/queries.tsx`）。
 
 ## 隔离浏览
@@ -136,6 +145,7 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 | 接缝 | 格式定义处 | 两边的测试读什么 |
 |---|---|---|
 | 页面的标签页 ↔ 隔离框架 | `web/src/workspace/frame/protocol.ts` | 同一组消息样例 |
+| 标签页的“正在看” ↔ 服务 ↔ agent 的“这个页面”与 `presence` | `api/components/workspace.yaml` 的 `WorkspaceViewing`、`WorkspacePresence` | `internal/workspace` 的存取测试；经产品服务的链路测试读到 agent 在读、保存后消失；Vitest 按生成的类型应答 |
 | 源码位置：服务注入 ↔ 辅助脚本回报 ↔ 服务换回源码 | `internal/workspace/testdata/` 的样例页与注入结果 | Go 生成并核对注入结果；Vitest 用同一份注入结果测选取 |
 | 桌面 ↔ 共享工作区服务 | `api/paths/workspace.yaml` | 生成的类型与校验；`internal/httpapi` 契约测试 |
 | 产品服务 ↔ 共享工作区服务 | `serviceproxy` 的请求头；`storeservice` 的认证钩子 | 经产品服务的 agent 姿态到真实认证钩子的 Go 测试 |
