@@ -11,7 +11,7 @@ Type=simple
 User=a-nas-photos
 Group=a-nas-photos
 ExecStart=/usr/lib/a-nas/anas-api photo-service
-# The montage center's project grants (ADR 0038), passed as "grants".
+# VideoCut's project grants (ADR 0038), passed as "grants".
 Sockets=anas-photos-grants.socket
 Environment=ANAS_PHOTOS_ROOT=/srv/a-nas/data/photos
 Environment=ANAS_PHOTOS_SOCKET=/run/a-nas-photos/photos.sock

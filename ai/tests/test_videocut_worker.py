@@ -1,4 +1,4 @@
-"""The montage center's compute Worker (ai/anas_videocut): its split of the
+"""VideoCut's compute Worker (ai/anas_videocut): its split of the
 prototype's computation gives the prototype's numbers, its fill asks for what
 it lacks in a fixed order, and it speaks the protocol with memfd arrays.
 
@@ -18,7 +18,7 @@ import unittest
 RUNTIME = bool(importlib.util.find_spec("numpy") and importlib.util.find_spec("PIL"))
 
 if not RUNTIME and os.environ.get("ANAS_VIDEOCUT_PYTHON"):
-    raise RuntimeError("montage Worker tests require NumPy and Pillow")
+    raise RuntimeError("VideoCut Worker tests require NumPy and Pillow")
 
 if RUNTIME:
     import numpy as np

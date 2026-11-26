@@ -98,7 +98,7 @@ func main() {
 	}
 	if len(os.Args) == 2 && os.Args[1] == videoCutServiceCommand {
 		if err := runVideoCutService(logger); err != nil {
-			logger.Error("A-NAS montage service stopped", "error", err)
+			logger.Error("A-NAS VideoCut service stopped", "error", err)
 			os.Exit(1)
 		}
 		return

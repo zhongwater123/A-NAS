@@ -10,7 +10,7 @@ import (
 )
 
 // GrantSearch is the search of Grants, which refuse as the photo library
-// does, with those refusals as the montage center's: windows made with
+// does, with those refusals as VideoCut's: windows made with
 // another model are ErrSearchModel, a library or local AI that cannot answer
 // now is ErrSearchUnavailable, a text it does not search for is ErrInvalid,
 // and the rest are as for any grant call (domain.GrantError). videocut.go
@@ -26,7 +26,7 @@ type PhotoSearch interface {
 }
 
 // SearchWindows asks the photo library and says its refusals as the
-// montage center's errors.
+// VideoCut's errors.
 
 func (g GrantSearch) SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error) {
 	matches, err := g.Grants.SearchWindows(ctx, grantID, texts, k)

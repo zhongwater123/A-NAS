@@ -16,7 +16,7 @@
 # - a-nas-assistant-trial, empty, at the version of a-nas, which it depends on:
 #   the assistant's trial is part of a-nas now, and a device that had the trial
 #   updates to this package before apt removes it (ADR 0034).
-# - a-nas-videocut-music, with --videocut-music only: the montage center's music
+# - a-nas-videocut-music, with --videocut-music only: VideoCut's music
 #   analysis (docs/architecture/montage-music.md) at the version of a-nas,
 #   which it depends on with its runtime's and models' content packages.
 #   While allin1's licence is pending no release builds it.
@@ -139,7 +139,7 @@ install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 # runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
 install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
-# The montage center's compute Worker runs in the same runtime (ADR 0038):
+# VideoCut's compute Worker runs in the same runtime (ADR 0038):
 # worker.py, its operations (ops/) and the pure computation (algo/). Not the
 # planning templates (prompts/): the Worker never reads them; the planner
 # does, from assistant/videocut-prompts below.
@@ -167,7 +167,7 @@ for file in "$assistant"/*.sh "$assistant"/*.py; do
 done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
-# The planning instance's policy adds the montage center's planning server,
+# The planning instance's policy adds VideoCut's planning server,
 # which no other unit starts, and reviews every planning
 # (docs/architecture/montage-planning-session.md); the fixed prompt templates
 # the planner fills go beside it.
@@ -243,7 +243,7 @@ control a-nas-assistant-trial '' >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
 build "$root"
 
-# The montage center's music analysis (docs/architecture/montage-music.md):
+# VideoCut's music analysis (docs/architecture/montage-music.md):
 # the Worker's code, its units, each model's manifest and links to the
 # content packages of its models and runtime.
 if "$videocut_music"; then

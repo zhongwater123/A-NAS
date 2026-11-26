@@ -27,7 +27,7 @@ func (r *registrar) RegisterAssistantPlan(ctx context.Context) (string, error) {
 
 // The requests that may lead to planning register a planning grant behind
 // the member's session first, and only the Product Service says so: the
-// header reaches the montage center through the proxy, which drops the one a
+// header reaches VideoCut through the proxy, which drops the one a
 // browser sent.
 func TestPlanningRequestsRegisterAGrantFirst(t *testing.T) {
 	var seen []string

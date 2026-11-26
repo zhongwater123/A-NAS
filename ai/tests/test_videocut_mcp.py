@@ -1,8 +1,8 @@
-"""The montage center's MCP server tells the model what each answer means, and passes on its answers as answers.
+"""VideoCut's MCP server tells the model what each answer means, and passes on its answers as answers.
 
 The planning round on the Experimental NAS (2026-11-19) showed how the seams between the model, this server and
-the montage center fail where each side's own tests pass. These run the server with stand-ins for the MCP SDK
-(tests.test_companion_mcp.load) against a montage center on a socket of its own.
+VideoCut fail where each side's own tests pass. These run the server with stand-ins for the MCP SDK
+(tests.test_companion_mcp.load) against a VideoCut on a socket of its own.
 """
 
 import unittest
@@ -44,7 +44,7 @@ class VideoCutToolTests(unittest.TestCase):
     def said(result):
         return result.content[0].text
 
-    def test_an_answer_written_as_a_json_string_reaches_the_montage_center_as_an_object(self):
+    def test_an_answer_written_as_a_json_string_reaches_videocut_as_an_object(self):
         center = self.center(200, {"status": "accepted"})
         self.module.call("videocut_submit_outline", {"jobId": "job:X", "attemptToken": "ab" * 16, "answer": '{"design": "海"}'})
         self.assertEqual(center.received,
@@ -66,7 +66,7 @@ class VideoCutToolTests(unittest.TestCase):
         for word in ("大纲已收下", "还有下一版", "全部方案都已收下", "mcp__videocut__"):
             self.assertIn(word, prompt)
 
-    def test_a_call_the_montage_center_refuses_as_a_request_is_rejected_with_what_to_fix(self):
+    def test_a_call_videocut_refuses_as_a_request_is_rejected_with_what_to_fix(self):
         self.center(400, {"error": {"code": "validation_failed", "message": "the request is not valid"}})
         said = self.said(self.module.call("videocut_brief", {"jobId": 7, "attemptToken": "t"}))
         self.assertIn("不合格", said)

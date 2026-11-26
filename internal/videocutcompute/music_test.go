@@ -57,7 +57,7 @@ func TestTheMusicOperationAnswersFromPython(t *testing.T) {
 }
 
 // A Worker that takes the request and breaks on it has failed on the song,
-// which the montage center counts; it is not a Worker to wait for without
+// which VideoCut counts; it is not a Worker to wait for without
 // end.
 func TestAWorkerThatBreaksOnTheMusicOperationHasFailed(t *testing.T) {
 	client := startWorker(t, "def broken(request, arrays):\n    raise RuntimeError('broken')\nworker.OPS['music'] = broken")

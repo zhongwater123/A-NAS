@@ -1,9 +1,9 @@
-"""The montage center's planning tools for a member's VNAS (docs/architecture/montage-planning-session.md).
+"""VideoCut's planning tools for a member's VNAS (docs/architecture/montage-planning-session.md).
 
-A stdio server inside the member's planning instance (anas-assistant-plan@.service). Each call goes to the montage
-center's assistant socket, which knows the member by the caller's UID and answers only for their jobs; every call
+A stdio server inside the member's planning instance (anas-assistant-plan@.service). Each call goes to VideoCut's
+ assistant socket, which knows the member by the caller's UID and answers only for their jobs; every call
 names the job and the round's token. Four tools: the two steps' briefs (data and exact schema) and their
-submissions. The montage center checks each answer and keeps the first good one.
+submissions. VideoCut checks each answer and keeps the first good one.
 
 Only the planning instance binds the socket and has this server in its policy, and it gives the model these tools
 with memory and skills alone (HERMES_TUI_TOOLSETS): the member's own conversations and tasks never list them. In
@@ -13,7 +13,7 @@ Every answer is a result, never an error (is_error stays false): Hermes counts e
 which after three in a row makes the server unreachable for a minute, and a refused answer is for the model to
 correct. Its status says what happened: accepted, rejected (with reasons), outline_first, next_plan, cancelled, round_over,
 not_found or unavailable. The server is the SDK's low-level one, as the companion's: the arguments reach the
-montage center as the model wrote them, and it answers a wrong one as rejected.
+VideoCut as the model wrote them, and it answers a wrong one as rejected.
 """
 
 import contextlib
@@ -31,11 +31,11 @@ from mcp_types import CallToolResult, ListToolsResult, TextContent, Tool, ToolAn
 from anas_window_call import UnixHTTP
 
 SOCKET = "/run/anas-assistant-videocut/videocut.sock"
-# The montage center keeps each brief once it is built and checks an answer without the compute Worker; only
+# VideoCut keeps each brief once it is built and checks an answer without the compute Worker; only
 # the second step's brief, asked for before the job came to that step, may wait behind the Worker's other
 # work. Hermes gives up after 120 s.
 TIMEOUT = 90
-# The montage center reads at most 80 KiB of a call; an answer is at most 64 KiB.
+# VideoCut reads at most 80 KiB of a call; an answer is at most 64 KiB.
 MOST = 64 << 10
 
 IDS = {
@@ -74,7 +74,7 @@ ACCEPTED = {"videocut_submit_outline": "outline_accepted", "videocut_submit_shot
 
 
 def ask(route: str, body: dict) -> dict:
-    """The montage center's answer to one call, or what to say without it."""
+    """VideoCut's answer to one call, or what to say without it."""
     try:
         data = json.dumps(body, ensure_ascii=False).encode()
     except (TypeError, ValueError):
@@ -97,7 +97,7 @@ def ask(route: str, body: dict) -> dict:
     if response.status == 404:
         return {"status": "not_found"}
     if response.status == 400:
-        # The montage center refused the call itself: the arguments, not the answer's content.
+        # VideoCut refused the call itself: the arguments, not the answer's content.
         return {"status": "rejected", "reasons": ["调用的参数不对：jobId 和 attemptToken 是提示词里给的字符串，answer 是一个 JSON 对象"]}
     if response.status != 200 or not isinstance(answer, dict):
         return {"status": "unavailable"}

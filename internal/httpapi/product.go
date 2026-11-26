@@ -70,8 +70,8 @@ type ProductDependencies struct {
 	// posture, and one-time transfer links. On a NAS the workspace service
 	// confirms the session or the agent token itself.
 	Workspace http.Handler
-	// PlanGrants registers the member's planning grant for the montage
-	// center's background planning (the File Broker); nil goes on without.
+	// PlanGrants registers the member's planning grant for VideoCut's
+	// background planning (the File Broker); nil goes on without.
 	PlanGrants protocol.PlanRegistrar
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of

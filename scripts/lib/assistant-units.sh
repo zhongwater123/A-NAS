@@ -2,18 +2,18 @@
 # The AI assistant's units that run in the sandbox of anas-assistant@.service
 # (ADR 0024), made from it so that they stay the same: a round of the member's
 # scheduled tasks and the weekly curator, each a oneshot, and the member's
-# planning instance for the montage center with the socket that starts it
+# planning instance for VideoCut with the socket that starts it
 # (docs/architecture/montage-planning-session.md). None of them has the
 # companion's socket, which only a conversation's window answers (#412). The
-# planning instance alone binds the montage center's socket, reads the policy
+# planning instance alone binds VideoCut's socket, reads the policy
 # and the member settings that add its planning server (managed-plan,
-# config-plan.yaml) and gives the model the montage, memory and skill tools
+# config-plan.yaml) and gives the model the videocut, memory and skill tools
 # alone. The curator also prunes Hermes's image cache, which serve never does
 # (ai/assistant/media-cache.py). scripts/build-packages.sh and the spike's
 # installer (ai/assistant-spike/assistant-install.sh) source this file.
 
 # derive_plan_policy POLICY SERVER OUT: the managed policy of a member's planning instance in
-# OUT: POLICY, the policy of every other unit, with the montage center's planning server added
+# OUT: POLICY, the policy of every other unit, with VideoCut's planning server added
 # (the fragment of mcp_servers in SERVER) and a background review after every planning
 # (skills.creation_nudge_interval: 1), which writes what VNAS learned as skills. The text is
 # spliced, which keeps the policy's comments; internal/hostops/linux reads the result as YAML in
@@ -23,7 +23,7 @@ derive_plan_policy() {
   if [[ "$(grep -c '^mcp_servers:$' "$policy")" != 1 || "$(grep -c '^skills:$' "$policy")" != 1 ]] ||
     grep -q '^  videocut:' "$policy" || grep -q 'creation_nudge_interval' "$policy" ||
     [[ "$(grep -c '^  videocut:$' "$server")" != 1 ]]; then
-    echo "the assistant's policy and the montage server do not fit together" >&2
+    echo "the assistant's policy and the videocut server do not fit together" >&2
     return 1
   fi
   sed -e "/^mcp_servers:\$/r $server" \
@@ -55,7 +55,7 @@ derive_assistant_units() {
   # The planning instance: a second `hermes serve` on port 9120 of the same sandbox, Hermes
   # home and network, started by its own socket for root's planner and stopped once that
   # bridge exits idle, as the member's instance is by anas-assistant-api@.
-  sed -e 's#^Description=.*#Description=A-NAS assistant (VNAS) of %i, planning for the montage center#' \
+  sed -e 's#^Description=.*#Description=A-NAS assistant (VNAS) of %i, planning for VideoCut#' \
     -e '\#a-nas-companion-assistant#d' \
     -e '/^Environment=HOME=/a Environment=ANAS_ASSISTANT_CHANNEL=plan HERMES_TUI_TOOLSETS=videocut,memory,skills' \
     -e "s#HERMES_MANAGED_DIR=$lib/managed\\b#HERMES_MANAGED_DIR=$lib/managed-plan#" \

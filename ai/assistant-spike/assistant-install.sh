@@ -33,7 +33,7 @@ sed -e "s/^  default: deepseek-flash$/  default: ${SPIKE_MODEL:-spike-model}/" \
   "$src/ai/assistant/managed-config.yaml" > "$lib/managed/config.yaml"
 chmod 0644 "$lib/managed/config.yaml"
 install -m 0644 /dev/null "$lib/empty.env"
-# The policy of the planning instance, with the montage center's planning server, and the
+# The policy of the planning instance, with VideoCut's planning server, and the
 # prompt templates of a planning round, as the package installs them (scripts/build-packages.sh).
 # shellcheck source=../../scripts/lib/assistant-units.sh
 . "$src/scripts/lib/assistant-units.sh"

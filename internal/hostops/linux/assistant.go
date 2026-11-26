@@ -36,7 +36,7 @@ const (
 	assistantCredential  = "a-nas-assistant-deepseek"
 	assistantGatewayUnit = "anas-assistant-gateway.service"
 	assistantWakerUnit   = "anas-assistant-cron-waker.service"
-	// assistantPlannerUnit hands the montage center's planning to members'
+	// assistantPlannerUnit hands VideoCut's planning to members'
 	// planning instances (docs/architecture/montage-planning-session.md).
 	assistantPlannerUnit = "anas-videocut-planner.service"
 )
@@ -137,7 +137,7 @@ func (e *Executor) assistantTokenPath(username string) string {
 	return filepath.Join(e.AssistantTokenDir(), username+".env")
 }
 
-// AssistantPlanDir holds the members' planning grants for the montage center, one file each
+// AssistantPlanDir holds the members' planning grants for VideoCut, one file each
 // named by the account: the File Broker writes them behind the member's live session, and
 // root's planner reads them (ai/assistant/videocut-planner.py). It is in the Host Agent's own state
 // directory, which no service can write to (docs/architecture/montage-center.md, 规划授权).
@@ -635,7 +635,7 @@ func (e *Executor) prepareAssistantSettings(username string) error {
 	if err != nil {
 		return err
 	}
-	// The planning instance's settings add the montage center's planning server from its own
+	// The planning instance's settings add VideoCut's planning server from its own
 	// policy, which no other unit starts (docs/architecture/montage-planning-session.md).
 	planConfig := config
 	if managedPlan, err := os.ReadFile(filepath.Join(library, "managed-plan", "config.yaml")); err == nil {

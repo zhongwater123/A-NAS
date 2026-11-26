@@ -3,7 +3,7 @@
 The test songs and the structure files stay out of the repository
 (docs/architecture/montage-music.md). For each structure-<song>.json under
 --structures it decodes <song>.* under --songs with FFmpeg as the media
-worker does for the montage center (stereo at 44.1 kHz and mono at 22050 Hz,
+worker does for VideoCut (stereo at 44.1 kHz and mono at 22050 Hz,
 float32), starts the Worker as its unit runs it, hands it the two streams
 through pipes over its socket, and waits for it to exit, so that each song is
 timed and measured on its own: the Worker's peak resident memory, models

@@ -1,4 +1,4 @@
-// What app asks of the montage center's outside: the photo library, the
+// What app asks of VideoCut's outside: the photo library, the
 // FFmpeg Worker, the compute and music Workers and the planner. The
 // interfaces are defined here, where they are used; the package
 // internal/videocut/external implements them, and tests stand in for them.
@@ -89,7 +89,7 @@ type Music interface {
 	Audio(ctx context.Context, owner, songID string) (*os.File, error)
 }
 
-// Grants is what the montage center asks of the photo library's grants;
+// Grants is what VideoCut asks of the photo library's grants;
 // photosapi.Grants provides it.
 type Grants interface {
 	Register(ctx context.Context, session, projectID string, assetIDs []string) (photos.Grant, error)
@@ -104,7 +104,7 @@ type Grants interface {
 	SaveFilm(ctx context.Context, grantID, versionKey, name string, film *os.File) (string, error)
 }
 
-// Media is what the montage center asks of the FFmpeg worker for its songs;
+// Media is what VideoCut asks of the FFmpeg worker for its songs;
 // ffmpegworker.Client provides it.
 type Media interface {
 	Probe(ctx context.Context, file *os.File) (ffmpegworker.Probe, error)

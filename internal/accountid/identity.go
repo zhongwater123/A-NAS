@@ -42,7 +42,7 @@ const (
 	// FamilyServiceUser owns the family store (ADR 0029).
 	FamilyServiceUser = "a-nas-family"
 	FamilyServiceUID  = 31002
-	// VideoCutServiceUser owns the montage center's store (ADR 0038).
+	// VideoCutServiceUser owns VideoCut's store (ADR 0038).
 	VideoCutServiceUser = "a-nas-videocut"
 	VideoCutServiceUID  = 31005
 	// WorkspaceServiceUser owns the shared workspace's store (ADR 0040).

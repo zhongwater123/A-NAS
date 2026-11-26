@@ -616,7 +616,7 @@ func (s *Store) save(ctx context.Context, run *jobRun) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.logger.InfoContext(ctx, "montage film saved", "job", run.id, "project", run.projectID, "version", number, "plan", run.plan)
+	s.logger.InfoContext(ctx, "VideoCut film saved", "job", run.id, "project", run.projectID, "version", number, "plan", run.plan)
 	if last {
 		s.removeJobFiles(run.id)
 		return nil, nil

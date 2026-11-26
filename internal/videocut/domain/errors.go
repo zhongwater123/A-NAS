@@ -1,4 +1,4 @@
-// Package domain holds the montage center's data types, the rules of its
+// Package domain holds VideoCut's data types, the rules of its
 // draft operations and the errors every layer shares. It does no input or
 // output and imports no other layer (docs/architecture/montage-center.md,
 // 代码结构).
@@ -43,7 +43,7 @@ var (
 	// ErrJobState: the job is not in a state that allows this.
 	ErrJobState = errors.New("the job cannot do this now")
 	// ErrJobsUnavailable: this service was started without what jobs need.
-	ErrJobsUnavailable = errors.New("the montage center cannot make films here")
+	ErrJobsUnavailable = errors.New("VideoCut cannot make films here")
 )
 
 // Planning errors.
@@ -74,9 +74,9 @@ var (
 
 var (
 	// ErrNotFound covers another member's project as well as a missing one.
-	ErrNotFound = errors.New("montage project not found")
-	// ErrInvalid is a request the montage center refuses as it stands.
-	ErrInvalid = errors.New("invalid montage request")
+	ErrNotFound = errors.New("VideoCut project not found")
+	// ErrInvalid is a request VideoCut refuses as it stands.
+	ErrInvalid = errors.New("invalid VideoCut request")
 	// ErrTooManyAssets names more than MaxAssets videos at once.
 	ErrTooManyAssets = errors.New("too many videos in one request")
 	// ErrAssetsRefused: the photo library would not grant a video. Missing,

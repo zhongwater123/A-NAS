@@ -392,7 +392,7 @@ func TestDisablingRemovesTheSocketTheMaskLeft(t *testing.T) {
 	}
 }
 
-// A planning grant for the montage center is the member's own, left while they were signed
+// A planning grant for VideoCut is the member's own, left while they were signed
 // in: closing the account removes it, so the waker starts no round of planning for it, and a
 // later account of the same name does not inherit it. Nobody else's is touched, and it goes
 // even where no assistant unit is installed.

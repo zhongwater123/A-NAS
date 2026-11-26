@@ -9,13 +9,13 @@ and run, with NumPy and FFmpeg:
     python -m eval.videocut_music_golden
 
 For each structure-<song>.json it decodes the song as the eighth version did
-(adapters/music.py: FFmpeg, mono, 22050 Hz, float32) and as the montage
-center does (the FFmpeg worker's PCM output, the same arguments), then
+(adapters/music.py: FFmpeg, mono, 22050 Hz, float32) and as VideoCut
+ does (the FFmpeg worker's PCM output, the same arguments), then
 compares, excerpt and slot for slot:
 - the eighth version's Allin1.music (domain.music.from_structure over its
   RMS curve), and
-- the Worker's op_music, with the structure and loudness as the montage
-  center sends them: the structure through JSON, the loudness as float32.
+- the Worker's op_music, with the structure and loudness as VideoCut
+   sends them: the structure through JSON, the loudness as float32.
 Where the eighth version kept a music-<song>.json from that run, it is
 compared too; an older file (旧切点, 副歌未修正) is not.
 """

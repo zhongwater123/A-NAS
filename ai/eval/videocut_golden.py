@@ -1,4 +1,4 @@
-"""Golden comparison of the montage compute Worker with the eighth version (development machine only).
+"""Golden comparison of the VideoCut compute Worker with the eighth version (development machine only).
 
 The prototype's results come from real footage and stay out of the repository
 (docs/architecture/montage-center.md, 剪辑计算 Worker, 样本). Point
@@ -7,7 +7,7 @@ development machine C, ~/A-NAS-datasets) and run, in the AI runtime:
 
     python -m eval.videocut_golden
 
-For each group it runs the Worker's fill the way the montage center will,
+For each group it runs the Worker's fill the way VideoCut will,
 one missing clear span at a time from the prototype's held-<group>.json, and
 compares the timeline with the prototype's cut-<group>-recut-1.json clip by
 clip; and it cuts the cards again from the prototype's window vectors and

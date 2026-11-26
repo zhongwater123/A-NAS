@@ -82,7 +82,7 @@ search_runtime_id() {
     sha256sum | cut -c1-16
 }
 
-# The montage center's music analysis (docs/architecture/montage-music.md):
+# VideoCut's music analysis (docs/architecture/montage-music.md):
 # its models, each ROLE:MANIFEST under deploy/models, which the
 # a-nas-videocut-music package links as /usr/lib/a-nas/videocut-music/ROLE, and
 # its runtime. While allin1's commercial licence is pending, no release

@@ -215,7 +215,7 @@ func TestACallTheCallerGaveUpOnIsNotAFailureOfTheWorker(t *testing.T) {
 // A member waits for Likeness (deleting a shot of a draft), so each failure
 // is one the request's handler answers: a Worker that is away, or from
 // before the operation existed, is waited for (503 compute_unavailable),
-// not an error of the montage center's own.
+// not an error of VideoCut's own.
 func TestLikenessFailsAsARequestAMemberWaitsOn(t *testing.T) {
 	ctx := context.Background()
 	dir, err := os.MkdirTemp("", "compute")

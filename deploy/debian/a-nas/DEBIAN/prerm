@@ -1,20 +1,20 @@
 #!/bin/bash
 # prerm of a-nas (ADR 0034). Removing the product stops its units; an upgrade
 # or rollback leaves that to the next release's preinst, which stops the
-# services that write the databases before it copies them. The montage
+# services that write the databases before it copies them. The VideoCut
 # service and the photo service's grant socket for it (ADR 0038) stop here on
 # an upgrade too: a release before them knows nothing of their units, so a
 # rollback to one would leave the service running, or the socket listening for
 # a photo service that no longer reads it, after dpkg removed the units. The
 # next release's postinst starts the service again, and its photo service the
 # socket; the photo service keeps its copy of the socket until it restarts.
-# The montage center's socket for planning stops before the montage service,
+# VideoCut's socket for planning stops before the VideoCut service,
 # each time: root's planner or a member's planning instance that connects to it
 # starts the service again (its Service=), which would then run on after the
 # rollback, or write videocut.db while the next release's preinst copies it.
-# It starts again with the montage service (its Wants=). Removing the product
+# It starts again with the VideoCut service (its Wants=). Removing the product
 # also stops the planner and the members' planning instances. The shared
-# workspace service (ADR 0040) stops on an upgrade for the montage service's
+# workspace service (ADR 0040) stops on an upgrade for the VideoCut service's
 # reason: a rollback to a release before it would leave it running.
 set -euo pipefail
 

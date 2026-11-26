@@ -89,7 +89,7 @@ func TestTheLibrarysRefusalsAreTheVideoCutCentersErrors(t *testing.T) {
 		}
 	}
 	// The rest are what a request's handler answers, not errors of the
-	// montage center's own (500): a text the library does not search for is
+	// VideoCut's own (500): a text the library does not search for is
 	// the request's fault, a revoked grant the project's, an ended session
 	// the member's.
 	for code, want := range map[string]error{photosapi.GrantInvalid: domain.ErrInvalid, photosapi.GrantNotFound: domain.ErrGrantRevoked,

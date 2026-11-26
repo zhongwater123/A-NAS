@@ -1,5 +1,5 @@
-// Package app keeps the montage center's records (剪辑中心, ADR 0038):
-// projects, plans, timelines and jobs, in videocut.db on the montage store.
+// Package app keeps VideoCut's records (剪辑中心, ADR 0038):
+// projects, plans, timelines and jobs, in videocut.db on the VideoCut store.
 // The videos, their analysis and the films stay in the photo library.
 package app
 
@@ -17,7 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/db"
 )
 
-// Store is the montage center's database. Every record names the member it
+// Store is VideoCut's database. Every record names the member it
 // belongs to, and every read is for one member.
 type Store struct {
 	db      *db.DB
@@ -33,7 +33,7 @@ type Store struct {
 	songs sync.Mutex
 	// wake tells AnalyzeSongs a song arrived.
 	wake chan struct{}
-	// What jobs work with: the compute Worker's montage operations, the
+	// What jobs work with: the compute Worker's VideoCut operations, the
 	// FFmpeg worker's editing, the planner, and the songs (the store's
 	// own, Chosen, Excerpt and Audio, unless a test sets another).
 	jobCompute Compute
@@ -101,7 +101,7 @@ type Options struct {
 	Music   MusicAnalyzer
 	Compute MusicComputer
 	// JobCompute, Editing and Planner are what jobs work with besides the
-	// songs: the compute Worker's montage operations, the FFmpeg worker's
+	// songs: the compute Worker's VideoCut operations, the FFmpeg worker's
 	// editing and the planner. A store without them keeps projects and
 	// songs but makes no film.
 	JobCompute Compute
@@ -127,10 +127,10 @@ type Options struct {
 // have advanced after a power cut.
 func Open(ctx context.Context, root string, options Options) (*Store, error) {
 	if options.Grants == nil {
-		return nil, errors.New("the montage store needs the photo library's grants")
+		return nil, errors.New("the VideoCut store needs the photo library's grants")
 	}
 	if options.Plans < 0 || options.Plans > MaxPlans {
-		return nil, fmt.Errorf("the montage store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
+		return nil, fmt.Errorf("the VideoCut store makes at most %d 方案 a job, not %d", MaxPlans, options.Plans)
 	}
 	database, err := db.Open(ctx, root)
 	if err != nil {

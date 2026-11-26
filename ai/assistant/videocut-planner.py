@@ -1,18 +1,18 @@
-"""Hands the montage center's planning to members' VNAS (docs/architecture/montage-planning-session.md).
+"""Hands VideoCut's planning to members' VNAS (docs/architecture/montage-planning-session.md).
 
 anas-videocut-planner.service runs this as root with the Hermes runtime's Python, which has websockets. Every
 INTERVAL seconds it gives one member with a job waiting for a plan a round, one round on the whole device at a time:
 
-1. Who: a marker the montage service left in MARKERS, the longest waiting first; a planning grant, read only as root's
+1. Who: a marker the VideoCut service left in MARKERS, the longest waiting first; a planning grant, read only as root's
    own file in root's own directory (GRANTS, the File Broker's), under seven days old and with rounds left, which are
    counted here (STATE); an account in use with VNAS (its instance secret in TOKENS, the Host Agent's word).
-2. Claim: POST /v1/rounds/claim on the montage center's assistant socket (VIDEOCUT), naming the account in
-   X-A-NAS-Account, which the montage service hears from root alone.
+2. Claim: POST /v1/rounds/claim on VideoCut's assistant socket (VIDEOCUT), naming the account in
+   X-A-NAS-Account, which the VideoCut service hears from root alone.
 3. Converse: Hermes's own login (/auth/password-login, the instance's secret as the member's password) on the socket
    of the member's planning instance (PLAN_SOCKETS/<account>.sock, which starts it), then Hermes's JSON-RPC on /api/ws:
    client.capabilities, session.create, session.title ("剪辑规划 · <project>"), the round reported started with the
    conversation's stored id, and prompt.submit with the fixed template (PROMPTS/<template>.md) filled with the claim's
-   checked ids, token and target seconds only. The planning instance gives the model the montage, memory and skill
+   checked ids, token and target seconds only. The planning instance gives the model the videocut, memory and skill
    tools alone.
 4. Wait: events until the prompt's message.complete, at most TURN seconds; every approval Hermes asks for is refused.
    Then, the round reported, the conversation stays open until Hermes's background review of it says what it learned,
@@ -20,10 +20,10 @@ INTERVAL seconds it gives one member with a job waiting for a plan a round, one 
 5. Report: the end with its result (complete, or the error, timeout or cut-off that stopped it); a round whose
    conversation never got its prompt is abandoned, saying whether VNAS could not be reached or the planning failed.
 6. Count: a round counts on its grant from the moment its prompt goes in; it is given back when the model never
-   called a montage tool and the conversation did not complete, which planned nothing.
+   called a videocut tool and the conversation did not complete, which planned nothing.
 
-When the montage center's socket does not answer, nothing is claimed for 2, 4, 8 and then 15 minutes, or until a
-member registers a new grant. Anything else that waits is the montage center's to say (internal/videocut/app/planning.go).
+When VideoCut's socket does not answer, nothing is claimed for 2, 4, 8 and then 15 minutes, or until a
+member registers a new grant. Anything else that waits is VideoCut's to say (internal/videocut/app/planning.go).
 """
 import asyncio
 import contextlib
@@ -51,7 +51,7 @@ PROMPTS = os.environ.get("ANAS_VIDEOCUT_PROMPTS", "/usr/lib/a-nas/assistant/vide
 INTERVAL = int(os.environ.get("ANAS_VIDEOCUT_PLANNER_INTERVAL", "15"))
 
 ACCOUNT = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
-# The montage center's round and job ids are a prefix and crypto/rand.Text (26 base32 letters), its tokens 16 random
+# VideoCut's round and job ids are a prefix and crypto/rand.Text (26 base32 letters), its tokens 16 random
 # bytes in hex (internal/videocut/app); internal/videocut/app/planner_ids_test.go holds them to these.
 ROUND_ID = re.compile(r"round:[A-Z2-7]{26}")
 JOB_ID = re.compile(r"job:[A-Z2-7]{26}")
@@ -64,7 +64,7 @@ GRANT_LIFE = 7 * 24 * 3600
 HERMES_HOST = "127.0.0.1:9120"
 START = 180  # seconds for the planning instance to start and log in
 CALL = 60  # seconds for one JSON-RPC call
-TURN = 60 * 60  # the montage center ends a started round after 65 minutes whatever happens
+TURN = 60 * 60  # VideoCut ends a started round after 65 minutes whatever happens
 REVIEW = 150
 VIDEOCUT_WAITS = (120, 240, 480, 900)
 TITLE = "剪辑规划 · "
@@ -109,11 +109,11 @@ def request(path, method, route, body=None, headers=None, timeout=30):
 
 
 def videocut(account, route, body=None):
-    """(status, answer) of one call on the montage center's assistant socket, for account."""
+    """(status, answer) of one call on VideoCut's assistant socket, for account."""
     status, _, raw = request(VIDEOCUT, "POST", route, body or {},
                              {"Content-Type": "application/json", "X-A-NAS-Account": account})
     if status == 503:
-        raise Unreachable("the montage center is not available")
+        raise Unreachable("VideoCut is not available")
     try:
         return status, json.loads(raw) if raw else {}
     except ValueError:
@@ -404,7 +404,7 @@ class Hermes:
             raise TimeoutError from None
 
     async def turn(self, session, limit):
-        """(result, what to report, montage tools called) of the prompt's turn: until its message.complete, the
+        """(result, what to report, videocut tools called) of the prompt's turn: until its message.complete, the
         connection closing, or limit seconds."""
         deadline, tools = time.monotonic() + limit, 0
         while True:
@@ -444,7 +444,7 @@ class Hermes:
 
 def abandon(account, round_id, failure, reason):
     say(f"{account}: round {round_id} not started ({failure}): {reason}")
-    # Unreachable, the montage center abandons it itself five minutes after its claim.
+    # Unreachable, VideoCut abandons it itself five minutes after its claim.
     with contextlib.suppress(Unreachable):
         videocut(account, f"/v1/rounds/{round_id}/abandon", {"outcome": reason[:500], "failure": failure})
 
@@ -454,7 +454,7 @@ def end(account, round_id, result, outcome):
     try:
         videocut(account, f"/v1/rounds/{round_id}/end", {"result": result, "outcome": outcome[:500]})
     except Unreachable as broken:
-        say(f"{account}: the end of round {round_id} was not reported ({broken}); the montage center ends it itself")
+        say(f"{account}: the end of round {round_id} was not reported ({broken}); VideoCut ends it itself")
 
 
 async def converse(account, key, round_id, text, title):
@@ -512,7 +512,7 @@ async def converse(account, key, round_id, text, title):
 
 
 def plan_round(account, key):
-    """Claim a round for the member and see it through. Unreachable when the montage center does not answer."""
+    """Claim a round for the member and see it through. Unreachable when VideoCut does not answer."""
     status, claim = videocut(account, "/v1/rounds/claim")
     if status == 409:
         say(f"{account}: no job to plan")
@@ -536,7 +536,7 @@ def plan_round(account, key):
 # --- the loop ---
 
 class Planner:
-    """The loop's own memory: how long the montage center has not answered."""
+    """The loop's own memory: how long VideoCut has not answered."""
 
     def __init__(self):
         self.waits = 0
@@ -551,7 +551,7 @@ class Planner:
             if grant is not None:
                 members.append((account, grant))
         if now < self.until:
-            # A member who registered a grant since the montage center stopped answering is tried at once.
+            # A member who registered a grant since VideoCut stopped answering is tried at once.
             if not any(datetime.fromisoformat(grant[0]).timestamp() > self.since for _, grant in members):
                 return
             self.until = 0.0
@@ -572,7 +572,7 @@ class Planner:
                 wait = VIDEOCUT_WAITS[min(self.waits, len(VIDEOCUT_WAITS) - 1)]
                 self.waits += 1
                 self.since, self.until = now, now + wait
-                say(f"the montage center does not answer ({broken}); claiming again in {wait // 60} minutes")
+                say(f"VideoCut does not answer ({broken}); claiming again in {wait // 60} minutes")
                 return
             self.waits = 0
             return

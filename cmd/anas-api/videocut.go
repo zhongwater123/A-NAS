@@ -27,7 +27,7 @@ const videoCutServiceCommand = "videocut-service"
 
 func runVideoCutService(logger *slog.Logger) error {
 	if os.Geteuid() == 0 {
-		return errors.New("the montage service must run as its own identity, never root")
+		return errors.New("the VideoCut service must run as its own identity, never root")
 	}
 	config, err := loadVideoCutServiceConfig(envconfig.Environment())
 	if err != nil {
@@ -46,7 +46,7 @@ func runVideoCutService(logger *slog.Logger) error {
 		JobCompute: videocutcompute.Client{SocketPath: config.ComputeSocket},
 		Editing:    config.Media.client(),
 		Planner:    planner(config.PlanAnswers),
-		// The member's VNAS plans on the montage center's assistant socket.
+		// The member's VNAS plans on VideoCut's assistant socket.
 		Accounts:        sessionlookup.NewClient(config.SessionSocket),
 		AssistantSocket: config.AssistantSocket,
 		PlanMarkers:     config.PlanMarkers,
@@ -62,12 +62,12 @@ func planner(answers string) app.Planner {
 	return external.FixedPlanner{Dir: answers}
 }
 
-// configuredVideoCut returns the montage API, nil while ANAS_VIDEOCUT_ENABLED
+// configuredVideoCut returns the VideoCut API, nil while ANAS_VIDEOCUT_ENABLED
 // is off: then /api/v1/videocut is not mounted and the desktop shows no
-// entry. A NAS forwards it to the montage service; development serves it in
+// entry. A NAS forwards it to the VideoCut service; development serves it in
 // this process from a directory on the development volume, with the grants
 // of the photo library in this process, and keeps the store as the service
-// does (app.Store.Upkeep). Deleted accounts leave the montage store
+// does (app.Store.Upkeep). Deleted accounts leave the VideoCut store
 // whatever the switch: the service runs either way, and rows from a time it
 // was on must not stay.
 func configuredVideoCut(ctx context.Context, config Config, grants app.Grants, media app.Media, logger *slog.Logger) (http.Handler, func(context.Context, string) error, func(), error) {

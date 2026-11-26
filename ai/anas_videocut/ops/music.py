@@ -1,6 +1,6 @@
 """The compute Worker's music operation (docs/architecture/montage-center.md, 配乐).
 
-The montage center asks for a song's excerpt once allin1 has found its
+VideoCut asks for a song's excerpt once allin1 has found its
 structure, and again when the member drags its start. The answer is the
 eighth version's (domain.music.from_structure): the excerpt around the first
 chorus, its sections with their levels, and the slots the shots fill, cut on
@@ -37,7 +37,7 @@ HOP, RATE = 512, 22050
 MIN_BARS = 16
 EXCERPT = (30.0, 150.0)
 LONGEST_SLOT = 12.0
-# The longest song the montage center takes, with room for the analysis.
+# The longest song VideoCut takes, with room for the analysis.
 LONGEST_SONG = 8 * 60 + 5
 LABELS = set(music.LEVELS)
 

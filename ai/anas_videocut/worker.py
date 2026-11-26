@@ -1,7 +1,7 @@
-"""The montage center's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
+"""VideoCut's compute Worker (docs/architecture/montage-center.md, 剪辑计算 Worker).
 
 It runs the prototype's pure computation (algo/) for the photo service,
-which cuts cards and measures their quality, and for the montage center,
+which cuts cards and measures their quality, and for VideoCut,
 which lists the catalog, asks for plans and fills the music's slots. It has
 no network and no data volume: everything it reads comes in the request.
 

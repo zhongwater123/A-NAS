@@ -17,10 +17,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// A project holds only the videos a member handed to the montage center
+// A project holds only the videos a member handed to VideoCut
 // (docs/specs/montage-center.md): each batch adds its own, fixed to their
-// content objects. The photo library keeps the videos and lets the montage
-// center reach them through the project's grant (ADR 0038 decision 3).
+// content objects. The photo library keeps the videos and lets VideoCut
+// reach them through the project's grant (ADR 0038 decision 3).
 
 // Limits of a request (docs/specs/montage-center.md, 本稿补充的默认规则).
 // IDs and request keys are printable ASCII, as the photo library's IDs are,
@@ -34,7 +34,7 @@ const (
 	pageSize      = 50
 )
 
-// UpkeepInterval is how often the montage service runs a store's Upkeep.
+// UpkeepInterval is how often the VideoCut service runs a store's Upkeep.
 const UpkeepInterval = time.Minute
 
 const (
@@ -663,7 +663,7 @@ func (s *Store) RetryRevocations(ctx context.Context) error {
 
 // Upkeep keeps the store in line with the photo library: it reconciles
 // while the store has not been reconciled yet or holds unfinished batches,
-// then revokes the grants whose revocation is due. The montage service runs
+// then revokes the grants whose revocation is due. The VideoCut service runs
 // it every UpkeepInterval beside the requests; a failure is tried again the
 // next time.
 func (s *Store) Upkeep(ctx context.Context) {

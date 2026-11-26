@@ -26,7 +26,7 @@ import (
 // A member picks a song for a project from the music library while the
 // session is there (docs/specs/montage-center.md, 配乐): the Product Service
 // opens the file as the member, the way the music library plays it, and
-// streams it here. The montage center keeps its own copy, named by its
+// streams it here. VideoCut keeps its own copy, named by its
 // content, so that the member may change or delete the original afterwards;
 // the copy goes once no project uses it. allin1 finds the song's beats,
 // downbeats and sections in the background (MusicAnalyzer), and the compute
@@ -110,7 +110,7 @@ type keptSelection struct {
 	Music json.RawMessage `json:"music,omitempty"`
 }
 
-// SongTitle is a song's title as the montage center keeps it: trimmed, and
+// SongTitle is a song's title as VideoCut keeps it: trimmed, and
 // at most maxTitleRunes long. The Product Service cuts a title the same way
 // before it sends it (protocol.CopySong), so that a long one fits the
 // header it travels in.
@@ -170,7 +170,7 @@ func (s *Store) receive(body io.Reader) (*os.File, string, error) {
 	return readOnly, hex.EncodeToString(digest.Sum(nil)), nil
 }
 
-// probeSong checks that file is audio of a length the montage center takes,
+// probeSong checks that file is audio of a length VideoCut takes,
 // and returns its length.
 func (s *Store) probeSong(ctx context.Context, file *os.File) (float64, error) {
 	if s.media == nil {
@@ -209,7 +209,7 @@ func (s *Store) keep(file *os.File, sha string) error {
 	return atomicfile.SyncDir(filepath.Dir(target))
 }
 
-// PutSong copies the song body streams into the montage center for owner's
+// PutSong copies the song body streams into VideoCut for owner's
 // project and starts analysing it. The project then uses it from its
 // excerpt's default start; a song it used before goes unless another of
 // owner's projects uses it.

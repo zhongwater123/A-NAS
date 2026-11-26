@@ -15,10 +15,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 )
 
-// The montage center's assistant socket (docs/architecture/montage-planning-session.md):
-// bound only into each member's planning instance, where the montage MCP
+// VideoCut's assistant socket (docs/architecture/montage-planning-session.md):
+// bound only into each member's planning instance, where the VideoCut MCP
 // server reaches it, and reached outside the sandboxes by root's planner,
-// which claims and reports the rounds. The montage service knows the member
+// which claims and reports the rounds. The VideoCut service knows the member
 // from the peer's UID, or the account root names, and puts them in the
 // request's context (accounts.WithUser); every call answers only for that
 // member's jobs.
@@ -186,7 +186,7 @@ type toolRequest struct {
 	Answer       json.RawMessage `json:"answer,omitempty"`
 }
 
-// tool serves a montage tool: a step's brief, or a submission of it.
+// tool serves a videocut tool: a step's brief, or a submission of it.
 func (h *assistantHandler) tool(step string, submit bool) func(http.ResponseWriter, *http.Request, string) {
 	return func(w http.ResponseWriter, r *http.Request, owner string) {
 		var request toolRequest

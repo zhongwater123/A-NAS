@@ -70,7 +70,7 @@ func TestAnUnmetThatIsNotAListSaysNothing(t *testing.T) {
 
 // A timeline naming a beat its card does not have cannot be shown shot by
 // shot: the version is one that can only be played, not a fault of the
-// montage center's.
+// VideoCut's.
 func TestATimelineOfAnUnknownBeatIsNotEditable(t *testing.T) {
 	for _, beat := range []string{"c1/9", "c1/0", "c1", "", "c9/1"} {
 		env := newEditEnv(t)

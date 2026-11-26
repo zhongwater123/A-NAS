@@ -187,7 +187,7 @@ systemctl start smbd.service || true
 # planner's restart those of their planning instances.
 systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' \
   'anas-assistant-planapi@*.service' 'anas-assistant-plan@*.service' 2>/dev/null || true
-# The montage center's planning ran in rounds of members' scheduled tasks
+# VideoCut's planning ran in rounds of members' scheduled tasks
 # before it had a planning instance and a planner of its own: the waker's
 # counts of those rounds and the receipts the rounds left in members' Hermes
 # homes have nothing left to read them.
@@ -201,7 +201,7 @@ systemctl restart anas-host-agent.service anas-photos.service anas-api.service a
   anas-videocut.service anas-workspace.service
 systemctl try-restart 'anas-kiosk@*.service' || true
 # The assistant's model gateway, the waker of its scheduled tasks and the
-# montage center's planner run only while the administrator's key is saved
+# VideoCut's planner run only while the administrator's key is saved
 # (their units' condition); the Product Service's identity synchronization
 # prepares each member's assistant.
 systemctl restart anas-assistant-gateway.service anas-assistant-cron-waker.service anas-videocut-planner.service || true

@@ -2579,7 +2579,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404 */
+        /** The caller's VideoCut projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404 */
         get: operations["listVideoCutProjects"];
         put?: never;
         /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
@@ -2771,7 +2771,7 @@ export interface paths {
         };
         /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
         get: operations["getVideoCutSong"];
-        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
+        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to VideoCut, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
         put: operations["putVideoCutSong"];
         post?: never;
         delete?: never;
@@ -2787,7 +2787,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description The montage center's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
+        /** @description VideoCut's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
         get: operations["getVideoCutSongAudio"];
         put?: never;
         post?: never;
@@ -2804,7 +2804,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
+        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the VideoCut store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
         get: operations["getVideoCutHero"];
         put?: never;
         post?: never;
@@ -3008,7 +3008,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where the montage center has no media worker */
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where VideoCut has no media worker */
         get: operations["getVideoCutFrame"];
         put?: never;
         post?: never;
@@ -14998,7 +14998,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The montage center is on */
+            /** @description VideoCut is on */
             204: {
                 headers: {
                     [name: string]: unknown;

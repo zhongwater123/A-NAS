@@ -148,7 +148,7 @@ func (e *Executor) EnsureModuleStore(ctx context.Context, manifest modulemanifes
 	return err == nil && statErr == nil, repaired, err
 }
 
-// EnsureVideoCutStore owns the montage center's projects, plans and jobs
+// EnsureVideoCutStore owns VideoCut's projects, plans and jobs
 // (ADR 0038), outside member spaces, like the family store.
 func (e *Executor) EnsureVideoCutStore(ctx context.Context) ([]string, error) {
 	if !e.dataVolumeReady() {

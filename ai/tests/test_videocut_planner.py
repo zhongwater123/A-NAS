@@ -1,7 +1,7 @@
 """Root's planner hands a planning round to the member's planning instance as one conversation
 (ai/assistant/videocut-planner.py, docs/architecture/montage-planning-session.md).
 
-The montage center's socket, the planning instance's login and the model's gateway are stand-ins on Unix sockets; the
+VideoCut's socket, the planning instance's login and the model's gateway are stand-ins on Unix sockets; the
 instance's JSON-RPC is a scripted connection in place of the runtime's websockets.
 """
 
@@ -351,7 +351,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual((self.ended, self.abandoned), ([], []))
         self.assertEqual(sum(self.counts().values()), 0)
 
-    def test_a_turn_that_fails_before_the_model_called_a_montage_tool_is_given_back(self):
+    def test_a_turn_that_fails_before_the_model_called_a_videocut_tool_is_given_back(self):
         self.member("alice")
         self.instance()
         self.turn = lambda ws: ws.event("message.complete", {"status": "error", "error": "the model's gateway answered 502"})
@@ -359,7 +359,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(self.ended, [{"result": "error", "outcome": "error: the model's gateway answered 502"}])
         self.assertEqual(sum(self.counts().values()), 0)
 
-    def test_a_turn_cut_off_after_a_montage_tool_counts(self):
+    def test_a_turn_cut_off_after_a_videocut_tool_counts(self):
         self.member("alice")
         self.instance()
 
@@ -381,7 +381,7 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual([e["result"] for e in self.ended], ["timeout"])
         self.assertEqual(len(self.hermes.calls("session.interrupt")), 1)
 
-    def test_a_montage_center_that_does_not_answer_is_asked_again_later_or_for_a_new_grant(self):
+    def test_a_videocut_that_does_not_answer_is_asked_again_later_or_for_a_new_grant(self):
         self.member("alice")
         self.instance()
         self.videocut_server.shutdown()

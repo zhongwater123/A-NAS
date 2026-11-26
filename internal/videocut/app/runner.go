@@ -153,7 +153,7 @@ func (s *Store) RunJobs(ctx context.Context) {
 		job, found, err := s.claim(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				s.logger.ErrorContext(ctx, "claiming a montage job failed", "error", err)
+				s.logger.ErrorContext(ctx, "claiming a VideoCut job failed", "error", err)
 			}
 			found = false
 		}
@@ -260,7 +260,7 @@ func (s *Store) keepJob(ctx context.Context, job claimed, cancel context.CancelC
 				cancel(errCancelled) // the project went
 				return
 			case err != nil:
-				s.logger.WarnContext(ctx, "renewing a montage job's lease failed", "job", job.id, "error", err)
+				s.logger.WarnContext(ctx, "renewing a VideoCut job's lease failed", "job", job.id, "error", err)
 			case requested:
 				cancel(errCancelled)
 				return
@@ -349,10 +349,10 @@ func (s *Store) settleJob(ctx context.Context, job claimed, err error, stopping 
 			Missing: missing, SaveStarted: saving, NotBefore: next, FinishedAt: finished, UpdatedAt: at})
 	})
 	if dbErr != nil {
-		s.logger.ErrorContext(ctx, "recording a montage job's step failed", "job", job.id, "error", dbErr)
+		s.logger.ErrorContext(ctx, "recording a VideoCut job's step failed", "job", job.id, "error", dbErr)
 		return
 	}
-	s.logger.InfoContext(ctx, "montage job stopped", "job", job.id, "reason", err.Error())
+	s.logger.InfoContext(ctx, "VideoCut job stopped", "job", job.id, "reason", err.Error())
 	if s.finished(ctx, job.id) {
 		s.removeJobFiles(job.id)
 		s.releaseSong(ctx, job.owner)

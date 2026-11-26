@@ -37,7 +37,7 @@ func (c Client) Music(ctx context.Context, request MusicRequest) (Selection, err
 	return selection, nil
 }
 
-// waitedError turns a call's error into the montage center's, for a call a
+// waitedError turns a call's error into VideoCut's, for a call a
 // member waits on (the song's excerpt, a step of an edit) rather than a job:
 // the request's handler tells them apart, where a job's runner retries.
 func waitedError(err error) error {
@@ -53,7 +53,7 @@ func waitedError(err error) error {
 		return fmt.Errorf("%w: %v", ErrWorkerRefused, err)
 	case errors.Is(err, ErrFailed):
 		// The Worker took the request and broke on it, or stopped: for a
-		// song the montage center counts these, and gives it up after a few.
+		// song VideoCut counts these, and gives it up after a few.
 		return fmt.Errorf("%w: %v", ErrWorkerFailed, err)
 	}
 	return fmt.Errorf("%w: %v", ErrWorkerUnavailable, err)

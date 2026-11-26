@@ -37,7 +37,7 @@ export interface UploadItem extends PendingPhoto {
   completed?: number;
   liveStill?: boolean;
   // assetId is the photo or video the upload became; a MOV that completed a
-  // Live Photo became none (the montage center builds projects of these).
+  // Live Photo became none (VideoCut builds projects of these).
   assetId?: string;
 }
 // What a finished batch brought: the targets photos and videos went to, how

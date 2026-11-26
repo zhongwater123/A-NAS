@@ -9,7 +9,7 @@ import (
 // The planner (ai/assistant/videocut-planner.py) refuses a claim whose round
 // id, job id or token is not what it expects, and so plans nothing. On the
 // Experimental NAS the round script before it expected 24 letters where the
-// montage center makes 26 (crypto/rand.Text): every round was claimed,
+// VideoCut makes 26 (crypto/rand.Text): every round was claimed,
 // thrown away and timed out, and no job was ever planned. Its patterns are
 // read from the planner itself, so that the two cannot part.
 func TestThePlannerAcceptsTheIDsAndTokensOfAClaim(t *testing.T) {

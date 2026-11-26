@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package videocut runs the montage center as its own service
+// Package videocut runs VideoCut as its own service
 // (anas-videocut.service, ADR 0038): the Product Service forwards
 // /api/v1/videocut with the browser's session token, and the service confirms
 // the session with the Host Agent itself (storeservice).
@@ -35,7 +35,7 @@ var (
 
 // WindowSearchOf is the grants' own search of windows by text, for editing
 // a film (#596), when they have one: the photo library's answers as the
-// montage center's errors (external.GrantSearch).
+// VideoCut's errors (external.GrantSearch).
 func WindowSearchOf(grants app.Grants) app.WindowSearch {
 	if search, ok := grants.(external.PhotoSearch); ok {
 		return external.GrantSearch{Grants: search}
@@ -59,8 +59,8 @@ type Config struct {
 	Editing    app.Editing
 	Planner    app.Planner
 	// Accounts names the account behind a member's UID; AssistantSocket is
-	// where members' planning instances and root's planner reach the montage
-	// center when systemd does not hold it; PlanMarkers is the directory of
+	// where members' planning instances and root's planner reach VideoCut
+	// when systemd does not hold it; PlanMarkers is the directory of
 	// planning markers the planner reads
 	// (docs/architecture/montage-planning-session.md).
 	Accounts        protocol.AccountResolver
@@ -75,10 +75,10 @@ type Config struct {
 
 // ErrStoreUnavailable reports a store that is not the service's own on the
 // data volume.
-var ErrStoreUnavailable = errors.New("montage store on the data volume is unavailable")
+var ErrStoreUnavailable = errors.New("VideoCut store on the data volume is unavailable")
 
 // RequireOwnedStore accepts root only as this service's own private
-// directory on the writable, verified data volume, so the montage center's
+// directory on the writable, verified data volume, so VideoCut's
 // records are never written to the system disk.
 func RequireOwnedStore(root string) error {
 	if err := modules.RequireDataVolumeStore(root); err != nil {
@@ -87,15 +87,15 @@ func RequireOwnedStore(root string) error {
 	return nil
 }
 
-// Proxy forwards the montage API to the service on socketPath; while the
+// Proxy forwards the VideoCut API to the service on socketPath; while the
 // service cannot be reached, requests answer videocut_unavailable.
 func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 	return serviceproxy.New(socketPath, serviceproxy.Unavailable{
-		Code: protocol.Unavailable, Message: "the montage center is not available",
+		Code: protocol.Unavailable, Message: "VideoCut is not available",
 	}, logger)
 }
 
-// Run serves the montage API on SocketPath until ctx ends. While the store
+// Run serves the VideoCut API on SocketPath until ctx ends. While the store
 // cannot be opened, as when the data volume is offline or read-only,
 // requests answer videocut_unavailable. Every store it opens is reconciled
 // with the photo library's grants and retries the revocations it missed
@@ -103,7 +103,7 @@ func Proxy(socketPath string, logger *slog.Logger) http.Handler {
 // (app.Store.StartWorkers).
 func Run(ctx context.Context, config Config) error {
 	if config.Grants == nil {
-		return errors.New("the montage service needs the photo library's grants")
+		return errors.New("the VideoCut service needs the photo library's grants")
 	}
 	if config.CheckStore == nil {
 		config.CheckStore = RequireOwnedStore
@@ -120,7 +120,7 @@ func Run(ctx context.Context, config Config) error {
 		}
 		markers = external.PlanMarkers{Dir: config.PlanMarkers}
 	}
-	// Members' planning instances reach the montage center on its assistant
+	// Members' planning instances reach VideoCut on its assistant
 	// socket, where their UID says who they are, and so does root's planner,
 	// naming the member. It answers with the store that is open, and
 	// unavailable while none is.

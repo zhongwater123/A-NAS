@@ -94,7 +94,7 @@ type config struct {
 	// the data volume), where only root may read them. The instance secrets
 	// are the Host Agent's own, written where the executor prepares a member's
 	// assistant (Executor.AssistantTokenDir), so they have no setting; nor
-	// have the members' planning grants for the montage center, which the
+	// have the members' planning grants for VideoCut, which the
 	// File Broker keeps beside them (Executor.AssistantPlanDir).
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
@@ -118,8 +118,8 @@ type config struct {
 	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
 	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
-	// VideoCutAssistantLookup=1 looks accounts up by UID for the montage
-	// center's socket for planning, as the unit sets it.
+	// VideoCutAssistantLookup=1 looks accounts up by UID for VideoCut's
+	// socket for planning, as the unit sets it.
 	VideoCutAssistantLookup string `env:"ANAS_VIDEOCUT_ASSISTANT_LOOKUP"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
@@ -496,7 +496,7 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 	logRepairs(logger, familyRepairs)
 	videoCutRepairs, videoCutErr := executor.EnsureVideoCutStore(ctx)
 	if videoCutErr != nil {
-		logger.ErrorContext(ctx, "montage store repair failed", "error", videoCutErr)
+		logger.ErrorContext(ctx, "VideoCut store repair failed", "error", videoCutErr)
 	}
 	logRepairs(logger, videoCutRepairs)
 	workspaceRepairs, workspaceErr := executor.EnsureWorkspaceStore(ctx)

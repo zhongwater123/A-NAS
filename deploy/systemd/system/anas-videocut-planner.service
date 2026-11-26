@@ -1,8 +1,8 @@
 [Unit]
-Description=Hands the A-NAS montage center's planning to members' VNAS
+Description=Hands the A-NAS VideoCut's planning to members' VNAS
 Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/architecture/montage-planning-session.md
 # For each member with a job waiting for a plan and a planning grant, it claims a round on
-# the montage center's socket, holds the planning as one conversation with the member's
+# VideoCut's socket, holds the planning as one conversation with the member's
 # planning instance (anas-assistant-plan@.service, reached through its root-only socket) and
 # reports how it ended; one round on the whole device at a time (videocut-planner.py). Without
 # the administrator's model key the assistant is off, and so is this (the Host Agent starts
@@ -23,7 +23,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
-# The montage service's planning markers, the File Broker's planning grants and the
+# The VideoCut service's planning markers, the File Broker's planning grants and the
 # instances' secrets in the Host Agent's own state, which only root reads; a grant counts only
 # as root's own file there (videocut-planner.py). The sockets it connects to are root's.
 ReadOnlyPaths=-/run/a-nas-videocut -/var/lib/a-nas-host/assistant/plans -/var/lib/a-nas-host/assistant/tokens

@@ -6,7 +6,7 @@
   "code": "allin1 1.1.0 (https://github.com/mir-aidj/all-in-one), whose allin1.models.loaders names these eight folds as harmonix-all",
   "sizeBytes": 11204568,
   "memoryBytes": 4816109568,
-  "memoryNote": "The music analysis Worker's whole peak for an 8-minute song, the longest the montage center takes, with htdemucs and the runtime: 4,593 MiB in a Debian 13 runtime like the NAS's on development machine C's virtual machine (2026-11-18, docs/architecture/montage-music.md, 用时与内存). The peak grows with the song; a 4-minute song took some 2.5 GiB.",
+  "memoryNote": "The music analysis Worker's whole peak for an 8-minute song, the longest VideoCut takes, with htdemucs and the runtime: 4,593 MiB in a Debian 13 runtime like the NAS's on development machine C's virtual machine (2026-11-18, docs/architecture/montage-music.md, 用时与内存). The peak grows with the song; a 4-minute song took some 2.5 GiB.",
   "sha256": "b3de263a502697043e02cb45f3357f4bb40a11f3de7bdb245487d22a412e3df7",
   "sha256Note": "The ensemble's identity: SHA-256 of a SHA256SUMS listing of its parts in order (\"<sha256>  <file>\\n\" each); every part is checked on its own.",
   "license": "Pending (docs/decisions/2026-11-17-montage-center-first-version.md, allin1 的商业版权): the weights are marked MIT on Hugging Face and were trained on the Harmonix Set, whose audio has a licence of its own. Until it is settled they run only on the development machine and the Experimental NAS, and no release depends on them.",

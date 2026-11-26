@@ -62,7 +62,7 @@ func startWorker(t *testing.T, prelude string) videocutcompute.Client {
 	return videocutcompute.Client{SocketPath: socket}
 }
 
-// The montage service's calls (app.Compute) against the Worker: the
+// The VideoCut service's calls (app.Compute) against the Worker: the
 // case is ai/tests/test_videocut_worker.py's tiny_case, one picture of two
 // two-second slots from a card of two beats.
 func TestTheVideoCutServicesCallsReachTheWorker(t *testing.T) {

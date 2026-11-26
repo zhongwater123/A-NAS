@@ -23,7 +23,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 )
 
-// The montage center's assistant socket (docs/architecture/montage-planning-session.md):
+// VideoCut's assistant socket (docs/architecture/montage-planning-session.md):
 // systemd holds it as anas-videocut-assistant.socket, named "assistant", open
 // to every UID in a directory only root enters; it is bound only into
 // members' planning instances. The peer's UID, which the kernel reports, is
@@ -83,7 +83,7 @@ func authenticatePeer(resolver AccountResolver, uidOf func(string) (int, error),
 		if ok && uid == 0 {
 			named = r.Header.Get(AccountHeader)
 			if !accountid.ValidAssistantAccount(named) {
-				logger.ErrorContext(r.Context(), "root named no account on the montage assistant socket")
+				logger.ErrorContext(r.Context(), "root named no account on the VideoCut assistant socket")
 				httpjson.WriteError(w, http.StatusForbidden, "forbidden", "root names the account it plans for")
 				return
 			}
@@ -95,7 +95,7 @@ func authenticatePeer(resolver AccountResolver, uidOf func(string) (int, error),
 			uid = found
 		}
 		if !ok || uid <= 0 {
-			logger.ErrorContext(r.Context(), "montage assistant socket peer is not a member", "uid", uid, "credentials", ok)
+			logger.ErrorContext(r.Context(), "VideoCut assistant socket peer is not a member", "uid", uid, "credentials", ok)
 			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "only members' assistants use this socket")
 			return
 		}
@@ -106,7 +106,7 @@ func authenticatePeer(resolver AccountResolver, uidOf func(string) (int, error),
 			return
 		case err != nil:
 			logger.ErrorContext(r.Context(), "account lookup failed", "error", err)
-			httpjson.WriteError(w, http.StatusServiceUnavailable, "videocut_unavailable", "the montage center is not available")
+			httpjson.WriteError(w, http.StatusServiceUnavailable, "videocut_unavailable", "VideoCut is not available")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(accounts.WithUser(r.Context(), accounts.User{ID: account.UserID, Username: account.Username})))
@@ -124,7 +124,7 @@ func assistantSocket(socketPath string) (net.Listener, bool, error) {
 		return nil, false, nil
 	}
 	if info, err := os.Stat(filepath.Dir(socketPath)); err != nil || info.Mode().Perm()&0o077 != 0 {
-		return nil, false, errors.New("the montage assistant socket's directory must be private")
+		return nil, false, errors.New("the VideoCut assistant socket's directory must be private")
 	}
 	_ = os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
@@ -151,7 +151,7 @@ func serveAssistant(ctx context.Context, listener net.Listener, handler http.Han
 		_ = server.Shutdown(shutdown)
 	}()
 	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.ErrorContext(ctx, "montage assistant socket stopped", "error", err)
+		logger.ErrorContext(ctx, "VideoCut assistant socket stopped", "error", err)
 	}
 	<-stopped
 }
@@ -169,7 +169,7 @@ func (g *AssistantGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	if g.api == nil {
-		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center is not available")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "VideoCut is not available")
 		return
 	}
 	g.api.ServeHTTP(w, r)

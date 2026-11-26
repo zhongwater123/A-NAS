@@ -30,7 +30,7 @@ func TestPersistentJobRetriesKilledComputeProcess(t *testing.T) {
 		if os.Getenv("ANAS_VIDEOCUT_PYTHON") != "" {
 			t.Fatalf("configured Worker Python: %v: %s", err, output)
 		}
-		t.Skip("requires the montage Worker Python with NumPy and Pillow")
+		t.Skip("requires the VideoCut Worker Python with NumPy and Pillow")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()

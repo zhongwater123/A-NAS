@@ -126,7 +126,7 @@ class MusicTest(unittest.TestCase):
 
 @unittest.skipUnless(RUNTIME, "NumPy is in the AI runtime")
 class ProtocolTest(unittest.TestCase):
-    """The montage center sends the loudness in a memfd, as every compute Worker array."""
+    """VideoCut sends the loudness in a memfd, as every compute Worker array."""
 
     def setUp(self):
         self.path = os.path.join(tempfile.mkdtemp(), "compute.sock")

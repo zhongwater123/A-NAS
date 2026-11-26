@@ -617,7 +617,7 @@ describe("剪辑中心", () => {
     expect(within(page).getByText("先选一首歌")).toBeInTheDocument();
   });
 
-  it("sends the member to the song when the montage center says there is none", async () => {
+  it("sends the member to the song when VideoCut says there is none", async () => {
     const seen = fresh();
     serve(
       () => project(),
@@ -711,7 +711,7 @@ describe("剪辑中心", () => {
     server.use(
       http.get("/api/v1/videocut/projects/{projectId}", ({ response }) =>
         down
-          ? response(503).json(apiError("videocut_unavailable", "the montage service is not running"))
+          ? response(503).json(apiError("videocut_unavailable", "the VideoCut service is not running"))
           : response(200).json(project()),
       ),
     );

@@ -1,9 +1,9 @@
 //go:build linux
 
-// Package videocutcompute is the client of the montage center's compute
+// Package videocutcompute is the client of VideoCut's compute
 // Worker (ai/anas_videocut/worker.py, docs/architecture/photo-ai.md). The
 // photo service cuts cards and measures their quality
-// with it, the montage service lists the catalog, asks for plans and fills
+// with it, the VideoCut service lists the catalog, asks for plans and fills
 // the music's slots. One request and one answer per connection, framed as
 // the AI Worker's; arrays travel as sealed memfds beside the request.
 package videocutcompute
@@ -34,11 +34,11 @@ const (
 var (
 	// ErrUnavailable: the Worker could not be reached; the same
 	// request may work later.
-	ErrUnavailable = errors.New("the montage compute worker is not available")
+	ErrUnavailable = errors.New("the VideoCut compute worker is not available")
 	// ErrRefused: the Worker refused the request; it would refuse it again.
-	ErrRefused = errors.New("the montage compute worker refused the request")
+	ErrRefused = errors.New("the VideoCut compute worker refused the request")
 	// ErrFailed: the Worker took the request and could not finish it.
-	ErrFailed = errors.New("the montage compute worker failed")
+	ErrFailed = errors.New("the VideoCut compute worker failed")
 )
 
 // Array is one array a request passes: Float32 or Uint8, with its shape.

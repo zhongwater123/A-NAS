@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the runtime of the montage center's music analysis Worker on a
+# Builds the runtime of VideoCut's music analysis Worker on a
 # development machine (docs/architecture/montage-music.md), as
 # scripts/build-ai-runtime.sh builds the AI Worker's: a virtual environment
 # for Debian 13's Python 3 with the wheels deploy/videocut-music/requirements.txt

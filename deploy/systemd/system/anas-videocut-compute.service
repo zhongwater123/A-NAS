@@ -1,5 +1,5 @@
 [Unit]
-Description=A-NAS montage compute Worker
+Description=A-NAS VideoCut compute Worker
 Documentation=https://github.com/zhongwater123/A-NAS
 Requires=anas-videocut-compute.socket
 After=anas-videocut-compute.socket

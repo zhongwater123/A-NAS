@@ -23,7 +23,7 @@ import (
 // holds it as one conversation with the member's planning instance, and
 // reports that it started and how it ended, or that it never started and
 // why (ai/assistant/videocut-planner.py). The model reads the
-// briefs and hands the two steps back through the montage tools (briefs.go);
+// briefs and hands the two steps back through the videocut tools (briefs.go);
 // each answer is checked there and the first good one kept for the input key
 // of the step it answers. The job's own step then takes it into its plan
 // (steps.go), so an answer for inputs the job no longer has is never used.
@@ -268,7 +268,7 @@ func (r pastRound) tried() bool { return r.state == RoundEnded || r.failure == f
 // after rounds that did not plan it, the latest first, and what it waits
 // for: errorWait after a round tried, 2, 4, 8 then 15 minutes after rounds
 // in a row that could not reach VNAS. Only rounds since the member last
-// registered a planning grant, and since the montage service started, make
+// registered a planning grant, and since the VideoCut service started, make
 // it wait: doing something that may need planning, or installing another
 // version, tries again at once.
 func (s *Store) retryWait(rounds []pastRound, registered time.Time) (time.Duration, string) {
@@ -554,7 +554,7 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failur
 // EndRound records how the round's conversation ended: result is
 // RoundComplete for one that ran to the model's last answer, else what
 // stopped it (an error, a timeout, the conversation cut off). One that
-// stopped before the model called any montage tool failed (failureError):
+// stopped before the model called any videocut tool failed (failureError):
 // whether the model had begun is unknown, but it planned nothing. Either
 // way a round that left the job without its plan counts as one tried, and
 // the job plans again on its own (awaitPlan). A round reported before it

@@ -28,7 +28,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// songMedia stands in for the media worker as the montage center uses it:
+// songMedia stands in for the media worker as VideoCut uses it:
 // every file is two minutes of audio.
 type songMedia struct{}
 
@@ -74,7 +74,7 @@ func (songExcerpt) Music(_ context.Context, request videocutcompute.MusicRequest
 
 // TestASongComesFromTheMembersMusicLibrary chooses a song for a project
 // through the Product Service as development runs it: the track is opened as
-// the member and copied into the montage center, which analyses it.
+// the member and copied into VideoCut, which analyses it.
 func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	dir := t.TempDir()
 	controlDB := filepath.Join(dir, "control.db")
@@ -115,7 +115,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = videoCutStore.Close() })
-	// What reaches the montage center: the header only the Product Service sets.
+	// What reaches VideoCut: the header only the Product Service sets.
 	var seen []string
 	api := protocol.New(videoCutStore, logger)
 	recorded := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 	owner.do(http.MethodPut, path+"/song", `{"trackId":"file:missing"}`, nil, http.StatusNotFound)
 	for _, request := range seen {
 		if strings.HasPrefix(request, "PUT") {
-			t.Fatalf("a refused track reached the montage center: %q", seen)
+			t.Fatalf("a refused track reached VideoCut: %q", seen)
 		}
 	}
 	// The browser cannot say what the song is.
@@ -201,11 +201,11 @@ func TestASongComesFromTheMembersMusicLibrary(t *testing.T) {
 		t.Fatalf("song = %+v", song)
 	}
 	if len(seen) != 1 || !strings.HasPrefix(seen[0], "PUT ") || seen[0] == "PUT forged" {
-		t.Fatalf("the montage center saw %q", seen)
+		t.Fatalf("VideoCut saw %q", seen)
 	}
 	if header, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(seen[0], "PUT ")); err != nil ||
 		!strings.Contains(string(header), `"title":"Symphony"`) || !strings.Contains(string(header), `"trackId":"`+mine+`"`) {
-		t.Fatalf("the montage center was told %q, %v", header, err)
+		t.Fatalf("VideoCut was told %q, %v", header, err)
 	}
 	// Bob reaches neither the owner's project nor its song.
 	bob.do(http.MethodPut, path+"/song", `{"trackId":"`+bobs+`"}`, nil, http.StatusNotFound)

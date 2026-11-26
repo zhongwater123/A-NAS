@@ -1,14 +1,14 @@
 [Unit]
-Description=A-NAS montage music analysis Worker (allin1)
+Description=A-NAS VideoCut music analysis Worker (allin1)
 Documentation=https://github.com/zhongwater123/A-NAS
 Requires=anas-videocut-music.socket
 After=anas-videocut-music.socket
 
 [Service]
 Type=simple
-# Finds a song's beats, downbeats and sections with allin1 for the montage
-# center (docs/architecture/montage-music.md). The song arrives as two
-# streams of samples the montage service decodes with the media worker; the
+# Finds a song's beats, downbeats and sections with allin1 for VideoCut
+# (docs/architecture/montage-music.md). The song arrives as two
+# streams of samples the VideoCut service decodes with the media worker; the
 # Worker has no network and no data volume, so a song cannot leave the device
 # through it. Its runtime and models are content packages of their own,
 # linked here by a-nas-videocut-music.
@@ -47,7 +47,7 @@ RestrictRealtime=true
 LockPersonality=true
 SystemCallArchitectures=native
 # Background work under anas.slice, which gives way to everything else on the
-# device. An 8-minute song, the longest the montage center takes (the user,
+# device. An 8-minute song, the longest VideoCut takes (the user,
 # 2026-11-18), peaked at 4,593 MiB in a Debian 13 runtime like the NAS's; the
 # limit leaves a fifth more (docs/architecture/montage-music.md, 用时与内存).
 # A song that needs more ends this Worker, not the device's other services.

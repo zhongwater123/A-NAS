@@ -194,7 +194,7 @@ linters:
               desc: the update service runs as root in anas-update.service; use internal/systemupdate
             - pkg: "github.com/landlock-lsm/go-landlock"
               desc: the root broker confines its workers
-        # The montage center's layers (docs/architecture/montage-center.md,
+        # VideoCut's layers (docs/architecture/montage-center.md,
         # 代码结构; #639): only the inner layers are held. domain uses the
         # standard library and the contract packages; db adds the basic
         # libraries; app adds the FFmpeg Worker's types and, file by file,
@@ -290,9 +290,9 @@ linters:
             - "!$test"
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal/videocut$"
-              desc: the compute client and the photo service do not depend on the montage center
+              desc: the compute client and the photo service do not depend on VideoCut
             - pkg: "github.com/zhongwater123/A-NAS/internal/videocut/"
-              desc: the compute client and the photo service do not depend on the montage center
+              desc: the compute client and the photo service do not depend on VideoCut
     errcheck:
       exclude-functions:
         # A query's failure shows in rows.Err after the loop, which

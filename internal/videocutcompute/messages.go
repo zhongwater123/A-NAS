@@ -1,4 +1,4 @@
-// The messages between the montage service and the compute Worker
+// The messages between the VideoCut service and the compute Worker
 // (ai/anas_videocut/worker.py): the requests and answers of its operations,
 // the bounds it holds the input to, and how a call can fail.
 
@@ -181,13 +181,13 @@ type MusicRequest struct {
 }
 
 // ErrWorkerUnavailable reports that a Worker could not be reached or could
-// not serve; the montage center tries again later.
+// not serve; VideoCut tries again later.
 var ErrWorkerUnavailable = errors.New("the worker is not available")
 
 // ErrWorkerFailed reports that a Worker took the request and could not
 // finish it: it reported an error of its own, stopped answering or ran out
 // of time. The same request may work later, but every attempt costs what the
-// work costs, so the montage center counts them.
+// work costs, so VideoCut counts them.
 var ErrWorkerFailed = errors.New("the worker failed")
 
 // ErrWorkerRefused reports that a Worker refused the input; the same input

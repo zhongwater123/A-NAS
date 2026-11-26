@@ -1,5 +1,5 @@
 [Unit]
-Description=A-NAS montage center service
+Description=A-NAS VideoCut service
 Documentation=https://github.com/zhongwater123/A-NAS
 After=anas-host-agent.service anas-api.service anas-photos.service anas-videocut-assistant.socket
 Wants=anas-host-agent.service anas-api.service anas-videocut-assistant.socket
@@ -8,7 +8,7 @@ Wants=anas-host-agent.service anas-api.service anas-videocut-assistant.socket
 Type=simple
 User=a-nas-videocut
 Group=a-nas-videocut
-# Reaches the media worker and the montage compute worker; the photo store
+# Reaches the media worker and the VideoCut compute worker; the photo store
 # stays private to a-nas-photos. The group also reaches the photo service's
 # API and the AI worker, as for the family service (ADR 0038, consequences).
 SupplementaryGroups=a-nas-photos
@@ -37,7 +37,7 @@ ProtectSystem=strict
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
-# Mounts can appear after startup; only montage/ grants this UID access.
+# Mounts can appear after startup; only videocut/ grants this UID access.
 ReadWritePaths=/srv/a-nas/data
 RestrictAddressFamilies=AF_UNIX
 # Heavy work runs in the workers and the photo service; this one keeps state.

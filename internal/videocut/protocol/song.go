@@ -39,7 +39,7 @@ type Tracks interface {
 // CopySong serves PUT /projects/{id}/song in the Product Service
 // (docs/specs/montage-center.md, 配乐): it opens the track the member names
 // through the File Broker as the member, the way the music library plays it,
-// and streams it to the montage center, next, with what it knows of the
+// and streams it to VideoCut, next, with what it knows of the
 // track. Another member's track is not_found, as a missing one.
 func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Handler {
 	if logger == nil {
@@ -72,14 +72,14 @@ func CopySong(tracks Tracks, next http.Handler, logger *slog.Logger) apiroute.Ha
 			httpjson.WriteError(w, http.StatusForbidden, "forbidden", "music library access is forbidden")
 			return
 		case err != nil:
-			logger.WarnContext(r.Context(), "opening a track for the montage center failed", "error", err)
+			logger.WarnContext(r.Context(), "opening a track for VideoCut failed", "error", err)
 			httpjson.WriteError(w, http.StatusServiceUnavailable, "music_unavailable", "music library is unavailable")
 			return
 		}
 		defer func() { _ = stream.Reader.Close() }()
 		track := stream.Track
 		// What the library knows already answers without copying anything;
-		// the montage center checks the copy itself.
+		// VideoCut checks the copy itself.
 		if track.SizeBytes > app.MaxSongBytes || stream.SizeBytes > app.MaxSongBytes {
 			httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "song_too_large", "the song is larger than 100 MiB")
 			return

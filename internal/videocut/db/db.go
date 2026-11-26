@@ -1,4 +1,4 @@
-// Package db is the montage center's own database: videocut.db in the
+// Package db is VideoCut's own database: videocut.db in the
 // store's root, its tables and their steps (schema.go), and the reads and
 // writes of each kind of record. It imports no other layer of
 // internal/videocut but domain (docs/architecture/montage-center.md,

@@ -96,7 +96,7 @@ func (h *productHandler) table() []apiroute.Route {
 	}
 	if h.VideoCut != nil {
 		// The desktop shows 剪辑中心 while this answers. The switch is the
-		// Product Service's, so the montage service is not asked.
+		// Product Service's, so the VideoCut service is not asked.
 		routes = append(routes, apiroute.Route{Method: get, Pattern: protocol.PathPrefix, Posture: session,
 			Handler: func(w http.ResponseWriter, _ *http.Request, _ accounts.Session) { w.WriteHeader(http.StatusNoContent) }})
 	}

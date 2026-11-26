@@ -1,5 +1,5 @@
 // Package protocol exposes 剪辑中心 under /api/v1/videocut. It does not
-// authenticate: the montage service, or the Product Service in development,
+// authenticate: the VideoCut service, or the Product Service in development,
 // wraps it so that every request carries the signed-in user and the session
 // token (accounts.WithUser, accounts.WithSessionToken), and writes have
 // passed the Product Service's CSRF check.
@@ -21,7 +21,7 @@ import (
 
 const PathPrefix = "/api/v1/videocut"
 
-// Unavailable is the error code while the montage store cannot be used, as
+// Unavailable is the error code while the VideoCut store cannot be used, as
 // when the data volume is offline or read-only.
 const Unavailable = "videocut_unavailable"
 
@@ -33,7 +33,7 @@ type handler struct {
 
 type route func(http.ResponseWriter, *http.Request, accounts.User)
 
-// New returns the montage API. A nil store answers 503 videocut_unavailable.
+// New returns the VideoCut API. A nil store answers 503 videocut_unavailable.
 func New(store *app.Store, logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -84,14 +84,14 @@ func New(store *app.Store, logger *slog.Logger) http.Handler {
 	return h
 }
 
-// Endpoints are the operations the montage API serves under PathPrefix.
+// Endpoints are the operations the VideoCut API serves under PathPrefix.
 func Endpoints() []apiroute.Endpoint {
 	return New(nil, nil).(*handler).mux.Endpoints()
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.store == nil {
-		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center is not available")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "VideoCut is not available")
 		return
 	}
 	h.mux.ServeHTTP(w, r)
@@ -139,13 +139,13 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, domain.ErrJobState):
 		httpjson.WriteError(w, http.StatusConflict, "job_state", "the job cannot do this now")
 	case errors.Is(err, domain.ErrJobsUnavailable):
-		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "the montage center cannot make films here")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, Unavailable, "VideoCut cannot make films here")
 	case errors.Is(err, domain.ErrSongTooLarge):
 		httpjson.WriteError(w, http.StatusRequestEntityTooLarge, "song_too_large", "the song is larger than 100 MiB")
 	case errors.Is(err, domain.ErrSongLength):
 		httpjson.WriteError(w, http.StatusUnprocessableEntity, "song_length", "the song is shorter than 30 seconds or longer than 8 minutes")
 	case errors.Is(err, domain.ErrNotAudio):
-		httpjson.WriteError(w, http.StatusUnprocessableEntity, "not_audio", "the file is not audio the montage center can read")
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "not_audio", "the file is not audio VideoCut can read")
 	case errors.Is(err, domain.ErrNoSong):
 		httpjson.WriteError(w, http.StatusNotFound, "no_song", "the project has no song yet")
 	case errors.Is(err, domain.ErrSongNotReady):
@@ -157,7 +157,7 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "media_unavailable", "the media worker is not available")
 	case errors.Is(err, videocutcompute.ErrWorkerUnavailable), errors.Is(err, videocutcompute.ErrWorkerFailed), errors.Is(err, videocutcompute.ErrWorkerRefused):
 		h.logger.WarnContext(r.Context(), "compute worker unavailable", "error", err)
-		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the montage compute worker is not available")
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "compute_unavailable", "the VideoCut compute worker is not available")
 	case errors.Is(err, domain.ErrPhotosUnavailable):
 		h.logger.WarnContext(r.Context(), "photo library unavailable", "error", err)
 		httpjson.WriteError(w, http.StatusServiceUnavailable, "photos_unavailable", "the photo library is not available")

@@ -898,7 +898,7 @@ func (s *Service) restoreDatabases(ctx context.Context, backup string) error {
 	if backup == "" {
 		return errors.New("no copy of the databases from before the install")
 	}
-	// The montage service came later (ADR 0038): a release before it has no
+	// The VideoCut service came later (ADR 0038): a release before it has no
 	// unit to stop or start, which systemctl says with exit status 5. Any
 	// other failure may leave it writing videocut.db, so nothing is restored.
 	// It stops first: a request of its on the photo service's grant socket

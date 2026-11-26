@@ -17,7 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
-// What the montage tools do (docs/architecture/montage-center.md, MCP 服务器):
+// What the videocut tools do (docs/architecture/montage-center.md, MCP 服务器):
 // the briefs give a step's data and exact schema, the submissions check an
 // answer against them and keep the first good one. Every call names the
 // job and the round's token, and answers only the member whose round it is.
@@ -181,7 +181,7 @@ func (s *Store) briefOf(ctx context.Context, jobID, step, key string, input func
 		return videocutcompute.PlanBrief{}, err
 	}
 	if want := templateOf(in.Settings); brief.Template != want {
-		return videocutcompute.PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, the montage center for %q", brief.Template, want)
+		return videocutcompute.PlanBrief{}, fmt.Errorf("the compute Worker briefs for %q, VideoCut for %q", brief.Template, want)
 	}
 	encoded, err := json.Marshal(brief)
 	if err != nil {

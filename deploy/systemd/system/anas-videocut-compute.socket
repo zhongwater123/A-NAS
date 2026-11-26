@@ -1,11 +1,11 @@
 [Unit]
-Description=A-NAS montage compute Worker socket
+Description=A-NAS VideoCut compute Worker socket
 Documentation=https://github.com/zhongwater123/A-NAS
 
 [Socket]
 # The first connection starts anas-videocut-compute.service, a single instance
 # that answers connections one at a time (docs/architecture/photo-ai.md,
-# 剪辑中心的分析). The photo service and the montage service reach it through
+# 剪辑中心的分析). The photo service and the VideoCut service reach it through
 # the a-nas-photos group.
 ListenStream=/run/a-nas-videocut-compute/compute.sock
 SocketUser=root

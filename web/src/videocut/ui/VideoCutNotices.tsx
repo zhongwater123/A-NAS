@@ -76,7 +76,7 @@ export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
     setNotices([]);
   };
   // One job whose planning failed: the notice plans it again, as the project page's 重新规划 does; when that
-  // cannot be done, the montage center opens on where the job stands.
+  // cannot be done, VideoCut opens on where the job stands.
   const failed = notices.filter((notice) => notice.kind === "failed" && notice.reason === "plan_failed");
   const action =
     failed.length === 1
@@ -104,7 +104,7 @@ export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
 }
 
 // summarize says each notice in a line, the projects named; a job that still
-// waits for VNAS says why, when the montage center gave a reason.
+// waits for VNAS says why, when VideoCut gave a reason.
 export function summarize(notices: VideoCutNotice[]): string[] {
   return notices.map((notice) => {
     const project = `「${notice.project}」`;

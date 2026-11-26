@@ -188,7 +188,7 @@ func (c *compute) Fill(_ context.Context, request videocutcompute.FillRequest, v
 	c.fills++
 	if c.failFill > 0 {
 		c.failFill--
-		return videocutcompute.FillAnswer{}, errors.New("the montage compute worker is not available: killed")
+		return videocutcompute.FillAnswer{}, errors.New("the VideoCut compute worker is not available: killed")
 	}
 	if c.refuse {
 		return videocutcompute.FillAnswer{}, fmt.Errorf("%w: the arrays are larger than the Worker takes", videocutcompute.ErrWorkerRefused)

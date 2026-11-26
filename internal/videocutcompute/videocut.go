@@ -9,7 +9,7 @@ import (
 	"fmt"
 )
 
-// What the montage service asks of the Worker (app.Compute): the
+// What the VideoCut service asks of the Worker (app.Compute): the
 // catalog, the fill and the clear spans it needs. Their cards, rows and
 // plans outgrow a frame for a project of hundreds of videos, so they travel
 // as the "body" array.

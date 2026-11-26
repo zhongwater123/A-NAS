@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up to 4 MiB from members'' agents.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for VideoCut, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up to 4 MiB from members'' agents.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -4472,13 +4472,13 @@ paths:
       summary: 'Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_VIDEOCUT_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204'
       responses:
         '204':
-          description: The montage center is on
+          description: VideoCut is on
         '404':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects:
     get:
       operationId: listVideoCutProjects
-      summary: The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404
+      summary: The caller's VideoCut projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404
       parameters:
         - $ref: '#/components/parameters/VideoCutCursor'
       responses:
@@ -4829,7 +4829,7 @@ paths:
   /api/v1/videocut/projects/{projectId}/song:
     put:
       operationId: putVideoCutSong
-      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
+      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to VideoCut, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4886,7 +4886,7 @@ paths:
   /api/v1/videocut/projects/{projectId}/song/audio:
     get:
       operationId: getVideoCutSongAudio
-      description: 'The montage center''s copy of the project''s song, to listen to: with Range support when browsers play its format, otherwise (the song''s transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start.'
+      description: 'VideoCut''s copy of the project''s song, to listen to: with Range support when browsers play its format, otherwise (the song''s transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start.'
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - name: Range
@@ -4927,7 +4927,7 @@ paths:
   /api/v1/videocut/hero:
     get:
       operationId: getVideoCutHero
-      description: 'The device''s background film for the 剪辑中心 home page, as the 第八版 prototype''s hero: a file the device keeps under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member''s own videos.'
+      description: 'The device''s background film for the 剪辑中心 home page, as the 第八版 prototype''s hero: a file the device keeps under the VideoCut store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member''s own videos.'
       parameters:
         - name: Range
           in: header
@@ -5265,7 +5265,7 @@ paths:
   /api/v1/videocut/projects/{projectId}/frames/{assetId}:
     get:
       operationId: getVideoCutFrame
-      summary: 'A frame of one of the project''s videos, a JPEG 320 on its longer side, for the thumbnails of an edit''s shots and candidates. It is not kept: the video''s content does not change, so the browser keeps it. A video that is not the project''s is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where the montage center has no media worker'
+      summary: 'A frame of one of the project''s videos, a JPEG 320 on its longer side, for the thumbnails of an edit''s shots and candidates. It is not kept: the video''s content does not change, so the browser keeps it. A video that is not the project''s is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where VideoCut has no media worker'
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - name: assetId

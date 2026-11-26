@@ -1,4 +1,4 @@
-// Package external reaches the rest of the NAS for the montage center: the
+// Package external reaches the rest of the NAS for VideoCut: the
 // Workers, the photo library and the planner. It implements the interfaces
 // in internal/videocut/app/ports.go and never imports app; videocut.go
 // hands its values to app (docs/architecture/montage-center.md, 代码结构).
@@ -23,7 +23,7 @@ import (
 // (anas_ai.protocol): one request and one answer per connection, a four-byte
 // big-endian length and JSON, descriptors beside the request. Its song
 // arrives as two streams, not arrays, so it is not one of the compute
-// Worker's calls (internal/montagecompute), which reads memfds.
+// Worker's calls (internal/videocutcompute), which reads memfds.
 
 // maxWorkerFrame bounds a Worker's answer, as anas_ai.protocol.MAX_FRAME.
 const maxWorkerFrame = 1 << 20
@@ -131,7 +131,7 @@ func callWorker(ctx context.Context, socket string, timeout time.Duration, reque
 type MusicWorker struct {
 	Socket string
 	// Timeout bounds one song; zero is 30 minutes, several times what the
-	// longest song the montage center takes needs.
+	// longest song VideoCut takes needs.
 	Timeout time.Duration
 }
 

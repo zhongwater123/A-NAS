@@ -15,13 +15,13 @@ import (
 
 // A planning grant (docs/architecture/montage-center.md, 规划授权): the
 // requests that may lead to planning register one for the member, behind
-// their session, before the Product Service forwards them; the montage
-// center is told by AssistantHeader whether VNAS can plan.
+// their session, before the Product Service forwards them; VideoCut
+// is told by AssistantHeader whether VNAS can plan.
 
-// AssistantHeader tells the montage center that the Product Service
+// AssistantHeader tells VideoCut that the Product Service
 // registered a planning grant for the member behind this request ("on"), or
 // that they have no VNAS to plan with ("off"). Only RegisterPlan sets it: the
-// proxy to the montage service drops every X-A-NAS- header a browser sent
+// proxy to the VideoCut service drops every X-A-NAS- header a browser sent
 // and adds this one from the request's context (serviceproxy).
 const AssistantHeader = "X-A-NAS-Assistant"
 

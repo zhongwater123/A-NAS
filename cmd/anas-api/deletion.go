@@ -53,7 +53,7 @@ func accountDeletionSteps(config Config, users *accounts.Service, photoService *
 		accounts.ForgetStep("family", func(ctx context.Context, removal accounts.Removal) error {
 			return removeFamily(ctx, removal.UserID)
 		}),
-		// The montage center forgets the account's projects; its videos and
+		// VideoCut forgets the account's projects; its videos and
 		// films went with the photos step (ADR 0038).
 		accounts.ForgetStep("videocut", func(ctx context.Context, removal accounts.Removal) error {
 			return removeVideoCut(ctx, removal.UserID)

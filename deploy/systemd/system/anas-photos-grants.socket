@@ -1,6 +1,6 @@
 [Unit]
-Description=A-NAS photo service socket for the montage center's project grants
-# The montage center reaches members' videos only through grants the photo
+Description=A-NAS photo service socket for VideoCut's project grants
+# VideoCut reaches members' videos only through grants the photo
 # library holds (ADR 0038 decision 3). Only its account may connect: the
 # Product Service shares its group, so the socket is the account's alone and
 # its directory is root's. The photo service checks the peer's UID as well.

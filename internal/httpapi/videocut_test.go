@@ -99,7 +99,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	grants := &planGrants{plan: wire.PlanRegistered}
 	handler := checkedProduct(t, httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: users,
-		// The headers the montage center gets are those its socket would carry.
+		// The headers VideoCut gets are those its socket would carry.
 		VideoCut: serviceproxy.Local(counted), PlanGrants: grants, Logger: logger,
 	})
 	f := &activityFixture{t: t, handler: handler, client: &contractClient{t: t, handler: handler}}
@@ -108,7 +108,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	bob := f.signIn("/api/v1/session", "bob", "bob password for testing", "172.18.45.21", http.StatusOK)
 	owner.do(http.MethodGet, "/api/v1/videocut", "", nil, http.StatusNoContent)
 	if served != 0 {
-		t.Fatal("the montage center was asked whether it is on")
+		t.Fatal("VideoCut was asked whether it is on")
 	}
 	response := owner.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusOK)
 	if body := strings.TrimSpace(response.Body.String()); body != `{"items":[]}` {
@@ -183,7 +183,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	jobPath := "/api/v1/videocut/jobs/" + job.ID
 	// The requests that may lead to planning registered a grant behind the
 	// member's session first. While the broker cannot register one they
-	// answer assistant_unavailable, and the montage center is not asked.
+	// answer assistant_unavailable, and VideoCut is not asked.
 	if grants.registered == 0 {
 		t.Fatal("generating registered no planning grant")
 	}
@@ -200,7 +200,7 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 		}
 	}
 	if served != before {
-		t.Fatal("a request whose planning grant was not registered reached the montage center")
+		t.Fatal("a request whose planning grant was not registered reached VideoCut")
 	}
 	grants.err = nil
 	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)

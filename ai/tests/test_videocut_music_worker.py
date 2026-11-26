@@ -1,5 +1,5 @@
 """The music analysis Worker (ai/anas_videocut_music): it reads the two streams
-the montage center decodes, answers the eighth version's loudness, and
+VideoCut decodes, answers the eighth version's loudness, and
 refuses what is not a song. allin1 itself runs only in the music runtime
 (scripts/build-videocut-music-runtime.sh); here a stand-in answers for it, and
 ai/eval/videocut_music_allin1.py compares the real one with the development
@@ -59,7 +59,7 @@ class WorkerTest(unittest.TestCase):
             worker.rms_curve = lambda y: np.zeros(1 + len(y) // worker.HOP, np.float32)
 
     def call(self, request, streams, confirm=None):
-        """Sends request with a pipe per stream, written while the Worker reads, as the montage center does.
+        """Sends request with a pipe per stream, written while the Worker reads, as VideoCut does.
 
         confirm: True sends the frame that says the streams are whole once they are written, False hangs up instead;
         the answer is then None."""
@@ -153,7 +153,7 @@ class WorkerTest(unittest.TestCase):
                 self.assertFalse(answer["ok"])
                 self.assertEqual(answer["error"]["code"], "invalid_input")
 
-    def test_a_song_longer_than_the_montage_center_takes_is_refused(self):
+    def test_a_song_longer_than_videocut_takes_is_refused(self):
         with self.assertRaises(worker.Refused):
             r, w = os.pipe()
             threading.Thread(target=self.write, args=(w, tone(3, 100, 2).tobytes()), daemon=True).start()

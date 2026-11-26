@@ -116,7 +116,7 @@ func TestMemberSettings(t *testing.T) {
 	if plan, err := os.ReadFile(planPath); err != nil || string(plan) != string(config) {
 		t.Fatalf("config-plan.yaml %q, %v", plan, err)
 	}
-	// With one, they add its servers, the montage center's planning server: only the planning
+	// With one, they add its servers, VideoCut's planning server: only the planning
 	// instance binds them (docs/architecture/montage-planning-session.md). The settings the
 	// scheduled tasks once had for it go.
 	if err := os.MkdirAll(filepath.Join(library, "managed-plan"), 0o755); err != nil {
@@ -145,7 +145,7 @@ func TestMemberSettings(t *testing.T) {
 		t.Fatalf("config-cron.yaml is still there: %v", err)
 	}
 	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "videocut") {
-		t.Fatalf("the instance's config.yaml has the montage server:\n%s", again)
+		t.Fatalf("the instance's config.yaml has the videocut server:\n%s", again)
 	}
 	// Preparing again keeps the secret and the file a running sandbox bound.
 	before, _ := os.Stat(configPath)
@@ -184,8 +184,8 @@ func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
 	}
 }
 
-// The policy of a member's planning instance is the assistant's policy with the montage
-// center's planning server and a review after every planning, and nothing else changed
+// The policy of a member's planning instance is the assistant's policy with VideoCut's
+// planning server and a review after every planning, and nothing else changed
 // (docs/architecture/montage-planning-session.md). The package makes it by splicing text
 // (scripts/lib/assistant-units.sh), which no check of the text shows to be the YAML it should
 // be: here the package's own function makes it from the files the package ships, and it is read
@@ -238,7 +238,7 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 		"tools": map[string]any{"prompts": false, "resources": false},
 	}
 	if !reflect.DeepEqual(videocut, want) {
-		t.Fatalf("the montage server in the planning policy = %#v", videocut)
+		t.Fatalf("the videocut server in the planning policy = %#v", videocut)
 	}
 	skills, _ := plan["skills"].(map[string]any)
 	if skills["creation_nudge_interval"] != 1 {
@@ -248,7 +248,7 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	delete(servers, "videocut")
 	delete(skills, "creation_nudge_interval")
 	if !reflect.DeepEqual(plan, policy) {
-		t.Fatal("the planning policy differs from the assistant's policy in more than the montage server and the reviews")
+		t.Fatal("the planning policy differs from the assistant's policy in more than the videocut server and the reviews")
 	}
 	if base, _ := policy["mcp_servers"].(map[string]any); base["videocut"] != nil || len(base) == 0 {
 		t.Fatalf("the assistant's own policy has servers %v", base)
@@ -256,7 +256,7 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	// No platform's toolsets name it: only the planning instance gives it (HERMES_TUI_TOOLSETS).
 	for platform, toolsets := range policy["platform_toolsets"].(map[string]any) {
 		if slices.Contains(toolsets.([]any), any("videocut")) {
-			t.Fatalf("platform %s lists the montage toolset", platform)
+			t.Fatalf("platform %s lists the videocut toolset", platform)
 		}
 	}
 	// A policy the server does not fit is refused when the package is built, and one that
@@ -267,13 +267,13 @@ func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out, err := derive(twice, serverPath); err == nil {
-		t.Fatalf("a policy that already has the montage server was spliced again into %s", out)
+		t.Fatalf("a policy that already has the videocut server was spliced again into %s", out)
 	}
 	server, _ := os.ReadFile(serverPath)
 	doubled := strings.Replace(string(raw), "mcp_servers:\n", "mcp_servers:\n"+string(server), 1)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(doubled), &document); err == nil {
-		t.Fatal("a policy with the montage server written twice read as YAML")
+		t.Fatal("a policy with the videocut server written twice read as YAML")
 	}
 	if _, err := memberConfig("alice", "hash", []byte(doubled)); err == nil {
 		t.Fatal("the Host Agent wrote a member's settings from a policy with a key written twice")

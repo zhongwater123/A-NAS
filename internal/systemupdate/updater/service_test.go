@@ -1090,12 +1090,12 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// Restoring the copies stops the montage service on its own, since a release
+// Restoring the copies stops the VideoCut service on its own, since a release
 // before it has no such unit, and brings its database back with the others
 // (ADR 0038). It stops first: a request of its on the photo service's grant
 // socket would start the photo service again while the copies go back. And
 // its socket for members' scheduled tasks stops before it: a round of a
-// member's tasks that connects there would start the montage service again
+// member's tasks that connects there would start the VideoCut service again
 // while its database is restored.
 func TestRestoringTheDatabasesTakesTheVideoCutServiceAlong(t *testing.T) {
 	host := newFakeHost()
@@ -1107,18 +1107,18 @@ func TestRestoringTheDatabasesTakesTheVideoCutServiceAlong(t *testing.T) {
 		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family videocut")
 	})
 	socket := slices.Index(host.calls, "systemctl stop anas-videocut-assistant.socket")
-	montage := slices.Index(host.calls, "systemctl stop anas-videocut")
+	videocut := slices.Index(host.calls, "systemctl stop anas-videocut")
 	photos := slices.IndexFunc(host.calls, func(call string) bool {
 		return strings.HasPrefix(call, "systemctl stop ") && strings.Contains(call, " anas-photos")
 	})
 	started := slices.Index(host.calls, "systemctl start anas-videocut")
-	if socket < 0 || socket > montage || montage > photos || photos > restore || restore > started {
-		t.Fatalf("calls = %v; want the montage center's assistant socket stopped, then the montage service, then the photo service, "+
-			"the databases restored and the montage service started", host.calls)
+	if socket < 0 || socket > videocut || videocut > photos || photos > restore || restore > started {
+		t.Fatalf("calls = %v; want VideoCut's assistant socket stopped, then the VideoCut service, then the photo service, "+
+			"the databases restored and the VideoCut service started", host.calls)
 	}
 }
 
-// Only a montage unit that is not loaded, as on a release before it, lets
+// Only a VideoCut unit that is not loaded, as on a release before it, lets
 // the restore go on without stopping it; any other failure to stop the
 // service, or the socket that would start it again, stops the restore before
 // a journal is deleted (ADR 0038).
@@ -1147,7 +1147,7 @@ func TestRestoringTheDatabasesNeedsTheVideoCutServiceStopped(t *testing.T) {
 }
 
 // The shared workspace service (ADR 0040) stops on its own before the copies
-// go back and starts after them, like the montage service: a release before
+// go back and starts after them, like the VideoCut service: a release before
 // it has no such unit, and any other failure to stop it stops the restore.
 func TestRestoringTheDatabasesTakesTheWorkspaceServiceAlong(t *testing.T) {
 	host := newFakeHost()

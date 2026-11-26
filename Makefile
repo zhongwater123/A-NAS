@@ -290,8 +290,8 @@ ops-check:
 	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
 	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ListenStream=/run/a-nas-videocut-compute/compute.sock' deploy/systemd/system/anas-videocut-compute.socket
-	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
-	@# the members' planning instances alone, and stopped before the montage service it would start again.
+	@# VideoCut's socket for planning: open to every UID in a directory only root enters, bound into
+	@# the members' planning instances alone, and stopped before the VideoCut service it would start again.
 	grep -Fqx 'ListenStream=/run/a-nas-videocut-assistant/assistant.sock' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-videocut-assistant.socket
 	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-videocut-assistant.socket

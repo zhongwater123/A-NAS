@@ -1,6 +1,6 @@
 #!/bin/bash
 # prerm of a-nas-videocut-music: the Worker and its socket stop before their
-# files go. The montage service keeps its songs waiting for the analysis.
+# files go. The VideoCut service keeps its songs waiting for the analysis.
 set -euo pipefail
 
 [[ -d /run/systemd/system ]] || exit 0

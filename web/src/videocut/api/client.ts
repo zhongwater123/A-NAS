@@ -73,7 +73,7 @@ export async function listNotices(signal?: AbortSignal): Promise<VideoCutNotice[
 // The device's background film for the home page, and its poster; 404 without one.
 export const heroURL = "/api/v1/videocut/hero";
 // Whether the device keeps a film of its own for the home page: its first
-// byte is asked for, and the montage center answers 404 without one.
+// byte is asked for, and VideoCut answers 404 without one.
 export async function hasHero(signal?: AbortSignal): Promise<boolean> {
   const { response } = await client.GET("/api/v1/videocut/hero", {
     params: { header: { Range: "bytes=0-0" } },

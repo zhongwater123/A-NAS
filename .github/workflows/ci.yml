@@ -155,7 +155,7 @@ jobs:
 
       # Ruff for `make ai-lint`, zizmor for `make ops-check`. NumPy, pinned by
       # the runtime's lock, lets the clustering tests run. NumPy and Pillow
-      # also exercise the montage Worker. The real-model tests need
+      # also exercise the VideoCut Worker. The real-model tests need
       # model files and stay skipped.
       - name: Install the AI tools and test dependencies
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
@@ -215,7 +215,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install the montage Worker test dependencies
+      - name: Install the VideoCut Worker test dependencies
         run: |
           sed -n '/^numpy==/,/[^\\]$/p; /^pillow==/,/[^\\]$/p' ai/requirements.txt |
             python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin

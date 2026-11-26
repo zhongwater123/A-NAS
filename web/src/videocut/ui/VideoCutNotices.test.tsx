@@ -34,7 +34,7 @@ const settle = () =>
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
 
-describe("the montage center's notices on the desktop", () => {
+describe("VideoCut's notices on the desktop", () => {
   it("says each job in a line, and why one still waits for VNAS", () => {
     expect(summarize([...notices])).toEqual(["「海边」在等 VNAS 规划", "「雪山」的成片已存进相册"]);
     expect(
@@ -46,7 +46,7 @@ describe("the montage center's notices on the desktop", () => {
     ).toEqual(["「海边」在等 VNAS 规划：VNAS 没有开启", "「海边」正在由 VNAS 规划", "「海边」需要你处理一下"]);
   });
 
-  it("shows them once on this device and opens the montage center", async () => {
+  it("shows them once on this device and opens VideoCut", async () => {
     server.use(http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [...notices] })));
     const opened = vi.fn();
     const { unmount } = render(<VideoCutNotices onOpen={opened} />);

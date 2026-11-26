@@ -18,7 +18,7 @@ import (
 )
 
 // A song is analysed once per content: the songs of several members with
-// the same digest share one analysis. The montage center decodes the copy
+// the same digest share one analysis. VideoCut decodes the copy
 // with the FFmpeg worker into two streams, stereo at 44.1 kHz for allin1 and
 // mono at 22050 Hz for the loudness, the eighth version's inputs, and hands
 // them to the music analysis Worker; then the compute Worker's music

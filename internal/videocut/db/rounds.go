@@ -54,7 +54,7 @@ func roundStanding(ctx context.Context, q queryer, owner, jobID, token string) (
 	return r, err
 }
 
-// MarkRoundCalled records that the model called a montage tool in round id
+// MarkRoundCalled records that the model called a videocut tool in round id
 // at at.
 func (d *DB) MarkRoundCalled(ctx context.Context, id string, at time.Time) error {
 	_, err := d.db.ExecContext(ctx, "UPDATE rounds SET called_at = ? WHERE id = ?", sqlitedb.FormatTime(at), id)

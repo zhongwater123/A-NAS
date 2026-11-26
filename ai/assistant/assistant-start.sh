@@ -22,7 +22,7 @@ fi
 # legacy session token, which any process of the sandbox could read, is refused. Sessions are
 # signed with a key serve draws at start and keeps in memory; serve_nondumpable.py keeps that
 # memory out of reach of the member's own processes in the sandbox. The member's planning
-# instance for the montage center (anas-assistant-plan@.service) is a second serve on 9120.
+# instance for VideoCut (anas-assistant-plan@.service) is a second serve on 9120.
 port=9119
 if [ "${ANAS_ASSISTANT_CHANNEL:-serve}" = plan ]; then
   port=9120

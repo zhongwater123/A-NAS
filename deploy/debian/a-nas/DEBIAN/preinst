@@ -11,7 +11,7 @@ case "${1:-}" in
   *) exit 0 ;;
 esac
 
-# The photo, share, family, montage and workspace services own their stores
+# The photo, share, family, VideoCut and workspace services own their stores
 # under fixed IDs (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
 # systemd-sysusers would leave such an account as it is.
 for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-videocut:31005 a-nas-workspace:31004; do
@@ -60,8 +60,8 @@ else
 fi
 
 # The writers stop first, so that each copy is whole. The new release starts
-# them again; so does the old one if this one fails to unpack. The montage
-# center's socket for planning stops before its service, which root's planner
+# them again; so does the old one if this one fails to unpack. VideoCut's
+# socket for planning stops before its service, which root's planner
 # or a member's planning instance would otherwise start again through it while
 # videocut.db is copied; a release before it has no such unit.
 if [[ -d /run/systemd/system ]]; then

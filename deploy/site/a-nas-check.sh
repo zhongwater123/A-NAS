@@ -159,7 +159,7 @@ if [[ -e /etc/a-nas/internet.env ]]; then
 else
   echo "INFO internet entry: off"
 fi
-# VNAS runs while the administrator's model key is saved, and with it the montage center's
+# VNAS runs while the administrator's model key is saved, and with it VideoCut's
 # planner, which hands the planning to members' planning instances.
 if [[ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]]; then
   if systemctl is-active --quiet anas-videocut-planner.service; then
@@ -169,7 +169,7 @@ if [[ -e /etc/credstore.encrypted/a-nas-assistant-deepseek ]]; then
       "anas-videocut-planner.service is $(systemctl is-active anas-videocut-planner.service); see journalctl -u anas-videocut-planner"
   fi
 else
-  echo "INFO VNAS and the montage center's planner: off without the model key"
+  echo "INFO VNAS and VideoCut's planner: off without the model key"
 fi
 
 # A store on the data volume that its service opened before opens again. A

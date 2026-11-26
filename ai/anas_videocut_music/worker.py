@@ -1,4 +1,4 @@
-"""The montage center's music analysis Worker (docs/architecture/montage-center.md, 配乐).
+"""VideoCut's music analysis Worker (docs/architecture/montage-center.md, 配乐).
 
 It runs allin1's harmonix-all on one song at a time and answers the song's
 tempo, beats, downbeats and labelled sections, as the eighth version's
@@ -59,7 +59,7 @@ log = logging.getLogger("anas_videocut_music")
 
 SYSTEMD_FIRST_FD = 3
 IDLE_SECONDS = 300
-# The longest song the montage center takes, with room for the decoder.
+# The longest song VideoCut takes, with room for the decoder.
 LONGEST_SECONDS = 8 * 60 + 5
 STEREO_RATE, MONO_RATE = 44100, 22050
 # The eighth version's RMS curve (librosa.feature.rms's defaults).
@@ -165,7 +165,7 @@ def read_stream(fd, channels, seconds=LONGEST_SECONDS, rate=STEREO_RATE):
                 break
             total += len(chunk)
             if total > most:
-                raise Refused("the song is longer than the montage center takes")
+                raise Refused("the song is longer than VideoCut takes")
             chunks.append(chunk)
     # Writable, for PyTorch to take as it is.
     data = bytearray().join(chunks)

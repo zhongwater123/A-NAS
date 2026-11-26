@@ -375,7 +375,7 @@ func TestAFailedPlanningIsPlannedAgainOnlyWithItsSong(t *testing.T) {
 	}
 }
 
-// A conversation that stopped after its model called a montage tool may have
+// A conversation that stopped after its model called a videocut tool may have
 // planned part of it: it is planned again on its own a minute later, with
 // what was taken kept (2026-11-25; until then the member decided, #514).
 func TestAnErrorAfterTheModelCalledAToolIsPlannedAgain(t *testing.T) {
@@ -392,7 +392,7 @@ func TestAnErrorAfterTheModelCalledAToolIsPlannedAgain(t *testing.T) {
 }
 
 // Doing something that may need planning registers a grant, and a new version
-// restarts the montage service: either way the waits so far are over and
+// restarts the VideoCut service: either way the waits so far are over and
 // VNAS is asked at once.
 func TestARegistrationOrARestartTriesAgainAtOnce(t *testing.T) {
 	ctx := context.Background()
@@ -586,7 +586,7 @@ func TestMarkersComeBackAfterARestart(t *testing.T) {
 	}
 }
 
-// A restart of the montage service while a round plans a job starts no other
+// A restart of the VideoCut service while a round plans a job starts no other
 // round for it (#514: a model that may have been called is not called again
 // on the service's own account): the round goes on, and its answers are
 // taken as before.
@@ -895,7 +895,7 @@ func TestNoticesTellWaitingFromPlanning(t *testing.T) {
 	only(app.NoticeWaiting, app.DetailNotTaken)
 }
 
-// The montage center notes a planning grant only when the Product Service
+// VideoCut notes a planning grant only when the Product Service
 // says it registered one: the header reaches it from the request's context
 // through the proxy, which drops whatever a browser sent under that name.
 func TestAPlanningGrantIsNotedOnlyOnTheProductServicesWord(t *testing.T) {

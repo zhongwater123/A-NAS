@@ -3,12 +3,12 @@
     operationId: getVideoCut
     summary: "Whether 剪辑中心 is on (ADR 0038): 204 while ANAS_VIDEOCUT_ENABLED is on, 404 while it is off. The desktop shows the app only while this answers 204"
     responses:
-      "204": { description: The montage center is on }
+      "204": { description: VideoCut is on }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects:
   get:
     operationId: listVideoCutProjects
-    summary: "The caller's montage projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404"
+    summary: "The caller's VideoCut projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404"
     parameters: [{ $ref: "../components/videocut.yaml#/parameters/VideoCutCursor" }]
     responses:
       "200": { description: A page of the caller's projects, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProjectPage" } } } }
@@ -106,7 +106,7 @@
 /api/v1/videocut/projects/{projectId}/song:
   put:
     operationId: putVideoCutSong
-    summary: "Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to the montage center, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again"
+    summary: "Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to VideoCut, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again"
     parameters: [{ $ref: "../components/videocut.yaml#/parameters/VideoCutProjectID" }, { $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody:
       required: true
@@ -138,7 +138,7 @@
   get:
     operationId: getVideoCutSongAudio
     description: >-
-      The montage center's copy of the project's song, to listen to: with Range support when browsers play its format,
+      VideoCut's copy of the project's song, to listen to: with Range support when browsers play its format,
       otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot
       seek, so players request a new start.
     parameters:
@@ -252,7 +252,7 @@
     operationId: getVideoCutHero
     description: >-
       The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps
-      under the montage store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the
+      under the VideoCut store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the
       member's own videos.
     parameters:
       - { name: Range, in: header, schema: { type: string } }
@@ -358,7 +358,7 @@
 /api/v1/videocut/projects/{projectId}/frames/{assetId}:
   get:
     operationId: getVideoCutFrame
-    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where the montage center has no media worker"
+    summary: "A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where VideoCut has no media worker"
     parameters:
       - { $ref: "../components/videocut.yaml#/parameters/VideoCutProjectID" }
       - { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }

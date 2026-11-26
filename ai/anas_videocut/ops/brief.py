@@ -1,6 +1,6 @@
 """What the member's VNAS reads to plan a film (docs/architecture/montage-center.md, 规划): the eighth version's two
 requests split into rules, data and the exact schema. The rules are the fixed template in prompts/; the data and the
-schema come back from the montage tools' briefs, which call this through the compute Worker's plan_brief.
+schema come back from the videocut tools' briefs, which call this through the compute Worker's plan_brief.
 
 The data is what pick_request and shots_request put in their text, as fields: the catalog lines, the music's parts,
 the outline's pictures with their beats. The schemas are theirs, unchanged. The domain stays as the eighth version
@@ -79,7 +79,7 @@ def pick_brief(request):
 
 def shots_brief(request):
     """The second step: {data, schema, slots, pictures}. request: picked (the outline taken), cards (the catalog, in
-    shooting order, so the videos are numbered as in the first step), music, ask, chronological. slots and pictures stay with the montage center: the fill reads the slots, and the
+    shooting order, so the videos are numbered as in the first step), music, ask, chronological. slots and pictures stay with VideoCut: the fill reads the slots, and the
     answer is turned back with the pictures (shots_answer)."""
     case, opts = case_of(request)
     m, picked = request["music"], request["picked"]

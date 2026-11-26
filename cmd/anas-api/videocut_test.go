@@ -14,7 +14,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 )
 
-// A deleted account leaves the montage store while the switch is off too:
+// A deleted account leaves the VideoCut store while the switch is off too:
 // rows from a time it was on must not stay (ADR 0038).
 func TestDeletedAccountsLeaveTheVideoCutStoreWhateverTheSwitch(t *testing.T) {
 	// Unix socket paths are short; t.TempDir can exceed the limit.
@@ -50,7 +50,7 @@ func TestDeletedAccountsLeaveTheVideoCutStoreWhateverTheSwitch(t *testing.T) {
 		closeVideoCut()
 	}
 	if want := "POST " + accountremoval.Path + "user:bob"; len(asked) != 2 || asked[0] != want || asked[1] != want {
-		t.Fatalf("the montage service was asked %q", asked)
+		t.Fatalf("the VideoCut service was asked %q", asked)
 	}
 
 	// Development keeps the store in this process, switched off or on.

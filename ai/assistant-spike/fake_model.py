@@ -11,7 +11,7 @@ test), logs every request (which tools Hermes offered), and answers deterministi
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
 
-A conversation whose prompt is the montage center's planning template (ai/anas_videocut/prompts) is planned as
+A conversation whose prompt is VideoCut's planning template (ai/anas_videocut/prompts) is planned as
 VNAS would, with the least that passes: it reads each brief, writes the smallest answer its schema allows and
 hands it in, through both steps of every 方案, until the tools say all are taken. With FAKE_MODEL_PLAN_SLEEP set,
 its first call waits that many seconds, a model call longer than any short timeout on the way. Hermes's background
@@ -73,7 +73,7 @@ def strings_of(content):
 
 
 def brief_in(content):
-    """The {data, schema} a montage brief answered, from its tool result."""
+    """The {data, schema} a VideoCut brief answered, from its tool result."""
     for text in strings_of(content):
         start = text.find('{"data"')
         while start >= 0:
@@ -122,7 +122,7 @@ def planning(messages):
 
 
 def plan(messages, tools, prompt):
-    """VNAS's next step in a planning round: a call of a montage tool, or the last answer."""
+    """VNAS's next step in a planning round: a call of a videocut tool, or the last answer."""
     job = re.search(r"任务编号 (job:[A-Z2-7]+)", prompt)
     token = re.search(r"token 是 ([0-9a-f]+)", prompt)
     named = {short: next((t for t in tools if t.endswith(short)), short)

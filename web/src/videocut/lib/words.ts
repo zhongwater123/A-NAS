@@ -1,4 +1,4 @@
-// What the montage window says about jobs (docs/specs/montage-center.md).
+// What the VideoCut window says about jobs (docs/specs/montage-center.md).
 import type { VideoCutJob } from "../api/client";
 
 export const stepNames: Record<VideoCutJob["steps"][number]["name"], string> = {
@@ -128,14 +128,14 @@ export function limitsOf(ask: string): string[] {
 }
 
 // failureText is what the page says of a job that failed, beyond that it
-// did. The montage center writes some failures for the member, in Chinese,
+// did. VideoCut writes some failures for the member, in Chinese,
 // as the one that asks to check the photo library for a film it could not
 // confirm; the rest are its own diagnostics, which stay in its log.
 export function failureText(job: VideoCutJob): string | undefined {
   return forMember(job.error);
 }
 
-// forMember is a failure as the montage center wrote it for the member, or nothing for its own diagnostics.
+// forMember is a failure as VideoCut wrote it for the member, or nothing for its own diagnostics.
 export function forMember(error?: string): string | undefined {
   return error && /[\u4e00-\u9fff]/.test(error) ? error : undefined;
 }

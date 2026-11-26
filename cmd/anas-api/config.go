@@ -93,8 +93,8 @@ type Config struct {
 	VideoCutSocket  string `env:"ANAS_VIDEOCUT_SOCKET" envDefault:"/run/a-nas-videocut/videocut.sock"`
 	// WorkspaceSocket is the shared workspace's service (ADR 0040).
 	WorkspaceSocket string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
-	// VideoCutMusicSocket and VideoCutComputeSocket reach the montage
-	// center's Workers in development, where the montage center runs in
+	// VideoCutMusicSocket and VideoCutComputeSocket reach VideoCut's
+	// Workers in development, where VideoCut runs in
 	// this process; without them its songs wait.
 	VideoCutPlanAnswers   string `env:"ANAS_VIDEOCUT_PLAN_ANSWERS"`
 	VideoCutMusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET"`
@@ -396,8 +396,8 @@ type photoServiceConfig struct {
 	AssistantSocket string `env:"ANAS_PHOTOS_ASSISTANT_SOCKET"`
 	// Without the AI component the socket is absent and photos wait for it.
 	AISocket string `env:"ANAS_AI_SOCKET" envDefault:"/run/a-nas-ai/ai.sock"`
-	// ComputeSocket is the montage compute Worker, which cuts the cards of
-	// the videos the montage center asks about (ADR 0038).
+	// ComputeSocket is the VideoCut compute Worker, which cuts the cards of
+	// the videos VideoCut asks about (ADR 0038).
 	ComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET" envDefault:"/run/a-nas-videocut-compute/compute.sock"`
 	// VectorSocket reaches the photo service's own vector index (ADR 0028);
 	// the unit names it, and without it the index is off.
@@ -479,7 +479,7 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	return c, nil
 }
 
-// videoCutServiceConfig configures the montage service (ADR 0038), which runs
+// videoCutServiceConfig configures the VideoCut service (ADR 0038), which runs
 // from this binary as its own process and identity.
 type videoCutServiceConfig struct {
 	Root          string `env:"ANAS_VIDEOCUT_ROOT" envDefault:"/srv/a-nas/data/videocut"`
@@ -499,17 +499,17 @@ type videoCutServiceConfig struct {
 	// PlanAnswers names a directory of fixed plans (pick.json, shots.json)
 	// that stand in for the AI assistant's planning, which is not shipped
 	// yet (M9): the development machine and the system test only. Without
-	// it the montage center makes no film.
+	// it VideoCut makes no film.
 	PlanAnswers string `env:"ANAS_VIDEOCUT_PLAN_ANSWERS"`
 	// AssistantSocket is where members' planning instances and root's
-	// planner reach the montage center when systemd does not hold the
+	// planner reach VideoCut when systemd does not hold the
 	// socket (development); PlanMarkers is where the planner finds who has
 	// a job to plan (docs/architecture/montage-planning-session.md).
 	AssistantSocket string `env:"ANAS_VIDEOCUT_ASSISTANT_SOCKET"`
 	PlanMarkers     string `env:"ANAS_VIDEOCUT_PLAN_MARKERS" envDefault:"/run/a-nas-videocut/plans"`
 }
 
-// loadVideoCutServiceConfig resolves and validates the montage service's
+// loadVideoCutServiceConfig resolves and validates the VideoCut service's
 // configuration, reporting every problem at once.
 func loadVideoCutServiceConfig(environment map[string]string) (videoCutServiceConfig, error) {
 	c, err := envconfig.Parse[videoCutServiceConfig](environment)

@@ -40,20 +40,20 @@ check "without a key no member has an assistant" \
 check "without a key the model gateway is not running" \
   test "$(systemctl is-active anas-assistant-gateway.service || true)" != active
 check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar "$api/api/v1/assistant-key")" = 403
-# The requests that may lead to planning in the montage center register a planning grant for
+# The requests that may lead to planning in VideoCut register a planning grant for
 # the member behind them first (docs/architecture/montage-center.md, 规划授权): the File Broker
 # writes it into the Host Agent's own state, for root's planner alone. Here the job asked for does
-# not exist, so the montage center answers 404 once the Product Service has passed the request
+# not exist, so VideoCut answers 404 once the Product Service has passed the request
 # on; without VNAS it passes it on with no grant.
 replan() { # JAR CSRF: the status of asking to plan a job again
   status_of -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/videocut/jobs/job:AAAAAAAAAAAAAAAAAAAAAAAA/replan" || true
 }
 plans=/var/lib/a-nas-host/assistant/plans
-check "without VNAS a planning request reaches the montage center, and leaves no planning grant" \
+check "without VNAS a planning request reaches VideoCut, and leaves no planning grant" \
   test "$(replan /tmp/alice.jar "$alice_csrf")" = 404 -a ! -e "$plans/alice"
 
-# The scripted model stands where the gateway would reach DeepSeek. Planning the montage
-# center's job below, its first call takes longer than two minutes.
+# The scripted model stands where the gateway would reach DeepSeek. Planning VideoCut's
+# job below, its first call takes longer than two minutes.
 systemd-run --unit fake-model --quiet --setenv=FAKE_MODEL_PLAN_SLEEP=130 \
   python3 /spike/fake_model.py tcp:127.0.0.1:18090 /var/log/fake-model.jsonl || true
 install -d /etc/systemd/system/anas-assistant-gateway.service.d
@@ -102,7 +102,7 @@ check "alice's Hermes home is hers alone" test "$(stat -c '%a %U %G' "$data/assi
 check "the members' settings are in the Host Agent's own state" \
   test "$(stat -c '%a %U' /var/lib/a-nas-host 2>/dev/null)" = "700 root" -a -f /var/lib/a-nas-host/assistant/members/alice/config.yaml
 check "alice now has VNAS" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available || true)" = true
-check "with VNAS a planning request registers her grant on its way to the montage center" \
+check "with VNAS a planning request registers her grant on its way to VideoCut" \
   test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 404:404
 check "the grants are root's alone, in the Host Agent's own state" \
   test "$(stat -c '%a %U' "$plans" 2>/dev/null):$(stat -c '%a %U %F' "$plans/alice" 2>/dev/null):$(stat -c '%a %U %F' "$plans/bob" 2>/dev/null)" = \
@@ -111,7 +111,7 @@ check "a grant says when it was issued and how many rounds it allows" \
   jq -e '.rounds == 5 and (.issuedAt | fromdateiso8601) > (now - 300)' "$plans/alice"
 check "no grant is kept where the Product Service could write one" test ! -e /var/lib/a-nas/assistant-plans
 check "the Product Service's account cannot read the grants" denied a-nas ls "$plans"
-check "nor can the montage service's" denied a-nas-videocut ls "$plans"
+check "nor can the VideoCut service's" denied a-nas-videocut ls "$plans"
 check "the members write the probe's files into their spaces" quiet bash /spike/seed.sh "$data"
 # A real snapshot of alice's space, which the sandbox must not show.
 curl -fsS -o /dev/null -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
@@ -148,40 +148,40 @@ for unit in anas-assistant-cron@alice.service anas-assistant-curator@alice.servi
 done
 check "without the bind, the sandbox's path is the empty mount point" \
   test -f /run/anas-assistant-companion/companion.sock -a ! -s /run/anas-assistant-companion/companion.sock
-# The montage center's socket (docs/architecture/montage-planning-session.md) is the reverse:
+# VideoCut's socket (docs/architecture/montage-planning-session.md) is the reverse:
 # only a member's planning instance binds it, a second `hermes serve` in her sandbox with the
-# policy and settings that add the montage server and its tools pinned to montage, memory and
+# policy and settings that add the videocut server and its tools pinned to videocut, memory and
 # skills; her ordinary instance, scheduled tasks and curator have none of it. Outside a bind
 # the socket is root's alone, and root is answered only for the account it names: that is the
 # planner, which hands the planning to her planning instance.
 videocut_socket=/run/a-nas-videocut-assistant/assistant.sock
-check "the montage service holds its socket for planning" systemctl is-active --quiet anas-videocut-assistant.socket
-check "the montage center's socket is out of a member's reach outside the sandbox" \
+check "the VideoCut service holds its socket for planning" systemctl is-active --quiet anas-videocut-assistant.socket
+check "VideoCut's socket is out of a member's reach outside the sandbox" \
   denied alice python3 -c "$unix_connect" "$videocut_socket"
 videocut_claim() { # [HEADER]: the status of a claim of a planning round on it, as root
   local header=()
   [[ -z "${1:-}" ]] || header=(-H "$1")
   curl -s -o /dev/null -w '%{http_code}' --unix-socket "$videocut_socket" "${header[@]}" -X POST -d '{}' http://videocut/v1/rounds/claim || true
 }
-check "the montage center refuses root unless it names the account" test "$(videocut_claim)" = 403
+check "VideoCut refuses root unless it names the account" test "$(videocut_claim)" = 403
 check "and answers root for the account it names: alice has nothing to plan yet" \
   test "$(videocut_claim 'X-A-NAS-Account: alice')" = 409
 check "an account that is not in use is refused" test "$(videocut_claim 'X-A-NAS-Account: nobody')" = 401
-check "a member's planning instance binds the montage center's socket" \
+check "a member's planning instance binds VideoCut's socket" \
   grep -Fq "$videocut_socket:/run/anas-assistant-videocut/videocut.sock" <<<"$(binds anas-assistant-plan@alice.service)"
 for unit in anas-assistant@alice.service anas-assistant-cron@alice.service anas-assistant-curator@alice.service; do
-  check "$unit does not bind the montage center's socket" \
+  check "$unit does not bind VideoCut's socket" \
     test -n "$(binds "$unit")" -a "$(grep -cF "$videocut_socket" <<<"$(binds "$unit")")" = 0
 done
 check "her planning instance does not bind the companion's socket either" \
   test -n "$(binds anas-assistant-plan@alice.service)" -a "$(grep -cF "$companion_socket" <<<"$(binds anas-assistant-plan@alice.service)")" = 0
 plan_environment=$(systemctl show -p Environment --value anas-assistant-plan@alice.service || true)
-check "her planning instance gives the model the montage, memory and skill tools alone" \
+check "her planning instance gives the model the videocut, memory and skill tools alone" \
   grep -q 'HERMES_TUI_TOOLSETS=videocut,memory,skills' <<<"$plan_environment"
-check "and reads the policy with the montage server" grep -q 'HERMES_MANAGED_DIR=/usr/lib/a-nas/assistant/managed-plan' <<<"$plan_environment"
+check "and reads the policy with the videocut server" grep -q 'HERMES_MANAGED_DIR=/usr/lib/a-nas/assistant/managed-plan' <<<"$plan_environment"
 # Counted, not "no match": a policy that is missing or cannot be read has no line either.
 members=/var/lib/a-nas-host/assistant/members
-check "only that policy has the montage server" \
+check "only that policy has the videocut server" \
   test "$(grep -c '^  videocut:' /usr/lib/a-nas/assistant/managed-plan/config.yaml):$(grep -c '^  videocut:' /usr/lib/a-nas/assistant/managed/config.yaml):$(grep -c '^  anas:' /usr/lib/a-nas/assistant/managed/config.yaml)" = 1:0:1
 check "and has every planning reviewed for what VNAS learned" \
   quiet yq -e '.skills.creation_nudge_interval == 1' /usr/lib/a-nas/assistant/managed-plan/config.yaml
@@ -619,15 +619,15 @@ if "$real_runtime"; then
   echo "INFO assistant run now: $(journalctl -u anas-assistant-cron@alice.service -o cat --no-pager | grep 'queued to run now' | tail -n 1 || true)"
   check "she deletes the task" \
     test "$(status_of -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -X DELETE "$api/api/v1/assistant/tasks/$task_id")" = 204
-  # --- The montage center's planning (docs/architecture/montage-planning-session.md): a job of
+  # --- VideoCut's planning (docs/architecture/montage-planning-session.md): a job of
   # hers comes to its planning step; root's planner claims a round for her and hands it to her
   # planning instance as a conversation; the scripted model plays VNAS and plans both 方案 with
-  # the four montage tools, one of its calls taking longer than two minutes; the job goes on
+  # the four videocut tools, one of its calls taking longer than two minutes; the job goes on
   # with what it handed in, the conversation stays in her VNAS history, and Hermes's background
   # review writes what it learned as a skill.
   #
   # What comes before planning needs models this test does not install: the photo library's
-  # analysis of her video and allin1's analysis of her song. With the montage service stopped,
+  # analysis of her video and allin1's analysis of her song. With the VideoCut service stopped,
   # the test gives the job what those steps would have kept, a catalog of four cards, and her
   # song an analysis (montage-plan-seed.py); from there the job works out its keys and asks for
   # its briefs itself, whose data and schema the compute Worker's stand-in writes
@@ -635,12 +635,12 @@ if "$real_runtime"; then
   # Worker would take the four cards for real ones, so with the real content this is left out.
   for _ in $(seq 1 60); do round_over && break; sleep 2; done
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
-    echo "INFO montage planning: left out with the real compute Worker, which the seeded cards are not for"
+    echo "INFO VideoCut planning: left out with the real compute Worker, which the seeded cards are not for"
   else
     videocut_job() { curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/jobs/$plan_job" || true; }
     plan_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
       -d "{\"requestKey\":\"system-test-plan\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
-    check "she makes a montage project of her video and her song" \
+    check "she makes a VideoCut project of her video and her song" \
       test "$(status_of -X PUT -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
         -d "{\"trackId\":\"$alice_track\"}" "$api/api/v1/videocut/projects/$plan_project/song")" = 200
     plan_name=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$plan_project" | jq -r .name || true)
@@ -653,11 +653,11 @@ if "$real_runtime"; then
       python3 /spike/montage-plan-seed.py "$data/videocut/videocut.db" "$plan_job" "$clip" 2>&1 || true)
     systemctl start anas-videocut.service anas-videocut-assistant.socket || true
     check "the test gives her job a catalog and her song an analysis" grep -q '^seeded ' <<<"$seeded"
-    echo "INFO montage planning: $seeded"
+    echo "INFO VideoCut planning: $seeded"
     waits_for_vnas() { [[ "$(videocut_job | jq -r '.state + " " + (.waitReason // "")')" == "waiting vnas" ]]; }
     for _ in $(seq 1 60); do waits_for_vnas && break; sleep 2; done
     check "her job comes to planning by itself and waits for VNAS" waits_for_vnas
-    echo "INFO montage planning: the job before its round: $(videocut_job | jq -c '{state, step, waitReason, error}' || true)"
+    echo "INFO VideoCut planning: the job before its round: $(videocut_job | jq -c '{state, step, waitReason, error}' || true)"
     planner_said() { journalctl -u anas-videocut-planner.service -o cat --no-pager | grep -q "$1"; }
     for _ in $(seq 1 30); do planner_said "alice: round .* handed to VNAS" && break; sleep 2; done
     check "root's planner claims a round for her and hands it to her planning instance" planner_said "alice: round .* handed to VNAS"
@@ -665,7 +665,7 @@ if "$real_runtime"; then
       test "$(systemctl show -p ActiveEnterTimestampMonotonic --value anas-assistant-plan@alice.service)" != 0
     for _ in $(seq 1 240); do planner_said "alice: round .* ended" && break; sleep 2; done
     check "the round ends with both 方案 handed in" planner_said "alice: round .* ended: complete"
-    check "the montage center took both steps of both 方案" test "$(journalctl -u anas-videocut.service -o cat --no-pager |
+    check "VideoCut took both steps of both 方案" test "$(journalctl -u anas-videocut.service -o cat --no-pager |
       grep 'planning step taken' | grep -cF "$plan_job")" = 4
     past_planning() {
       videocut_job | jq -e '([.steps[] | select(.name == "pick" or .name == "shots") | .state] == ["done", "done"])
@@ -673,16 +673,16 @@ if "$real_runtime"; then
     }
     for _ in $(seq 1 60); do past_planning && break; sleep 2; done
     check "her job goes past planning with what VNAS handed in" past_planning
-    echo "INFO montage planning: the job after its round: $(videocut_job | jq -c '{state, step, waitReason, error}' || true)"
+    echo "INFO VideoCut planning: the job after its round: $(videocut_job | jq -c '{state, step, waitReason, error}' || true)"
     plan_requests=$(jq -sc '[.[] | select(.plan and (.review | not) and (.tools | length) > 0)]' /var/log/fake-model.jsonl || true)
     plan_tools=$(jq -c '[.[].tools[]] | unique' <<<"$plan_requests" || true)
-    check "the model was offered the montage, memory and skill tools alone" test "$plan_tools" = \
+    check "the model was offered the videocut, memory and skill tools alone" test "$plan_tools" = \
       '["mcp__videocut__videocut_brief","mcp__videocut__videocut_shots_brief","mcp__videocut__videocut_submit_outline","mcp__videocut__videocut_submit_shots","memory","skill_manage","skill_view","skills_list"]'
-    echo "INFO montage planning: tools offered: $plan_tools"
+    echo "INFO VideoCut planning: tools offered: $plan_tools"
     # What the scripted VNAS did, step by step, and what each step answered to.
     jq -c '.[] | {decision: (.decision | {tool, text: ((.text // "") | .[0:160]), args: ((.args // "") | .[0:160])}),
       after: [(.tail // [])[] | {role, calls, text: (.text | .[0:200])}]}' <<<"$plan_requests" 2>/dev/null |
-      sed 's/^/INFO montage planning step: /' || true
+      sed 's/^/INFO VideoCut planning step: /' || true
     check "a model call of more than two minutes in the round was waited out" \
       jq -e 'any(.[]; (.decision.sleep // 0) >= 120)' <<<"$plan_requests"
     # shellcheck disable=SC2016 # $title is jq's
@@ -698,7 +698,7 @@ if "$real_runtime"; then
     for _ in $(seq 1 90); do systemctl is-active --quiet anas-assistant-plan@alice.service || break; sleep 2; done
     check "her planning instance stops once the planner has left it" \
       test "$(systemctl is-active anas-assistant-plan@alice.service || true)" != active
-    echo "INFO montage planning: $(journalctl -u anas-videocut-planner.service -o cat --no-pager | tail -n 6 | tr '\n' ';' || true)"
+    echo "INFO VideoCut planning: $(journalctl -u anas-videocut-planner.service -o cat --no-pager | tail -n 6 | tr '\n' ';' || true)"
   fi
 fi
 

@@ -311,8 +311,8 @@ const (
 	// thumbnailQuality is the JPEG's quality scale (2 best, 31 worst).
 	thumbnailQuality = 5
 	// MaxThumbnails is how many thumbnails are taken at once: the member
-	// waits for them, so they are Interactive and outside the montage
-	// center's one Background request.
+	// waits for them, so they are Interactive and outside VideoCut's
+	// one Background request.
 	MaxThumbnails = 4
 )
 

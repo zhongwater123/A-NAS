@@ -73,7 +73,7 @@ func TestCopySongAnswersWhatTheLibraryKnowsWithoutCopying(t *testing.T) {
 			request.Header.Set("Content-Type", "application/json")
 			handler(recorder, request, accounts.Session{User: accounts.User{ID: c.user}})
 			if recorder.Code != c.want || !strings.Contains(recorder.Body.String(), `"`+c.code+`"`) || reached {
-				t.Fatalf("answer = %d %s, reached the montage center: %v", recorder.Code, recorder.Body, reached)
+				t.Fatalf("answer = %d %s, reached VideoCut: %v", recorder.Code, recorder.Body, reached)
 			}
 		})
 	}
@@ -97,7 +97,7 @@ func TestCopySongStreamsTheTrackWithWhatItIs(t *testing.T) {
 	request.Header.Set(protocol.SongHeader, "forged")
 	handler(recorder, request, accounts.Session{User: accounts.User{ID: "user:alice"}})
 	if recorder.Code != http.StatusOK || body != "song" || header == "forged" || header == "" {
-		t.Fatalf("answer = %d; the montage center got %q with %q", recorder.Code, body, header)
+		t.Fatalf("answer = %d; VideoCut got %q with %q", recorder.Code, body, header)
 	}
 	// A track browsers cannot play has no content type: it is decoded to listen.
 	var source domain.SongSource
@@ -107,7 +107,7 @@ func TestCopySongStreamsTheTrackWithWhatItIs(t *testing.T) {
 }
 
 // The music library does not bound a title tag; the header's reader takes at
-// most 4 KiB. The title is cut to what the montage center keeps before it is
+// most 4 KiB. The title is cut to what VideoCut keeps before it is
 // sent, so a long one does not make the song impossible to choose.
 func TestCopySongCutsALongTitleToFitItsHeader(t *testing.T) {
 	var header string

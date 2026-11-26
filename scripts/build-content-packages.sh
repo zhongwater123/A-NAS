@@ -17,7 +17,7 @@
 # Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
 # pins.
 #
-# With --videocut-music it also builds the content of the montage center's
+# With --videocut-music it also builds the content of VideoCut's
 # music analysis (docs/architecture/montage-music.md): allin1's and Demucs'
 # models, and its runtime from
 #   videocut-music-runtimes/<id>.tar.gz  scripts/build-videocut-music-runtime.sh's tarball

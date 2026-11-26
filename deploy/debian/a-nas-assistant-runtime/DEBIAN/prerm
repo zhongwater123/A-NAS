@@ -2,7 +2,7 @@
 # prerm of the AI assistant's Hermes runtime packages, a-nas-assistant-runtime-*
 # (scripts/build-content-packages.sh). apt replaces the runtime before a-nas's
 # postinst runs, so what runs on it stops first: the scheduled tasks' waker,
-# which would start a round on a runtime being replaced, the montage center's
+# which would start a round on a runtime being replaced, VideoCut's
 # planner, which runs on it, then the assistants, their API, scheduled tasks,
 # curator and planning instances. a-nas's postinst starts the waker and the
 # planner again; a member's next connection starts their assistant.
