@@ -9,7 +9,7 @@ export interface PickedFile {
 // if anything. The input waits in the page, hidden, while the picker is open:
 // iOS Safari may never report the choice made in an input that is not part
 // of the document. A browser without the cancel event leaves the input of a
-// cancelled pick; the next pick removes it.
+// cancelled pick, holding what onChosen holds, until the next pick removes it.
 let waiting: HTMLInputElement | undefined;
 export function chooseFiles(options: { accept: string; multiple?: boolean }, onChosen: (files: File[]) => void) {
   waiting?.remove();
@@ -19,16 +19,20 @@ export function chooseFiles(options: { accept: string; multiple?: boolean }, onC
   input.accept = options.accept;
   input.multiple = options.multiple ?? false;
   input.hidden = true;
+  const done = () => {
+    input.remove();
+    if (waiting === input) waiting = undefined;
+  };
   input.addEventListener(
     "change",
     () => {
       const files = Array.from(input.files ?? []);
-      input.remove();
+      done();
       if (files.length) onChosen(files);
     },
     { once: true },
   );
-  input.addEventListener("cancel", () => input.remove(), { once: true });
+  input.addEventListener("cancel", done, { once: true });
   document.body.append(input);
   input.click();
 }

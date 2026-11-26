@@ -2,9 +2,9 @@
 <!--
   手机模拟器（只在开发服务器上有：npm run dev 后打开 /phone.html）。
   在电脑上按手机浏览器的可视区大小嵌入桌面，几台机型并排比较布局。
-  “触屏”打开时桌面以 ?touch 载入：鼠标点击按手指点按处理，按住半秒算长按。
-  CSS 的 (pointer: coarse)、(hover: none) 在这里模拟不了，那部分仍要用
-  浏览器的设备模拟或真机看。构建只打包 index.html，这个页面不进产品。
+  “触屏”打开时桌面以 ?touch 载入（src/lib/touchSimulator.ts，只有开发构建加载）：
+  页面标上 data-touch，样式与代码都按触屏处理；鼠标点击算点按，按住半秒算长按。
+  构建只打包 index.html，这个页面不进产品。
 -->
 <html lang="zh-CN">
   <head>
