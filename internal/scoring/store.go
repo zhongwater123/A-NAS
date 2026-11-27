@@ -19,8 +19,10 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/capacity"
 	"github.com/zhongwater123/A-NAS/internal/filesystem"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
@@ -43,6 +45,9 @@ var (
 	ErrInUse = errors.New("batch already has ratings")
 	// ErrNameTaken refuses a custom 打分项 named like another.
 	ErrNameTaken = errors.New("a scoring dimension has this name")
+	// ErrInsufficientSpace refuses a write that would take the data volume
+	// below the reserve every writer keeps (internal/capacity).
+	ErrInsufficientSpace = errors.New("data volume reserve would be exhausted")
 )
 
 func invalid(format string, args ...any) error {
@@ -84,6 +89,12 @@ const (
 	// score, as in "3.5-湖边日落.jpg".
 	AnchorFolder = "_锚点"
 	backupsKept  = 14
+	// What a write is expected to add to the data volume, checked against
+	// its reserve before it starts: a transaction's rows and journal, one
+	// rendered preview, and one full-size render.
+	rowBytes     = 64 << 10
+	previewBytes = 4 << 20
+	fullBytes    = 64 << 20
 )
 
 // Photos reads the Shared folder the module unit binds in read-only.
@@ -104,6 +115,8 @@ type Options struct {
 	Random func() float64
 	// MinLongEdge replaces DefaultMinLongEdge when it is not 0.
 	MinLongEdge int
+	// Admits checks the data-volume reserve; nil uses capacity.Admits.
+	Admits func(path string, incoming int64) (bool, error)
 }
 
 // Store is the module's state in dir.
@@ -116,7 +129,10 @@ type Store struct {
 	now         func() time.Time
 	random      func() float64
 	minLongEdge int
+	admits      func(string, int64) (bool, error)
 	wake        chan struct{}
+	// importPaused is set while imports wait for space on the data volume.
+	importPaused atomic.Bool
 }
 
 // Open opens or creates the store in dir, which must exist.
@@ -135,7 +151,11 @@ func Open(dir string, options Options) (*Store, error) {
 	}
 	store := &Store{
 		db: db, dir: dir, photosDir: filepath.Clean(options.PhotosDir), photos: options.Photos,
-		logger: options.Logger, now: options.Now, random: options.Random, minLongEdge: options.MinLongEdge, wake: make(chan struct{}, 1),
+		logger: options.Logger, now: options.Now, random: options.Random, minLongEdge: options.MinLongEdge, admits: options.Admits,
+		wake: make(chan struct{}, 1),
+	}
+	if store.admits == nil {
+		store.admits = capacity.Admits
 	}
 	if store.minLongEdge == 0 {
 		store.minLongEdge = DefaultMinLongEdge
@@ -160,6 +180,21 @@ func Open(dir string, options Options) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) timestamp() string { return sqlitedb.FormatTime(s.now()) }
+
+// room refuses a write of about incoming bytes to the store when it would
+// leave the data volume under its reserve, the line that files, photos and
+// the family center keep as well, so that the module never fills the volume
+// that everything else shares.
+func (s *Store) room(incoming int64) error {
+	admitted, err := s.admits(s.dir, incoming)
+	if err != nil {
+		return err
+	}
+	if !admitted {
+		return ErrInsufficientSpace
+	}
+	return nil
+}
 
 // schema takes the database from each version to the next; its version is
 // how many steps have run (sqlitedb.Schema). The first four were released

@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,6 +56,8 @@ type harness struct {
 	clock  *clock
 	random func() float64
 	mu     sync.Mutex
+	// full stands for a data volume at its reserve.
+	full atomic.Bool
 }
 
 // newHarness takes photos of any size, so that tests render small ones.
@@ -69,6 +72,7 @@ func newHarnessWith(t *testing.T, minLongEdge int) *harness {
 	h.random = func() float64 { return 0.99 }
 	store, err := Open(t.TempDir(), Options{
 		PhotosDir: h.photos, Photos: filesystem.NewRootFileSystem(h.photos, false), Now: h.clock.Now, MinLongEdge: minLongEdge,
+		Admits: func(string, int64) (bool, error) { return !h.full.Load(), nil },
 		Random: func() float64 {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -892,7 +896,7 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	}
 	_ = db.Close()
 	photos := t.TempDir()
-	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Admits: func(string, int64) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +950,24 @@ func TestAVersionFourDatabaseIsCopiedAndKeepsItsCustomNamesUnique(t *testing.T) 
 	_ = db.Close()
 	photos := t.TempDir()
 	now := func() time.Time { return time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC) }
-	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Now: now})
+	room := false
+	options := Options{
+		PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Now: now,
+		Admits: func(path string, incoming int64) (bool, error) {
+			if path != dir || incoming <= 0 {
+				t.Fatalf("unexpected backup budget for %q: %d bytes", path, incoming)
+			}
+			return room, nil
+		},
+	}
+	if _, err := Open(dir, options); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("upgrade without space for a backup: %v", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "backups")); err != nil || len(entries) != 0 {
+		t.Fatalf("backups after refused upgrade: %v, %v", entries, err)
+	}
+	room = true
+	store, err := Open(dir, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -996,7 +1017,7 @@ func TestAVersionOneDatabaseScoresOverallAlone(t *testing.T) {
 	}
 	_ = db.Close()
 	photos := t.TempDir()
-	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Admits: func(string, int64) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1292,5 +1313,138 @@ func TestTheRulerShowsTheRatersLatestTwelveScoresWithSmallThumbnails(t *testing.
 	}
 	if _, err := h.store.BatchCover(ctx, "no-such-batch"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cover of a batch that does not exist: %v", err)
+	}
+}
+
+// Every write of the module keeps the data volume's reserve (spec, 边界与失败;
+// #487 R1): at the line nothing is claimed, answered, imported, created,
+// rendered or backed up, and it all goes on once space is freed.
+func TestAtTheReserveTheModuleScoresImportsAndRendersNothing(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	batch := h.batchOf(t, 2, 1)
+	h.raters(t, "a")
+	held, _, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(held) != 2 {
+		t.Fatalf("claims %+v, %v", held, err)
+	}
+	write(t, filepath.Join(h.photos, "第二批", "a.png"), picture(t, 16, 12, 200, png.Encode))
+	waiting, err := h.store.CreateBatch(ctx, "user:admin", BatchInput{Name: "第二批", Source: "第二批", Required: 1, Dimensions: []string{Overall}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.full.Store(true)
+	answer := score(6)
+	if _, err := h.store.Submit(ctx, held[0].Token, "a", answer); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("an answer at the reserve: %v", err)
+	}
+	if _, _, err := h.store.Claim(ctx, batch.ID, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a claim at the reserve: %v", err)
+	}
+	if _, err := h.store.ClaimFull(ctx, held[0].Token, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a full-size render at the reserve: %v", err)
+	}
+	if _, err := h.store.ClaimThumbnail(ctx, held[0].Token, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a thumbnail at the reserve: %v", err)
+	}
+	// What is already on the volume is still shown.
+	if _, err := h.store.ClaimPreview(ctx, held[0].Token, "a"); err != nil {
+		t.Fatalf("a preview at the reserve: %v", err)
+	}
+	another := BatchInput{Name: "第三批", Source: "第二批", Required: 1, Dimensions: []string{Overall}}
+	if _, err := h.store.CreateBatch(ctx, "user:admin", another); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a new batch at the reserve: %v", err)
+	}
+	if worked, err := h.store.ImportStep(ctx); worked || !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("an import at the reserve: %v, %v", worked, err)
+	}
+	if paused, err := h.store.Batch(ctx, waiting.ID); err != nil || paused.State != "importing" || !paused.WaitingForSpace || paused.Files != 0 {
+		t.Fatalf("the waiting batch %+v, %v", paused, err)
+	}
+	if err := h.store.BackupIfDue(ctx); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a backup at the reserve: %v", err)
+	}
+	if backups, _ := os.ReadDir(filepath.Join(h.store.dir, "backups")); len(backups) != 0 {
+		t.Fatalf("backups written at the reserve: %v", backups)
+	}
+	var answers int
+	_ = h.store.db.QueryRow("SELECT count(*) FROM ratings").Scan(&answers)
+	if answers != 0 {
+		t.Fatalf("%d answers kept at the reserve", answers)
+	}
+
+	h.full.Store(false)
+	if result, err := h.store.Submit(ctx, held[0].Token, "a", answer); err != nil || result.Rated != 1 {
+		t.Fatalf("the same answer once space is freed: %+v, %v", result, err)
+	}
+	h.importAll(t)
+	if done, err := h.store.Batch(ctx, waiting.ID); err != nil || done.State != "open" || done.WaitingForSpace || done.Photos != 1 {
+		t.Fatalf("the import once space is freed: %+v, %v", done, err)
+	}
+}
+
+// A rater sees the photo behind a claim while holding it or with an answer
+// for it, and only while chosen (spec, 边界与失败; #487 R2).
+func TestOnlyAHeldOrAnsweredClaimShowsItsPhoto(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	batch := h.batchOf(t, 3, 1)
+	h.raters(t, "a")
+	held, _, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(held) != 3 {
+		t.Fatalf("claims %+v, %v", held, err)
+	}
+	if _, err := h.store.Submit(ctx, held[0].Token, "a", score(4)); err != nil {
+		t.Fatal(err)
+	}
+	looks := map[string]func(token string) error{
+		"preview": func(token string) error {
+			_, err := h.store.ClaimPreview(ctx, token, "a")
+			return err
+		},
+		"thumbnail": func(token string) error {
+			_, err := h.store.ClaimThumbnail(ctx, token, "a")
+			return err
+		},
+		"full": func(token string) error {
+			_, err := h.store.ClaimFull(ctx, token, "a")
+			return err
+		},
+	}
+	for name, look := range looks {
+		for _, claim := range held[:2] {
+			if err := look(claim.Token); err != nil {
+				t.Fatalf("%s of a held or answered claim: %v", name, err)
+			}
+		}
+	}
+
+	h.clock.Advance(LeaseDuration + time.Minute)
+	for name, look := range looks {
+		if err := look(held[1].Token); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s after the lease ended unanswered: %v", name, err)
+		}
+		if err := look(held[0].Token); err != nil {
+			t.Fatalf("%s of the answered claim after its lease: %v", name, err)
+		}
+	}
+	// A late answer is still taken, and its photo shown again.
+	if _, err := h.store.Submit(ctx, held[2].Token, "a", score(5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := looks["preview"](held[2].Token); err != nil {
+		t.Fatalf("the preview of a late answer: %v", err)
+	}
+
+	if err := h.store.SetRater(ctx, "a", "user:admin", false); err != nil {
+		t.Fatal(err)
+	}
+	for name, look := range looks {
+		for _, claim := range held {
+			if err := look(claim.Token); !errors.Is(err, ErrNotRater) {
+				t.Fatalf("%s for a rater taken off: %v", name, err)
+			}
+		}
 	}
 }
