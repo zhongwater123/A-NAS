@@ -1,7 +1,7 @@
 # 向量索引技术设计
 
 状态：相册的向量同步进索引，排序也从索引读（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)，accepted）；Experimental NAS 上同步与影子比对已运行，读路径的部署见[当前状态](../status/CURRENT.md)
-更新时间：2026-11-11
+更新时间：2026-11-24
 
 本页说明向量索引如何运行、交付、同步与验证。决定与权衡见 ADR 0028；相册的检索语义仍以[相册本地 AI](photo-ai.md#语义搜索)为准。
 
@@ -43,7 +43,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - `ExecStart` 运行 [`start.sh`](../../deploy/qdrant/start.sh)。它只解析一次 `/usr/lib/a-nas/vectors/qdrant` 的链接，检查完存储后 `exec` 同一个 Qdrant，软件包升级换掉链接的瞬间也不会“检查的是旧版、运行的是新版”。以下两种情况它先清空存储，交给所属服务重建：
   - **版本**：版本戳记录写入存储的 Qdrant 版本（`qdrant --version`）。版本相同或同一 minor 内的补丁升级，保留存储；换了 minor（单节点不能跳过 minor 版本），或比写入者更旧（降级），清空。
   - **启动失败**：连续两次启动失败也清空，例如段损坏让 Qdrant 加载时 panic（系统测试用损坏的集合配置验证）。每次启动先计为失败，`wait-ready.sh` 等到端口可连后清掉计数。
-- `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。
+- `ExecStartPost` 运行 [`wait-ready.sh`](../../deploy/qdrant/wait-ready.sh)，等 gRPC 端口可以连接；在此之前单元不算启动完成，代理也就不会先于 Qdrant 转发。Qdrant 先退出时（例如上面的 panic）systemd 仍等这个脚本，所以它看 `$MAINPID`，主进程不在后 5 秒判为失败。排队的连接随即再次拉起实例：这 5 秒和实例的 `StartLimitIntervalSec=0` 让套接字不至于因触发上限永久失败，损坏的索引经三次启动恢复（[调查](../investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md)）。
 
 ### 配置
 
@@ -90,13 +90,13 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 - **让实例能空闲退出**：
   - `PoolSize: 1`；
   - `KeepAliveTime: -1`，空闲时不 ping；
-  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接。
+  - `grpc.WithIdleTimeout`，空闲约一分钟后断开连接（`Options.IdleTimeout`；只有系统测试经 `ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT` 改为 5 秒，[预热](#预热)靠这一分钟让连接在使用期间保持）。
 
   否则连接一直开着，代理不会空闲，实例也就永远不退出。实例因此在最后一次请求后约一分钟停止。代理只等 2 秒，所以客户端没有连接时，实例几乎都已经停了：核对记录的 `warm=false` 基本就是冷启动；只有连接刚断开的两三秒里（代理退出、实例停止的过程中）到来的查询会被这样记录，实际只需重连。
 - **`Warm()` 不等待**：连接放在 `atomic.Pointer` 里，正在建立连接时 `Warm()` 也立刻返回 false，不会排在拉起实例的那次连接后面，把冷启动记成热的。
 - **不在构造时联系实例**：设 `SkipCompatibilityCheck`，所属服务启动时不会把实例拉起来。第一次使用时调用 `HealthCheck`，major.minor 与固定版本不符就拒绝工作。
 - **没事不连**：outbox 为空时，同步循环不联系实例；只有对账（启动后第一次空闲时与每天）、有人使用相册（[预热](#预热)与排序）和核对会联系。所以没人用相册、相册也不变时，实例会停下来。
-- **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询（可以带分数下限，可以一次发多条）、`Prepare`（连接或 `HealthCheck`，让实例运行）。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
+- **只提供类型化的操作**：建集合与 keyword 索引、批量 upsert/delete（`wait=true`，确认写入 WAL 后才返回）、scroll、按范围过滤的查询（可以带分数下限，可以一次发多条）、读别名与切换别名（一次请求里删旧建新，读者不会遇到别名不在的空档）、`Prepare`（连接或 `HealthCheck`，让实例运行）。不接受调用方拼的过滤条件，避免出现“不认识的条件被当成满足”这类问题（#152 审查 S3）。
 - **回复上限 256 MiB**：带分数下限的查询返回下限以上的全部点，一批标签查询更是每个标签一份；图库大了会超过 gRPC 默认的 4 MiB，所以放宽到 256 MiB。
 - **点 ID**：键的基于名称的 UUID（`github.com/google/uuid` 的 `NewSHA1`，固定命名空间），同一个键总是同一个点。
 - **超时**：每次调用最多 2 分钟，覆盖实例冷启动（单元允许 90 秒）。卡住的实例不会一直拖住所属服务，也不会让连接一直忙、实例停不下来。
@@ -124,7 +124,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 ### 剪辑中心的窗口集合
 
-剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518) 的实施方案“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
+剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
 - **名称**：`video_windows_v1_<分析身份的 SHA-256 前 8 位>_<随机 8 位>`；分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。payload 是 `object` 与 `libraries`，两者都建 keyword 索引；点的键是 `<object>#<窗口序号>`。不建 HNSW 图。
 - **集合的身份**：取最新写入的窗口的身份（`video_windows.created_at`，重算时覆盖写会刷新它），和图片按最新向量选模型一样。所以换模型后第一块写入，集合就换成新身份，不必等最后插入的那个视频重算。
 - **outbox**：Catalog migration 18 的 `window_outbox`，触发器建在 `video_windows` 的增删改，以及有窗口的对象的资产增删与图库、回收站变化上。不与 `vector_outbox` 共用：那张表的主键只有 `object_id`，同步只认 `images_*`。
@@ -133,7 +133,28 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
   - 一个视频的点一起换：先按 `object` 过滤删除（`vectorindex.Client.DeleteMatching`，删除时 Catalog 里的窗口行可能已经没了），再从 Catalog 写入当前分析身份的窗口，每次至多 500 个点（约 1.5 MB），远低于 Qdrant 默认 32 MB 的请求上限；没有未进回收站的资产时只删除。
   - 窗口集合的失败单独退避，不推迟图片的同步与对账。
 - **对账**：每天一次，与图片集合分开记时间。集合不在就新建并把全部有窗口的视频排队；集合在就逐点比对：点数、窗口序号与 `libraries` 与 Catalog 不符的视频重新排队，分析还在进行的视频跳过。Catalog 里没有窗口时删除集合。
-- **读者**：首版没有，剪辑中心从 Catalog 读窗口向量。所以它不受下文“换模型”中改为集合别名的约束；有了检索的读者再满足。
+- **别名**：同步写的和搜索读的都是 Catalog 的 `vector_index_state` 记的那个集合，按集合名访问。别名 `video_windows_v1` 不用来寻址，只标记“这个集合已经写满”（[#599](https://github.com/zhongwater123/A-NAS/issues/599)）：
+  - 换了身份时，新集合在旁边建好并写入，`vector_index_state` 随即改记新集合，别名仍指向旧集合；window outbox 清空、全部视频都写进新集合后，别名一次切过去（日志 `photo vector index switched`）。
+  - 搜索只在别名指向 `vector_index_state` 记的集合时读索引。它不是每次都去读别名：同步循环记着自己最后一次看到或切过去的别名指向哪个集合，搜索直接信这个记忆，记忆里不是当前集合时（服务刚启动、新集合还在写）才问一次索引。所以换模型期间旧集合没有读者：被搜的视频还有旧身份的窗口时回答 `model_mismatch`，都重新分析过、新集合还没写满时读 Catalog（见下文“读者”）。
+  - 旧集合留到下一次换身份，不再同步。换回之前的模型时，同身份的旧集合被重新启用（`reused`）而不是新建：它停更期间的变化未知，所以照新集合的做法把全部视频排队重写，写完后别名切回。所以窗口集合至多两个：正在写的，与别名还指着或上一次指过的那个。
+  - 别名只在同步或对账做完一批、outbox 为空时检查；记得它已指向当前集合时不联系实例。对账先忘掉这个记忆，实例丢了别名（例如清空了存储）时下一次就补上。
+  - 索引丢了集合时（例如实例清空了存储，别名随集合一起没了），结果始终由 Catalog 给出，原因分两步记。服务运行期间丢的：第一次搜索还照记忆去问，索引回答没有这个集合，记一次 `the vector index failed` 并进入出错后的等待，同时忘掉记忆；等待过后的搜索读别名、再看索引里还有没有这个集合，没有就记 `the vector index has lost the windows collection`。服务启动前就丢了的，第一次搜索直接记后者。集合在下一次有视频排队同步或每天对账时重建；搜索发现它丢了不会立即重建（图片集合会）。
+- **读者**：剪辑中心二次编辑的文字搜镜头，经相册授权套接字的 `searchWindows`（[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项，[`windowsearch.go`](../../internal/photos/windowsearch.go)）。它是这个集合唯一的读者，剪辑中心的其他读取仍从 Catalog 读窗口向量。
+  - **范围**：授权里主人现在看得到、窗口分析已完成的视频。按 `object` 过滤，命中的点还要是这些视频、窗口序号在窗口数以内，否则忽略：索引命中不构成授权。
+  - **模型不一致**：这些视频（含分析未完成的）在 Catalog 里有任何一个窗口的身份不是文字模型的身份，就回答 `model_mismatch`，不回答空结果或只搜其余视频。
+  - **结果与精确扫描相同**：做法同图片的[读路径](#结果与精确扫描相同)，没有加分。先取前 k 个加超取，有效命中不够就加深；第 k 名的分数减 10⁻⁴ 作为截线，没取尽就带这个下限再取到尽；截线以上的窗口从 Catalog 读向量，用 float64 重算后排序。outbox 里的视频不问索引，直接按 Catalog 算。排序先按分数，同分按内容 ID 与窗口序号，所以两条路径逐个相同。
+  - **读 Catalog**：以下情况逐个视频读 Catalog 的窗口向量精确计算，结果相同；原因同样记入 `photo search reads the Catalog's vectors`，与图片共用出错后的等待：
+
+    | reason | 级别 |
+    |---|---|
+    | `the vector index has no windows collection for the model` | info |
+    | `the vector index is still filling the windows collection` | info |
+    | `the vector index has lost the windows collection` | info |
+    | `too many videos wait for the vector index` | info |
+    | `the vector index failed` | warn，带 `error` |
+    | `the vector index failed recently` | info |
+
+  - 测试：[`TestWindowSearchReadsTheIndexAsTheCatalogDoes`](../../internal/photos/windowsearch_test.go)、`TestWindowSearchWorksWithTheIndexStopped`、`TestWindowSearchSaysWhyItReadsTheCatalog`、`TestWindowSearchSaysTheIndexLostItsCollection`、`TestTheWindowsAliasMovesOnceTheNewCollectionIsFull`、[`TestAWindowSearchFindsOnlyTheGrantsVideos`](../../internal/photos/leak_test.go)。
 
 ### 同步循环
 
@@ -227,7 +248,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 ### 换模型
 
 - 现在：目标模型变了，同步就新建集合、删掉旧集合、把全部向量排队。新集合写满之前，查询向量的模型与集合不符，排序读 Catalog；结果照旧，只是更慢。
-- 后续集合的前提：视频分段与文件分块的规模大得多，换模型期间不能都回退到 Catalog。它们接入前要先改为集合别名：新集合建好并写满后一次切换别名，回滚时切回。相册的集合到时一起改。
+- 后续集合的前提：视频分段与文件分块的规模大得多，换模型期间不能都回退到 Catalog。它们接入前要先改为集合别名：新集合建好并写满后一次切换别名，回滚时切回。剪辑中心的窗口集合只做了前一半（见上文“剪辑中心的窗口集合”）：新集合写满后才切别名，但读写仍按集合名，别名只标记“写满了”，换模型期间它的搜索回答 `model_mismatch` 或读 Catalog，不读旧集合。让读者经别名继续读旧集合还没做，随这些后续集合接入时做；相册的图片集合到时一起改。
 
 ### 切换前的影子比对
 
@@ -253,6 +274,7 @@ Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
 | 所属服务 | 集合 | 内容 | 状态 |
 |---|---|---|---|
 | 相册（`a-nas-photos`） | `images_*` | 每个内容对象一个整图向量 | 同步；排序从索引读（2026-11-06） |
+| 相册（`a-nas-photos`） | `video_windows_v1_*` | 剪辑中心按项目请求的视频，每 2 秒一个窗口向量；向量在 Catalog，不建 HNSW | 同步（[剪辑中心方案](montage-center.md#窗口向量)）；二次编辑的文字搜镜头在别名 `video_windows_v1` 指向它（已写满）时读取（[#599](https://github.com/zhongwater123/A-NAS/issues/599)） |
 | 相册（`a-nas-photos`） | 视频分段 | 每个视频多个分段向量，按最佳片段打分 | 计划中（#207） |
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 
@@ -296,6 +318,6 @@ Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
 - [ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - [相册本地 AI](photo-ai.md)、[相册技术设计](photo-library.md)、[人物与宠物](photo-people.md)
 - [启用向量索引手册](../runbooks/enable-vector-index.md)
-- 代码：[客户端](../../internal/vectorindex/vectorindex.go)、[同步与对账](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[核对](../../internal/photos/vectorcheck.go)、[预热与日志](../../internal/photoservice/photoservice.go)
+- 代码：[客户端](../../internal/vectorindex/vectorindex.go)、[同步与对账](../../internal/photos/vectorsync.go)、[读路径](../../internal/photos/vectorsearch.go)、[窗口集合](../../internal/photos/windowsync.go)与[窗口搜索](../../internal/photos/windowsearch.go)、[核对](../../internal/photos/vectorcheck.go)、[预热与日志](../../internal/photoservice/photoservice.go)
 - [Qdrant 检索特性试验](../research/qdrant-retrieval-features.md)
 - [#66](https://github.com/zhongwater123/A-NAS/issues/66)、[#152](https://github.com/zhongwater123/A-NAS/issues/152)、[#207](https://github.com/zhongwater123/A-NAS/issues/207)、[#208](https://github.com/zhongwater123/A-NAS/issues/208)、[#262](https://github.com/zhongwater123/A-NAS/issues/262)（嵌入式、图 + 向量方案与 Qdrant 的选型横比）

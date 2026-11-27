@@ -1,9 +1,10 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UploadItem } from "../photos/uploads";
 import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
+import { sizedScrollers } from "../test/layout";
 import { apiError, http, server } from "../test/server";
 import { MontagePanel } from "./MontagePanel";
 
@@ -57,42 +58,11 @@ async function openNew() {
   return screen.findByRole("region", { name: "新建剪辑项目" });
 }
 
-// jsdom lays nothing out; what scrolls, as the picker's grid does, gets a
-// window-sized view (as the photos window's tests give it).
-const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
-const scrollerSize = { offsetHeight: 800, offsetWidth: 1000, clientHeight: 800, clientWidth: 1000 };
-const scrolls = (element: Element) => element.isConnected && getComputedStyle(element).overflowY === "auto";
-
-beforeEach(() => {
-  for (const [name, size] of Object.entries(scrollerSize))
-    Object.defineProperty(HTMLElement.prototype, name, {
-      configurable: true,
-      get() {
-        return this instanceof HTMLElement && scrolls(this) ? size : 0;
-      },
-    });
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {
-        /* no layout in jsdom */
-      }
-      unobserve() {
-        /* none */
-      }
-      disconnect() {
-        /* none */
-      }
-    },
-  );
-});
+// The picker's grid lays out only in a scroller of some size.
+sizedScrollers();
 
 afterEach(() => {
   server.resetHandlers();
-  vi.unstubAllGlobals();
-  for (const name of ["offsetHeight", "offsetWidth"] as const)
-    Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
-  for (const name of ["clientHeight", "clientWidth"] as const) Reflect.deleteProperty(HTMLElement.prototype, name);
   queue.items = [];
   queue.added = [];
 });

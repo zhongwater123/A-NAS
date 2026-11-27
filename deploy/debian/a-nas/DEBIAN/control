@@ -5,9 +5,10 @@ Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
 Depends: a-nas-host (= @VERSION@), systemd (>= 257), python3, @CONTENT@
+Suggests: a-nas-hotspot-radio (= @VERSION@)
 Description: the A-NAS product
- The Host Agent, the Product Service and its photo, share, family and
- montage services, the AI Worker, the AI assistant (VNAS), web search, the
+ The Host Agent, the Product Service and its photo, share, family, montage
+ and shared workspace services, the AI Worker, the AI assistant (VNAS), web search, the
  vector index and the local console's launcher, with their systemd units,
  accounts and directories (docs/adr/0034). The models, runtimes, Qdrant and llama.cpp are content
  packages of their own, and the Debian packages the product runs on come

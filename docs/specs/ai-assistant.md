@@ -28,6 +28,7 @@
 | 快照、其他成员的个人空间、私有图库与回收站（包括管理员已获查看授权的） | 不可以 | 不可以 |
 | 系统设置、应用、宿主机、局域网与外网 | 不可以（操作桌面时见下一行） | 不可以（同上） |
 | 成员的 WebOS 桌面（VNAS 窗口里对话时） | 成员看得到的窗口；只读查看的他人空间与图库、快照里的内容除外 | 像成员一样操作；删除、移动、改名、分享、复制、恢复、问题反馈与设置类的写入先经成员允许，终端、Docker 与应用中心里的每一步先经允许 |
+| 本人的剪辑项目（剪辑工具，只在规划进程里剪辑中心发起的规划对话中，[ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md)） | 这一轮任务的卡片目录、音乐段落与成员的要求（文字，没有画面） | 只能交回这一轮的规划；规划进程另外只有记忆与技能的工具 |
 | 发起这段对话的设备上的虚拟伙伴（伙伴工具，[#414](../decisions/2026-11-06-companion-v1.md)） | 只有命令的结果：动画播完没有、是否睡着或被锁 | 播放动作、说话气泡、移动与抛出、睡觉与叫醒、加锁，不经确认（只改变这块屏幕上伙伴的样子，不碰数据，见[虚拟伙伴](virtual-companion.md#让伙伴做动作说话)）；定时任务不能让伙伴做事，调用得到“没有在用的桌面”（[虚拟伙伴](virtual-companion.md#定时任务不能让伙伴做事)） |
 
 ## 名称与外观
@@ -234,6 +235,12 @@
 - When：到了任务的时间。
 - Then：任务在成员自己的沙箱中运行，能读的与对话中相同，只能写助手目录；需要成员确认的命令、代码与“提交更改”被拒绝，回答里说明，由成员回到对话里确认。每次运行是一段对话，不出现在对话列表中，而在“定时任务”中这个任务的运行记录里。
 
+### 剪辑中心的后台规划
+
+- Given：成员在剪辑中心点了“开始”或“重新规划”，之后关掉了浏览器。
+- When：剪辑任务走到规划。
+- Then：NAS 凭成员点击时留下的授权（7 天、最多 5 轮），在成员的规划进程里开一次对话，标题“剪辑规划 · <项目名>”，留在成员的对话历史里，成员可以打开接着说；不出现在“定时任务”里，不弹出提示。规划进程只有剪辑、记忆与技能的工具，看不到画面、文件与照片；成员的记忆与技能照样进提示，用云端模型时随请求发出；结束后照常后台复盘，学到的做法写成技能（[剪辑中心](montage-center.md)、[规划会话](../architecture/montage-planning-session.md)）。
+
 ### 得知任务的结果
 
 - Given：一个任务刚运行完，或在成员离线时运行过。
@@ -348,7 +355,7 @@
 - 架构：[架构总览](../architecture/OVERVIEW.md)、[存储与文件架构](../architecture/storage-and-files.md)
 - ADR：[0024 每个账号一个沙箱中的 Hermes Agent](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0008](../adr/0008-use-unified-linux-identities-and-filesystem-acls.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)
 - 研究：[Hermes Agent 可行性](../research/hermes-agent-runtime.md)
-- 代码：设置页 [`AssistantSection.tsx`](../../web/src/settings/AssistantSection.tsx) 与接口 [`internal/assistantkeyapi`](../../internal/assistantkeyapi/assistantkeyapi.go)，Host Agent 的密钥与成员准备 [`assistant.go`](../../internal/hostops/linux/assistant.go)，模型网关 [`gateway.py`](../../ai/assistant/gateway.py)，单元在 [`deploy/systemd/system`](../../deploy/systemd/system/anas-assistant@.service)；产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/assistant/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），没有文件代理的开发模式由 spike 的 [`change_broker.py`](../../ai/assistant-spike/change_broker.py) 代替
+- 代码：设置页 [`AssistantSection.tsx`](../../web/src/settings/AssistantSection.tsx) 与接口 [`internal/assistantkeyapi`](../../internal/assistantkeyapi/assistantkeyapi.go)，Host Agent 的密钥与成员准备 [`assistant.go`](../../internal/hostops/linux/assistant.go)，模型网关 [`gateway.py`](../../ai/assistant/gateway.py)，单元在 [`deploy/systemd/system`](../../deploy/systemd/system/anas-assistant@.service)；产品服务 [`internal/assistantapi`](../../internal/assistantapi/handler.go)（网关 [`gateway.go`](../../internal/assistantapi/gateway.go)、白名单 [`rpc.go`](../../internal/assistantapi/rpc.go)、卡片 [`approvals.go`](../../internal/assistantapi/approvals.go)），会话闸门 [`internal/filebroker/assistant.go`](../../internal/filebroker/assistant.go)，窗口 [`web/src/assistant`](../../web/src/assistant/AssistantPanel.tsx)、[应用图标](../../web/src/assistant/AssistantGlyph.tsx) 与连接层 [`useAssistantGateway.ts`](../../web/src/assistant/useAssistantGateway.ts)、[`useAssistantThread.ts`](../../web/src/assistant/useAssistantThread.ts)，复制的 Hermes Desktop 聊天层与 JSON-RPC 客户端 [`web/src/assistant/hermes`](../../web/src/assistant/hermes/README.md)；执行方 [`internal/assistantchanges`](../../internal/assistantchanges/executor.go) 在文件代理中运行（[`changes.go`](../../internal/filebroker/changes.go)），开发模式由 spike 的 [`broker-spike`](../../ai/assistant-spike/broker-spike/main.go) 运行同一个执行方
 - 操作桌面：沙箱里的 MCP 服务器 [`anas_desktop_mcp.py`](../../ai/assistant/anas_desktop_mcp.py)，产品服务 [`desktop.go`](../../internal/assistantapi/desktop.go)（与伙伴工具共用 [`companion.go`](../../internal/assistantapi/companion.go) 的通道），窗口中的控制器 [`webosControl.ts`](../../web/src/assistant/webosControl.ts) 与写入清单 [`webosWrites.ts`](../../web/src/assistant/webosWrites.ts)，页面写入的闸门在 [`api.ts`](../../web/src/api/client.ts) 的 `apiFetch` 与 `uploadForm`，问题 [#160](https://github.com/zhongwater123/A-NAS/issues/160)，系统技能 [`anas-desktop`](../../ai/assistant/skills/anas-desktop/SKILL.md)，Hermes 自己的登录 [`internal/assistantlogin`](../../internal/assistantlogin/login.go)
 - 定时任务：产品服务 [`tasks.go`](../../internal/assistantapi/tasks.go) 与 [`tasknotices.go`](../../internal/assistantapi/tasknotices.go)，通知 [`internal/accounts/assistanttasks.go`](../../internal/accounts/assistanttasks.go)，窗口 [`TasksView.tsx`](../../web/src/assistant/TasksView.tsx) 与桌面提示 [`TaskToasts.tsx`](../../web/src/assistant/TaskToasts.tsx)，唤醒 [`cron-waker.py`](../../ai/assistant/cron-waker.py)，系统技能 [`anas-scheduled-tasks`](../../ai/assistant/skills/anas-scheduled-tasks/SKILL.md)
 - 伙伴工具：[虚拟伙伴规格](virtual-companion.md)，伙伴服务器 [`anas_companion_mcp.py`](../../ai/assistant/anas_companion_mcp.py)，产品服务 [`companion.go`](../../internal/assistantapi/companion.go)

@@ -299,6 +299,29 @@ func TestImageProductThatBreaksACheckGoesBack(t *testing.T) {
 	}
 }
 
+func TestImageCheckOffersANewerReleaseOnlyAfterAFailedRollbackIsRepaired(t *testing.T) {
+	s, host := newImageService(t)
+	host.versions["1002"] = "1.0.2"
+	host.failing["1002"], host.failing["1001"] = true, true
+	publish(t, s.Staging, "1002", "1.0.2", "1001", nil)
+	runImage(t, s, RequestCheck, "owner")
+	state := runImage(t, s, RequestInstall, "owner")
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback {
+		t.Fatalf("install = %+v, want a failed rollback", state)
+	}
+	publish(t, s.Staging, "1003", "1.0.3", "1001", nil)
+	state = runImage(t, s, RequestCheck, "owner")
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback ||
+		state.Candidate != "" || state.Image.Candidate != "" {
+		t.Fatalf("a check while 1001 still fails = %+v, image = %+v", state, state.Image)
+	}
+	host.failing["1001"] = false
+	state = runImage(t, s, RequestCheck, "owner")
+	if state.Phase != PhaseReady || state.Problem != nil || state.Candidate != "1.0.3" || state.Image.Candidate != "1003" {
+		t.Fatalf("a check after repair = %+v, image = %+v, want 1003 ready", state, state.Image)
+	}
+}
+
 // installBase checks and installs release 1003, which brings base 1003.
 func installBase(t *testing.T, s *ImageService, host *fakeImage, by string) State {
 	t.Helper()

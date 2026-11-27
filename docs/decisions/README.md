@@ -7,21 +7,21 @@
 同一个决定只写在一处：
 
 1. 改回来要迁移数据、改协议、改部署或改安全边界的，写 [ADR](../adr/README.md)；改回来只是一次普通提交的，写决定记录。拿不准时先写决定记录；后来发现难以逆转，再写 ADR，并把决定记录标为 `superseded` 链接过去。
-2. ADR 已覆盖的事只改 ADR：修订或推翻 ADR 中的某项决定，在 ADR 中修订，不另写决定记录。ADR 里已经记下的用户选择留在原处。
-3. ADR 是否接受以 ADR 的状态行为准，不写决定记录。`proposed` 的 ADR 与 `pending` 的决定记录一起列在[当前状态](../status/CURRENT.md#待用户决定)的“待用户决定”中。
+2. ADR 已覆盖的事只改 ADR：修订或推翻 ADR 中的某项决定，在 ADR 中修订，不另写决定记录。ADR 里已经记下的用户选择留在原处。这类修订要等用户定时，先写一篇 `pending` 的决定记录列出问题与选项，好让它出现在索引里；定下后改 ADR，在 ADR 的状态行记下决定，并把决定记录标为 `superseded` 链接到 ADR。
+3. ADR 是否接受以 ADR 的状态行为准，不写决定记录。等用户定的事在两个索引里看：下面的索引中标 `（pending）` 的决定记录，[ADR 索引](../adr/README.md#索引)中标 `（proposed）` 的 ADR；[当前状态](../status/CURRENT.md#待用户决定)只链接这两个索引，不逐条列出。
 
 用户对界面细节的反馈（文案、配色、图标、布局）直接写成规格中的行为，不写决定记录；定默认值、上限、范围或在几种做法中选一种的，才写。
 
 ## 索引
 
-按主题列出，同一主题内按日期排列。AI 助手的大部分决定在 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 中，网页搜索的在 [ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md) 中。
+按主题列出，同一主题内按日期排列；等用户定的条目后面标 `（pending）`。AI 助手的大部分决定在 [ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 中，网页搜索的在 [ADR 0030](../adr/0030-ship-web-search-as-a-built-in-searxng-service.md) 中。
 
 ### 文件与存储
 
 - [2026-10-12：备份中心先只做快照保护](2026-10-12-backup-center-snapshots-only.md)
-- [2026-10-13：文件管理的图片缩略图是否改用服务端生成](2026-10-13-file-manager-image-thumbnails.md)
-- [2026-10-21：FFmpeg Worker 的槽位、分层与内存上限](2026-10-21-ffmpeg-worker-slots-and-memory.md)
-- [2026-11-06：镜像缺盘的开机路径是否做成虚拟机回归测试](2026-11-06-mirror-boot-vm-test.md)
+- [2026-10-13：文件管理的图片缩略图是否改用服务端生成](2026-10-13-file-manager-image-thumbnails.md)（pending）
+- [2026-10-21：FFmpeg Worker 的槽位、分层与内存上限](2026-10-21-ffmpeg-worker-slots-and-memory.md)（pending）
+- [2026-11-06：镜像缺盘的开机路径是否做成虚拟机回归测试](2026-11-06-mirror-boot-vm-test.md)（pending）
 
 ### 相册
 
@@ -33,7 +33,7 @@
 - [2026-10-15：人物与宠物里程碑的范围](2026-10-15-photo-people-scope.md)
 - [2026-10-19：相册放视频，视频不参与 AI](2026-10-19-videos-in-the-photo-library.md)
 - [2026-10-19：相册做 OCR](2026-10-19-photo-ocr.md)
-- [2026-10-20：相册视频实现时选的默认做法](2026-10-20-photo-video-defaults.md)
+- [2026-10-20：相册视频实现时选的默认做法](2026-10-20-photo-video-defaults.md)（pending）
 - [2026-10-20：相册侧栏的“照片”改名“图库”](2026-10-20-library-sidebar-name.md)
 - [2026-10-28：AI 模型不设固定内存预算，加载前留出余量](2026-10-28-ai-memory-headroom.md)
 - [2026-10-30：OCR 模型用 Qwen3.5-4B 的 Q4_K_M](2026-10-30-ocr-model.md)
@@ -45,22 +45,22 @@
 - [2026-11-03：OCR 字段核对的单字概率取 0.99](2026-11-03-ocr-character-confidence.md)
 - [2026-11-06：照片中的文字在界面上不遮挡](2026-11-06-ocr-no-masking-in-the-ui.md)
 - [2026-11-10：AI 助手看不到证件、票据和文字还没读完的照片的画面](2026-11-10-assistant-view-of-documents.md)
+- [2026-11-25：成员在等的后台 AI 工作要不要等相册空闲](2026-11-25-photo-ai-gate-member-work.md)
 
 ### AI 助手
 
-- [2026-10-15：助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](2026-10-15-assistant-help-and-onboarding.md)
+- [2026-10-15：助手的回答提到 Hermes 的 `/help` 与上手引导怎么处理](2026-10-15-assistant-help-and-onboarding.md)（pending）
 - [2026-10-16：AI 助手在界面上叫 VNAS](2026-10-16-assistant-name-vnas.md)
-- [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)
+- [2026-10-20：助手说“下次从笔记接着聊”的措辞是否调整](2026-10-20-assistant-notes-wording.md)（pending）
 - [2026-11-10：Hermes 的固定提交怎么越过 gateway 运行时](2026-11-10-hermes-gateway-runtime.md)
 - [2026-11-13：VNAS 评分场景用哪个模型当评审](2026-11-13-assistant-eval-judge.md)
 - [2026-11-17：AI 助手 V1 的模型、开启范围、密钥与告知](2026-11-17-assistant-v1-cloud-model.md)
-- [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 
 ### 桌面与设置
 
 - [2026-10-08：开机动画的风格](2026-10-08-boot-ident-style.md)
 - [2026-10-20：程序坞图标悬停时显示窗口缩略图](2026-10-20-dock-hover-preview.md)
-- [2026-10-22：活动记录保留多久](2026-10-22-activity-record-retention.md)
+- [2026-10-22：活动记录保留多久](2026-10-22-activity-record-retention.md)（pending）
 - [2026-10-30：Web 桌面首屏 JavaScript 上限放宽到 200 kB](2026-10-30-desktop-js-budget.md)
 - [2026-10-30：不调节风扇转速](2026-10-30-no-fan-control.md)
 - [2026-11-16：重新启用与删除账号的做法](2026-11-16-account-deletion.md)
@@ -68,16 +68,42 @@
 ### 虚拟伙伴
 
 - [2026-11-06：虚拟伙伴（大肥鱼）V1 的形象、实现方式与 VNAS 的控制](2026-11-06-companion-v1.md)
-- [2026-11-06：虚拟伙伴 V1 是否不含待办与专注计时](2026-11-06-companion-v1-no-todo-focus.md)
-- [2026-11-06：虚拟伙伴旧分支中的第三方素材怎么清除](2026-11-06-companion-old-branches.md)
+- [2026-11-06：虚拟伙伴 V1 是否不含待办与专注计时](2026-11-06-companion-v1-no-todo-focus.md)（pending）
+- [2026-11-06：虚拟伙伴旧分支中的第三方素材怎么清除](2026-11-06-companion-old-branches.md)（pending）
 
 ### 家庭中心
 
-- [2026-10-29：家庭中心规格中补充的默认规则](2026-10-29-family-center-default-rules.md)
+- [2026-10-29：家庭中心规格中补充的默认规则](2026-10-29-family-center-default-rules.md)（pending）
+
+### 剪辑中心
+
+- [2026-11-17：剪辑中心首版的数据归属与几项做法](2026-11-17-montage-center-first-version.md)
+- [2026-11-17：剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)
+- [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
+- [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
+- [2026-11-25：规划没有完成时自动重来，到上限仍失败就让任务失败并通知](2026-11-25-montage-planning-retries.md)
+
+### 家庭待办
+
+- [2026-11-16：家庭待办是不是本体能力、按什么分范围、先做哪一步](2026-11-16-family-todos-first-step.md)
+- [2026-11-17：家庭待办规格中补充的默认规则](2026-11-17-family-todos-default-rules.md)（pending）
 
 ### 网页搜索
 
 - [2026-11-02：网页搜索像人一样询问引擎](2026-11-02-web-search-pacing.md)
+
+### 网络与访问
+
+- [2026-11-09：第一版先做家庭局域网内访问](2026-11-09-home-network-first.md)
+- [2026-11-19：宿主机网络与手机直连热点的首版范围](2026-11-19-host-network-and-phone-hotspot-v1.md)
+
+### 设备分档
+
+- [2026-11-18：设备分档与每档的最低规格](2026-11-18-device-tiers.md)
+- [2026-11-18：处理器“不低于参考机”用什么衡量](2026-11-18-tier-cpu-comparison.md)（pending）
+- [2026-11-18：本机型不支持的功能在界面上隐藏还是标注](2026-11-18-unsupported-feature-display.md)（pending）
+- [2026-11-18：除硬件限制外，是否按档位区分功能](2026-11-18-deliberate-tiering.md)（pending）
+- [2026-11-18：低端设备上的 AI 功能：慢但完整还是关闭](2026-11-18-ai-on-low-tier.md)（pending）
 
 ### 发布与更新
 
@@ -94,18 +120,18 @@
 ### 仓库与版权
 
 - [2026-11-17：仓库保持公开，声明保留所有权利](2026-11-17-all-rights-reserved.md)
-- [2026-11-17：版权人与贡献者授权](2026-11-17-copyright-holder-and-contributor-grants.md)
+- [2026-11-17：版权人与贡献者授权](2026-11-17-copyright-holder-and-contributor-grants.md)（pending）
 
 ## 状态
 
-每篇的状态只写在标题下的“状态：”一行，索引不重复。状态以下列词开头：
+每篇的状态写在标题下的“状态：”一行。索引只给 `pending` 的条目加标记，其他状态不在索引中重复。状态以下列词开头：
 
 - `pending`：等用户定。
 - `decided`：已定，括号中写日期与决定人，例如 `decided（2026-11-03，用户）`。
 - `superseded`：被后来的决定或 ADR 取代，链接替代项。
 
-`make docs-check` 检查：索引收录每篇决定记录且不带状态；状态行以上述词开头，`decided` 带日期；当前状态的“待用户决定”链接每篇 `pending` 的决定与每篇 `proposed` 的 ADR，不链接已定或被取代的决定。
+`make docs-check` 检查：索引收录每篇决定记录；状态行以上述词开头，`decided` 带日期；索引中 `pending` 的条目都标 `（pending）`，已定或被取代的条目不带标记；当前状态的“待用户决定”链接本索引与 ADR 索引，不逐条链接决定记录或 ADR。
 
 ## 使用方式
 
-从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`，日期取提出问题的那天，在索引的对应主题下加一行，`pending` 的同时在当前状态的“待用户决定”中加一行链接。用户定下后，把状态改为 `decided`，补上“决定”一节，从“待用户决定”中删去这一行，并把落实它的规格、代码或 PR 链接进来。之后改了主意，新写一篇，把旧的标为 `superseded` 并链接新的，不改写旧结论。
+从 [`_TEMPLATE.md`](_TEMPLATE.md) 创建 `YYYY-MM-DD-short-title.md`，日期取提出问题的那天，在索引的对应主题下加一行，`pending` 的在行尾标 `（pending）`。用户定下后，把状态改为 `decided`，补上“决定”一节，去掉索引中的标记，并把落实它的规格、代码或 PR 链接进来。之后改了主意，新写一篇，把旧的标为 `superseded` 并链接新的，不改写旧结论。

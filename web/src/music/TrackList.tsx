@@ -88,6 +88,9 @@ export function TrackList({
     estimateSize: () => rowHeight,
     overscan: 12,
     scrollMargin: margin,
+    // The scroller is the parent's element, whose ref React attaches after this
+    // component's layout effects on mount: the virtualizer can measure it only
+    // on a later render, and until then initialRect decides which rows show.
     initialRect: { width: 0, height: 900 },
   });
 

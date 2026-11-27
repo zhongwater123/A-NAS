@@ -78,14 +78,14 @@ anas-api（a-nas）
 - 转换后的流是分片 MP4（`frag_keyframe+empty_moov+default_base_moof`），不能随机访问。播放器在拖动时用新的 `start` 重新请求，并把该起点加到 `<video>` 的时钟上；进度、字幕与进度条都使用这个绝对时间。
 - 直接播放出错时，播放器自动改为转码一次。
 - 转换流最多同时 2 路（`Options.MaxStreams`，默认 `mediaplay.Conversions`），超出返回 `media_busy`；连接断开时 Worker 立即结束 FFmpeg。相册服务在自己的进程中另有 2 路，两者合计最多 4 路，都还要经过媒体 Worker 的共享槽位（见下文“准入与失败”）。
-- 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
+- 字幕：外挂文件非 UTF-8 时按 GB18030 交给 FFmpeg；内嵌的文本字幕按流索引抽取。转换结果按文件版本缓存。删除媒体库或账号时一并删除其视频的截图与字幕缓存；删除时仍在进行的截取或转换之后才写入的，由每 15 分钟一次的缓存清理删掉（视频已不在目录中的截图与字幕，[`process.go`](../../internal/media/process.go) 的 `pruneCache`）。浏览器只把字幕载入隐藏的 `<track>`，由播放器按绝对时间显示，使它在转码重启后仍然对齐。
 - 进度每 10 秒、暂停与关闭时保存；不足 30 秒不记位置，达到 90% 记为已看并清除位置。
 
 ## Worker 协议
 
 - 帧格式与文件代理相同：4 字节大端长度加 JSON，请求的长度前缀上附带 `SCM_RIGHTS` 文件描述符（[`protocol.go`](../../internal/ffmpegworker/protocol.go)）。
 - 通用操作有 `probe`、`frame`（时间点与宽度）、`image`（HEIF 预览宽度）、`subtitle`（格式与字符集，或内嵌流索引）、`stream`（起点、复制或转码、高度、码率、音轨）、`audio`（起点、采样率、16 或 24 位 FLAC；带 `pcm` 时严格校验字段并输出 32 位单声道或立体声浮点采样）。参数经校验后由 [`command.go`](../../internal/ffmpegworker/command.go) 生成。FFmpeg 通过标准输入上的 `fd:` 读取可寻址的描述符（需 FFmpeg 6.1 或更新版本），通过标准输出返回结果。`image` 使用独立的 libheif 命令。
-- 剪辑操作包括 `frames`、`segment`、`assemble`（[`edit.go`](../../internal/ffmpegworker/edit.go)，[剪辑中心实施方案](https://github.com/zhongwater123/A-NAS/pull/518)）。`frames` 按时刻列表或区间采样，每帧发一条消息，空消息之后发结果，结果里带每帧的时刻。区间是半开的 `[start, end)`：第 k 帧对应 `start + k/rate`，帧数是 end 之前这样的时刻个数（300 秒、每秒 2 帧正好 600 帧）。FFmpeg 从起点前一步读到终点后一步，所以同一时刻在哪个区间里取到的都是同一个源帧：前一段的终点等于后一段的起点时两段不重复；终点多一步时两段共享这一时刻的帧。需要模糊值时，将编码后的 JPEG 送进同一个 blurdetect 进程，黑帧的值为 `null`。`segment` 渲染 1920×1080、30 帧/秒、无声的 MPEG-TS，时间戳包含该段在成片中的偏移。`assemble` 接收拼好的 TS 与歌曲两个只读描述符，在 Worker 自有 memfd 生成 faststart MP4，验证视频帧数和 AAC 立体声后发回。
+- 剪辑操作包括 `frames`、`segment`、`assemble`（[`edit.go`](../../internal/ffmpegworker/edit.go)，[剪辑中心实施方案](montage-center.md#ffmpeg-worker-的新操作)）。`frames` 按时刻列表或区间采样，每帧发一条消息，空消息之后发结果，结果里带每帧的时刻。区间是半开的 `[start, end)`：第 k 帧对应 `start + k/rate`，帧数是 end 之前这样的时刻个数（300 秒、每秒 2 帧正好 600 帧）。FFmpeg 从起点前一步读到终点后一步，所以同一时刻在哪个区间里取到的都是同一个源帧：前一段的终点等于后一段的起点时两段不重复；终点多一步时两段共享这一时刻的帧。需要模糊值时，将编码后的 JPEG 送进同一个 blurdetect 进程，黑帧的值为 `null`。`segment` 渲染 1920×1080、30 帧/秒、无声的 MPEG-TS，时间戳包含该段在成片中的偏移。`assemble` 接收拼好的 TS 与歌曲两个只读描述符，在 Worker 自有 memfd 生成 faststart MP4，验证视频帧数和 AAC 立体声后发回。
 - 剪辑请求拒绝未知字段，预检超限返回 `invalid_request`，运行中输出超限返回 `too_large`，转码超时或 blurdetect 运行失败返回 `failed`，缺少 blurdetect 滤镜返回 `unavailable`。`segment` 和 `assemble` 报出正文长度，正文提前结束算 `ErrInterrupted`。剪辑与 PCM 子进程以 nice 10 启动，取帧和片段渲染的解码、编码及滤镜各用至多 4 个线程。
 - 有限输出的操作限制大小与运行时间，剪辑操作的时限也限制套接字写入。`stream` 与 `audio` 在 FFmpeg 产出第一块数据后才回复成功，失败时带回 stderr 最后一行。对端不会在请求后再写入，所以连接上任何读取返回都表示对端已断开，Worker 随即结束 FFmpeg。
 - 客户端在请求中带 `ack`，Worker 读到请求与描述符后先回一帧 `accepted`，再开始工作并回复结果。没有 `ack` 的请求（旧客户端）直接得到结果，新客户端遇到旧 Worker 也把第一帧当作结果，所以部署时新旧进程短暂混用不会出错。

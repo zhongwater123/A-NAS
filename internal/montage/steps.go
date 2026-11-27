@@ -32,7 +32,7 @@ import (
 const (
 	catalogVersion = "catalog/v1"
 	promptVersion  = "plan/v8"
-	fillVersion    = "fill/v9"
+	fillVersion    = "fill/v10"
 	renderVersion  = "render/v1"
 )
 
@@ -72,12 +72,16 @@ type jobRun struct {
 
 type jobAsset struct{ assetID, objectID string }
 
+// stepKey names a step's input for a run: a step whose key is the one its
+// stored result was made with is not run again.
+type stepKey = func(ctx context.Context, run *jobRun) (string, error)
+
 // step is one step: its key from the run so far, and doing it.
 type step struct {
 	name string
 	// plan is the 方案 the step belongs to, 0 for the steps all share.
 	plan int
-	key  func(ctx context.Context, run *jobRun) (string, error)
+	key  stepKey
 	do   func(ctx context.Context, run *jobRun) (any, error)
 	// load takes a stored result back into the run.
 	load func(run *jobRun, result []byte) error
@@ -93,6 +97,12 @@ func planStep(name string, plan int) string {
 		return name
 	}
 	return fmt.Sprintf("%s-%d", name, plan)
+}
+
+// planStepSQL is planStep as SQL, for a step's plain name and the column
+// that holds the 方案 (TestPlanStepsAreNamedAlikeInSQL).
+func planStepSQL(name, column string) string {
+	return "CASE WHEN " + column + " <= 1 THEN '" + name + "' ELSE '" + name + "-' || " + column + " END"
 }
 
 // planOf is a step's plain name and the 方案 it belongs to.
@@ -126,7 +136,10 @@ func planKey(pickKey string, plan int) string {
 // next; the last one's save ends the job. The list is the one place that
 // says the order: what a job shows (Job) and which steps a new input makes
 // stale (startStep) read it.
-func (s *Store) steps(plans int) []step {
+func (s *Store) steps(kind string, plans int) []step {
+	if kind == KindEdit {
+		return s.editSteps()
+	}
 	steps := []step{
 		{name: "analysis", key: s.analysisKey, do: s.analyse,
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.analysis) }},
@@ -137,40 +150,56 @@ func (s *Store) steps(plans int) []step {
 			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.excerpt) }},
 	}
 	for plan := 1; plan <= plans; plan++ {
-		pick, shots, fill, render := planStep("pick", plan), planStep("shots", plan), planStep("fill", plan), planStep("render", plan)
+		pick, shots, render := planStep("pick", plan), planStep("shots", plan), planStep("render", plan)
 		steps = append(steps,
 			step{name: pick, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
 				if plan > 1 {
 					return planKey(run.keys["pick"], plan), nil
 				}
-				return digest(run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion), nil
+				parts := []string{run.keys["catalog"], run.settings.Ask, fmt.Sprint(run.settings.Chronological), run.keys["song"], promptVersion}
+				if recut := run.settings.Recut; recut != nil {
+					// A recut plans anew from its version's plan and sentence.
+					parts = append(parts, RecutTemplate, recut.Change, string(recut.Base))
+				}
+				return digest(parts...), nil
 			}, do: s.pick, load: func(run *jobRun, b []byte) error { run.picked = b; return nil }},
 			step{name: shots, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
 				return shotsKey(run.keys[pick], run.picked), nil
 			}, do: s.shots, load: func(run *jobRun, b []byte) error { run.planned = b; return nil }},
-			step{name: fill, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
-			}, do: s.fill, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
-			step{name: render, plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
-				if plan > 1 {
-					// Two 方案 with the same timeline are still two films.
-					parts = append(parts, fmt.Sprintf("plan %d", plan))
-				}
-				return digest(parts...), nil
-			}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
-				reusable: s.filmKept},
-			step{name: planStep("save", plan), plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
-				return run.id + "|" + run.keys[render], nil
-			}, do: s.save, load: func(*jobRun, []byte) error { return nil }},
 		)
+		steps = append(steps, s.filmSteps(plan, func(_ context.Context, run *jobRun) (string, error) {
+			return digest(run.keys[shots], digest(string(run.planned)), fillVersion), nil
+		}, func(_ context.Context, run *jobRun) (string, error) {
+			return run.id + "|" + run.keys[render], nil
+		})...)
 	}
 	return steps
 }
 
+// filmSteps are the steps that make a 方案's film of what was planned: the
+// fill, the render and the save, the same whatever kind of job planned it.
+// fillKey names what the fill cuts from, and saveKey what saves the film
+// once.
+func (s *Store) filmSteps(plan int, fillKey, saveKey stepKey) []step {
+	return []step{
+		{name: planStep("fill", plan), plan: plan, key: fillKey, do: s.fill,
+			load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.timeline) }},
+		{name: planStep("render", plan), plan: plan, key: func(_ context.Context, run *jobRun) (string, error) {
+			parts := []string{digestJSON(run.timeline.Clips), renderVersion, run.excerpt.Key}
+			if plan > 1 {
+				// Two 方案 with the same timeline are still two films.
+				parts = append(parts, fmt.Sprintf("plan %d", plan))
+			}
+			return digest(parts...), nil
+		}, do: s.renderFilm, load: func(run *jobRun, b []byte) error { return json.Unmarshal(b, &run.render) },
+			reusable: s.filmKept},
+		{name: planStep("save", plan), plan: plan, key: saveKey, do: s.save, load: func(*jobRun, []byte) error { return nil }},
+	}
+}
+
 // stepNames are the names of the steps of a job that makes plans 方案, in order.
-func (s *Store) stepNames(plans int) []string {
-	steps := s.steps(plans)
+func (s *Store) stepNames(kind string, plans int) []string {
+	steps := s.steps(kind, plans)
 	names := make([]string, len(steps))
 	for i, st := range steps {
 		names[i] = st.name
@@ -242,7 +271,7 @@ func (s *Store) runSteps(ctx context.Context, job claimed) error {
 	if err != nil {
 		return err
 	}
-	steps := s.steps(job.plans)
+	steps := s.steps(job.kind, job.plans)
 	for i, st := range steps {
 		if s.cancelRequested(ctx, job.id) {
 			return errCancelled
@@ -542,15 +571,14 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	for _, asset := range looked {
 		status[asset.AssetID] = asset
 	}
-	var missing []string
-	trashed := false
+	var missing, trashed []string
 	for _, id := range ids {
 		asset, ok := status[id]
 		switch {
 		case !ok || asset.Status == photos.GrantMissing:
 			missing = append(missing, id)
 		case asset.Status == photos.GrantTrashed:
-			trashed = true
+			trashed = append(trashed, id)
 		case asset.ObjectID != objects[id]:
 			missing = append(missing, id)
 		}
@@ -558,8 +586,14 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 	if len(missing) > 0 {
 		return &stepNeeds{reason: NeedMissing, missing: missing}
 	}
-	if trashed {
-		return &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
+	if len(trashed) > 0 {
+		wait := &stepWait{reason: WaitTrashed, delay: lifecycleCheck}
+		if job.kind == KindEdit {
+			// Named, so that the shots of the videos in the trash can be
+			// marked for the member.
+			wait.missing = trashed
+		}
+		return wait
 	}
 	return nil
 }
@@ -568,24 +602,94 @@ func (s *Store) checkAssets(ctx context.Context, job claimed) error {
 
 // analysedVideo is one video's analysis as the job uses it.
 type analysedVideo struct {
-	AssetID              string                     `json:"assetId"`
-	ObjectID             string                     `json:"objectId"`
-	Dimensions           int                        `json:"dimensions"`
-	CardsIdentity        string                     `json:"cardsIdentity"`
-	QualityIdentity      string                     `json:"qualityIdentity"`
-	DescriptionsIdentity string                     `json:"descriptionsIdentity"`
-	Identity             string                     `json:"identity"`
-	Duration             float64                    `json:"duration"`
-	Width                int                        `json:"width"`
-	Height               int                        `json:"height"`
-	TakenAt              *time.Time                 `json:"takenAt,omitempty"`
-	Windows              []photos.Window            `json:"windows"`
-	Cards                []Card                     `json:"cards"`
-	Measures             map[string]json.RawMessage `json:"measures"`
+	videoHead
+	Cards    []Card                     `json:"cards"`
+	Measures map[string]json.RawMessage `json:"measures"`
+}
+
+// videoHead is a video's analysis without its cards and their measures:
+// what reading a version needs, its catalog holding the cards as they were
+// planned from (loadPlan).
+type videoHead struct {
+	AssetID              string          `json:"assetId"`
+	ObjectID             string          `json:"objectId"`
+	Dimensions           int             `json:"dimensions"`
+	CardsIdentity        string          `json:"cardsIdentity"`
+	QualityIdentity      string          `json:"qualityIdentity"`
+	DescriptionsIdentity string          `json:"descriptionsIdentity"`
+	Identity             string          `json:"identity"`
+	Duration             float64         `json:"duration"`
+	Width                int             `json:"width"`
+	Height               int             `json:"height"`
+	TakenAt              *time.Time      `json:"takenAt,omitempty"`
+	Windows              []photos.Window `json:"windows"`
+}
+
+// sameWindows reports whether now holds the windows the video was analysed
+// with: of its content, done, by the same model and of the same dimensions.
+func (video analysedVideo) sameWindows(now photos.GrantAnalysis) bool {
+	return now.ObjectID == video.ObjectID && now.Windows == photos.AnalysisDone &&
+		now.Identity == video.Identity && now.Dimensions == video.Dimensions
+}
+
+// windowsChanged reports whether the photo library has made the video's
+// windows again with another model or dimensions since: windows not done
+// yet are not another model, and other content is not the video's.
+func (video analysedVideo) windowsChanged(now photos.GrantAnalysis) bool {
+	return now.ObjectID == video.ObjectID && now.Windows == photos.AnalysisDone && !video.sameWindows(now)
 }
 
 type analysisResult struct {
 	Videos []analysedVideo `json:"videos"`
+}
+
+// allDone reports whether every stage of a video's analysis is done: the
+// one rule for the lookup's states and for the analysis read after it.
+func allDone(states ...photos.AnalysisState) bool {
+	return !slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone })
+}
+
+// allStages are every stage of a video's analysis: what planning reads.
+func allStages(video photos.GrantedAsset) []photos.AnalysisState {
+	return []photos.AnalysisState{video.Windows, video.Cards, video.Quality, video.Descriptions}
+}
+
+// analysisReady answers what keeps a step from reading the analysis of
+// videos, by the stages of it the step reads: the videos too long to
+// analyse and those whose analysis failed need the member, every such video
+// at once, then a missing local model an administrator; a stage not done
+// yet is asked for, again changing nothing for one already queued, and
+// waited for. Nil when every stage is done.
+func (s *Store) analysisReady(ctx context.Context, grantID string, videos []photos.GrantedAsset, stages func(photos.GrantedAsset) []photos.AnalysisState) error {
+	var pending, broken, long []string
+	unavailable := false
+	for _, video := range videos {
+		states := stages(video)
+		switch {
+		case video.Windows == photos.AnalysisFailed && photos.VideoTooLong(video.Duration):
+			long = append(long, video.AssetID)
+		case slices.Contains(states, photos.AnalysisUnavailable):
+			unavailable = true
+		case slices.Contains(states, photos.AnalysisFailed):
+			broken = append(broken, video.AssetID)
+		case !allDone(states...):
+			pending = append(pending, video.AssetID)
+		}
+	}
+	switch {
+	case len(long) > 0:
+		return &stepNeeds{reason: NeedTooLong, missing: long, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
+	case len(broken) > 0:
+		return &stepNeeds{reason: NeedAnalysis, missing: broken}
+	case unavailable:
+		return &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
+	case len(pending) > 0:
+		if err := s.analyzeAssets(ctx, grantID, pending, false); err != nil {
+			return jobGrantError(err, pending)
+		}
+		return &stepWait{reason: WaitAnalysis, delay: waitPoll}
+	}
+	return nil
 }
 
 // analysisKey reads the photo library's analysis of every video: the key
@@ -607,8 +711,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 	}
 	// The states first: reading the analysis itself carries every
 	// window's vector.
-	var pending, broken, long []string
-	unavailable := false
+	var available []photos.GrantedAsset
 	for _, asset := range run.assets {
 		looked, ok := about[asset.assetID]
 		if ok && looked.Status == photos.GrantTrashed {
@@ -617,35 +720,10 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		if !ok || looked.Status != photos.GrantAvailable || looked.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
 		}
-		states := []photos.AnalysisState{looked.Windows, looked.Cards, looked.Quality, looked.Descriptions}
-		switch {
-		case looked.Windows == photos.AnalysisFailed && photos.VideoTooLong(looked.Duration):
-			long = append(long, asset.assetID)
-		case slices.Contains(states, photos.AnalysisUnavailable):
-			unavailable = true
-		case slices.Contains(states, photos.AnalysisFailed):
-			broken = append(broken, asset.assetID)
-		case slices.ContainsFunc(states, func(state photos.AnalysisState) bool { return state != photos.AnalysisDone }):
-			pending = append(pending, asset.assetID)
-		}
+		available = append(available, looked)
 	}
-	// What the member has to take out comes first, every such video at
-	// once; then what only an administrator can change.
-	if len(long) > 0 {
-		return "", &stepNeeds{reason: NeedTooLong, missing: long, err: errors.New("视频超过窗口分析时长上限，请移除此素材")}
-	}
-	if len(broken) > 0 {
-		return "", &stepNeeds{reason: NeedAnalysis, missing: broken}
-	}
-	if unavailable {
-		return "", &stepNeeds{reason: NeedModel, err: errors.New("素材分析所需的本地模型不可用")}
-	}
-	if len(pending) > 0 {
-		// Asking again changes nothing for the videos already queued.
-		if err := s.analyzeAssets(ctx, run.grantID, pending, false); err != nil {
-			return "", jobGrantError(err, pending)
-		}
-		return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
+	if err := s.analysisReady(ctx, run.grantID, available, allStages); err != nil {
+		return "", err
 	}
 	result := analysisResult{}
 	for n, asset := range run.assets {
@@ -655,6 +733,16 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 		}
 		if analysis.ObjectID != asset.objectID {
 			return "", &stepNeeds{reason: NeedMissing, missing: []string{asset.assetID}}
+		}
+		// The analysis may have gone stale since the lookup, as when the
+		// windows are made again for a new model: the library then answers
+		// with its state and leaves out what is no longer current. Planning
+		// from that would leave the video's cards out, or find no footage
+		// at all; the next round's lookup decides again.
+		if !allDone(analysis.Windows, analysis.Cards, analysis.Quality, analysis.Described) {
+			s.logger.InfoContext(ctx, "a video's analysis changed after it was looked up; waiting for it again", "asset", asset.assetID,
+				"windows", analysis.Windows, "cards", analysis.Cards, "quality", analysis.Quality, "descriptions", analysis.Described)
+			return "", &stepWait{reason: WaitAnalysis, delay: waitPoll}
 		}
 		video := analysedVideo{AssetID: asset.assetID, ObjectID: asset.objectID, Identity: analysis.Identity, Dimensions: analysis.Dimensions,
 			CardsIdentity: analysis.CardsIdentity, QualityIdentity: analysis.QualityIdentity, DescriptionsIdentity: analysis.DescriptionsIdentity,
@@ -680,7 +768,7 @@ func (s *Store) analysisKey(ctx context.Context, run *jobRun) (string, error) {
 			id := fmt.Sprintf("v%d-%d", n+1, card.Index)
 			frames := make([]string, len(seen))
 			for i := range seen {
-				frames[i] = fmt.Sprintf("%s/%d", id, i+1)
+				frames[i] = beatID(id, i+1)
 			}
 			video.Cards = append(video.Cards, Card{ID: id, Video: asset.assetID, Start: float64(card.StartMs) / 1000,
 				End: float64(card.EndMs) / 1000, Times: seen, Frames: frames, Answer: answer})
@@ -863,12 +951,9 @@ func (s *Store) plan(ctx context.Context, run *jobRun, step string, ask func(con
 	case errors.Is(err, ErrPlanInvalid):
 		return nil, &stepNeeds{reason: NeedPlanInvalid, err: err}
 	case errors.Is(err, ErrPlanFailed):
-		// The page shows what the planner reported, after "规划出错".
-		said := ""
-		if failure, ok := errors.AsType[*planFailed](err); ok {
-			said = failure.said
-		}
-		return nil, &stepNeeds{reason: NeedPlanError, err: err, said: cmp.Or(said, err.Error())}
+		// Planned as many rounds as a job is, none finished: the job fails
+		// and says why, and the member plans it again with one click (Replan).
+		return nil, &stepFailed{err: err, reason: FailPlanning}
 	case err != nil:
 		return nil, err
 	}
@@ -890,6 +975,15 @@ func (s *Store) shots(ctx context.Context, run *jobRun) (any, error) {
 func voidPlans(ctx context.Context, tx *sql.Tx, jobID string, at time.Time) error {
 	_, err := tx.ExecContext(ctx, "UPDATE plans SET voided_at = ? WHERE job_id = ? AND voided_at IS NULL", sqlitedb.FormatTime(at), jobID)
 	return err
+}
+
+// pins are an edit's slots with their beats (#596), nil for a job that
+// plans.
+func (run *jobRun) pins() []FillPin {
+	if run.settings.Edit == nil {
+		return nil
+	}
+	return run.settings.Edit.Pins
 }
 
 // assetOf is the job's video named in a card.

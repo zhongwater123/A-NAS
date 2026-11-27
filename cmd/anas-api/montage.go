@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accountremoval"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
@@ -20,6 +19,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
+	"github.com/zhongwater123/A-NAS/internal/storeservice"
 )
 
 const montageServiceCommand = "montage-service"
@@ -99,24 +99,9 @@ func configuredMontage(ctx context.Context, config Config, grants montage.Grants
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	upkeep, stopUpkeep := context.WithCancel(ctx)
-	upkept := make(chan struct{})
-	go func() {
-		defer close(upkept)
-		ticker := time.NewTicker(montage.UpkeepInterval)
-		defer ticker.Stop()
-		for {
-			store.Upkeep(upkeep)
-			select {
-			case <-upkeep.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
+	stopUpkeep := storeservice.Every(ctx, montage.UpkeepInterval, store.Upkeep)
 	closeStore := func() {
 		stopUpkeep()
-		<-upkept
 		_ = store.Close()
 	}
 	if !config.MontageEnabled {

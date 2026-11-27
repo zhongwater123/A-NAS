@@ -7,6 +7,7 @@ import type { FamilyRecordInput } from "../api.generated";
 import { session } from "../test/fixtures";
 import { emptySchedule, familyBaby, familyHandlers, familyOverview, familyRecord } from "../test/handlers/family";
 import { asset, photosHandlers, privateLibrary, sharedLibrary } from "../test/handlers/photos";
+import { sizedScrollers } from "../test/layout";
 import { http, server } from "../test/server";
 import { fixToday } from "../test/today";
 import { summarize } from "./FamilyNotices";
@@ -276,24 +277,8 @@ describe("FamilyPanel", () => {
   });
 
   describe("从相册选择", () => {
-    // The photo grid lays out only in an element of some size; jsdom gives
-    // what scrolls the size of a window.
-    const sizes = Object.getOwnPropertyDescriptors(HTMLElement.prototype);
-    const scrolls = (element: Element) => element.isConnected && getComputedStyle(element).overflowY === "auto";
-    beforeEach(() => {
-      for (const name of ["offsetHeight", "offsetWidth", "clientHeight", "clientWidth"])
-        Object.defineProperty(HTMLElement.prototype, name, {
-          configurable: true,
-          get() {
-            return scrolls(this) ? (name.endsWith("Height") ? 600 : 900) : 0;
-          },
-        });
-    });
-    afterEach(() => {
-      for (const name of ["offsetHeight", "offsetWidth"] as const)
-        Object.defineProperty(HTMLElement.prototype, name, sizes[name]);
-      for (const name of ["clientHeight", "clientWidth"] as const) Reflect.deleteProperty(HTMLElement.prototype, name);
-    });
+    // The photo grid lays out only in an element of some size.
+    sizedScrollers({ height: 600, width: 900 });
 
     it("adds photos from both libraries, leaving out what the channel has and copying the member's own", async () => {
       let added: FamilyRecordInput | undefined;

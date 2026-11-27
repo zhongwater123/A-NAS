@@ -61,6 +61,44 @@ describe("the montage center's notices on the desktop", () => {
     expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
   });
 
+  it("says a job failed, with what was written for the member, and plans a failed planning again", async () => {
+    const failed = {
+      kind: "failed",
+      jobId: "job:3",
+      projectId: "p3",
+      project: "古镇",
+      reason: "plan_failed",
+      detail: "规划试了 3 轮都没有完成：out of time",
+      at: "2026-11-25T10:00:00Z",
+    } as const;
+    expect(summarize([failed, { ...failed, reason: undefined, detail: "the fill asked again for v1-0/2" }])).toEqual([
+      "「古镇」没有剪成：规划试了 3 轮都没有完成：out of time",
+      "「古镇」没有剪成",
+    ]);
+    const replanned: string[] = [];
+    server.use(
+      http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [failed] })),
+      http.post("/api/v1/montage/jobs/{jobId}/replan", ({ params, response }) => {
+        replanned.push(params.jobId);
+        return response(200).json({
+          id: params.jobId,
+          projectId: "p3",
+          kind: "generate",
+          state: "queued",
+          steps: [],
+          createdAt: failed.at,
+        });
+      }),
+    );
+    const opened = vi.fn();
+    render(<MontageNotices onOpen={opened} />);
+    expect(await screen.findByText("「古镇」没有剪成：规划试了 3 轮都没有完成：out of time")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重新规划" }));
+    await waitFor(() => expect(replanned).toEqual(["job:3"]));
+    expect(opened).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
+  });
+
   it("tells again when the reason a job waits changes", async () => {
     let detail: string | undefined;
     server.use(

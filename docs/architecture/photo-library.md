@@ -1,6 +1,6 @@
 # 相册技术设计
 
-状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 未开始。模型 revision 与视觉 token 已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量；搜索按向量排序并分两段，AI 标签只在 AI 聚合中展示、不参与搜索（[M2 实施方案](photo-ai.md#ai-聚合)）。部署与验收进度见[当前状态](../status/CURRENT.md)。
+状态：M1 切片 1–6 已实现，切片 7 的本地部分已实现、实机闸门待做；M2 的切片 8、9、11、12 已实现（步骤见 [M2 实施方案](photo-ai.md)），切片 10 已按 [ADR 0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md) 实现为随系统内置安装；M3 的切片 13、14、18 已实现，15–17 未开始。模型 revision 与视觉 token 已按[校准报告](../research/photo-ai-label-calibration.md)冻结，资源参数待实机测量；搜索按向量排序并分两段，AI 标签只在 AI 聚合中展示、不参与搜索（[M2 实施方案](photo-ai.md#ai-聚合)）。部署与验收进度见[当前状态](../status/CURRENT.md)。
 
 本设计落实[相册规格](../specs/photo-library.md)。受管图库的长期边界由 [ADR 0006](../adr/0006-use-a-managed-photo-library.md) 决定，相册服务的身份、存储位置与授权方式由 [ADR 0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md) 决定；模型与 Runtime 的候选证据见[本地照片 AI 研究](../research/photo-ai-model-runtime-selection.md)。
 
@@ -72,7 +72,7 @@ HEIC、动态照片和普通视频经 `photos.Options.Media` 使用隔离 FFmpeg
 - **封面**：缩略图任务对视频对象调用 Worker 的 `frame`，取 `min(时长/10, 1)` 秒处的一帧，在那里取不到时取第一帧；FFmpeg 已按显示矩阵转正。查看器的 1600 px 封面按需渲染、不缓存，与 HEIC 预览相同。
 - **AI 排除**：入队向量、检测、人脸（含按图库重新入队）的 SQL 都带 `notVideo` 条件，所以没有任何代码路径能为视频对象排 AI 任务；AI 进度不计视频对象，搜索只按名称与用户标签匹配视频、也不把它们计入“尚未识别完”，找相似对视频返回不存在；AI 聚合、聚合计数与找相似的候选明确排除视频，即使视频有了向量（例如将来覆盖视频的索引）也不出现。哪些内容对象参与本地 AI 只由一条规则决定（[`video.go`](../../internal/photos/video.go) 的 `inLocalAI`，以及已读出候选上的同名方法）：AI 任务入队、向量索引同步、AI 聚合、找相似与搜索的语义排序都用它，不各自判断视频。成员的 AI 助手（`Principal.Assistant`）看不到视频，这是 Policy 的资产规则（见下文“资产可见性”）。
 - **播放**：`VideoPlayback` 按浏览器报告的能力（`caps`）决定直接播放、转封装或转码，规则与影视中心共用 [`internal/mediaplay`](../../internal/mediaplay/mediaplay.go)（[影视中心的播放](media-center.md#播放)）：相册把导入时读到的第一条音轨当作默认音轨，按 `video/3gpp` 标出 3GPP，没有画质与音轨选择，所以转码总是最高 1080 行、8000 kbps。直接播放读 `/video/original`（QuickTime 与 3GP 以 `video/mp4` 返回，浏览器按 MP4 播放），转换经 Worker 的 `stream` 生成分段 MP4，同时最多两路（`mediaplay.Conversions`），新请求最多等 4 秒，仍无空位时返回 `media_busy`。转换由请求持有，断开即取消。
-- **前台活动**：相册服务把每个仍在服务中的用户请求（播放中的视频、长时间上传）都计为前台使用，`Gate.Use` 结束后才开始 5 分钟静默计时。剪辑中心的分析不等这 5 分钟（[剪辑中心的分析](photo-ai.md#任务与调度)）。
+- **前台活动**：播放中的视频在整个请求期间都算有人在用相册，结束后才开始 5 分钟静默计时；哪些请求算、哪些 AI 工作因此等待，见[门控与三类工作](photo-ai.md#门控与三类工作)。
 - **回滚**：降级到第 12 次迁移前，必须先彻底删除所有视频资产（回收站清空），再删除 `videos` 表并把 `user_version` 设为 12；旧版本不认识视频对象，会把它们当作图片生成缩略图并排入 AI。
 
 ## 持久化与崩溃一致性
@@ -115,7 +115,7 @@ SQLite 任务表保存输入、派生版本（如 `thumbnail/v1`）、状态、�
 
 启动恢复：每次打开相册库、在任务循环开始前，`RecoverJobs` 让崩溃或断电遗留的 `running` 任务立即重新排队，而不是等租约到期，并保留已计的次数，所以反复拖垮进程的原图仍以 `interrupted` 结束、不会在重启间无限重试；`io` 失败的任务（存储错误、Worker 超时，以及修复前被 Worker 缺席记为 `io` 的任务）重新获得 3 次尝试，因为写满的磁盘或过忙的设备此时可能已恢复。`interrupted` 不重新排队。
 
-默认执行策略：
+默认执行策略（M1 时的设计；现在门控怎样对待各类工作，见[门控与三类工作](photo-ai.md#门控与三类工作)）：
 
 - 连续 5 分钟无前台活动后才领取新任务，并发 1，每次只让一个模型族常驻（2026-10-13 起改为按需加载、用完即放，见[物体检测的资源策略](photo-objects.md#资源策略)）。前台活动来自相册与文件 API 的用户请求（不含状态栏等定时轮询）；SMB 传输不经过产品服务，因此同时参考 Host Agent 的磁盘与网络吞吐。
 - 检测到上传、下载、播放、交互、内存压力、I/O 压力或温度上限后立即停止领取新任务；已经开始的单张原子推理允许完成。
@@ -146,8 +146,8 @@ Qwen3-VL-Embedding-2B 继续作为有官方 OpenVINO INT4 路线的成熟质量�
 
 - Go 相册服务 `anas-photos` 负责所有权威状态、权限、任务租约、结果提交和检索组合；`anas-api` 只承担浏览器边界与转发。
 - 成员的 AI 助手不经 `anas-api`，也没有会话：它沙箱中的 MCP 服务以成员本人的 UID 连接相册服务的助手套接字（`ANAS_PHOTOS_ASSISTANT_SOCKET`，未设置时关闭），相册服务按内核给出的对端 UID 经 Host Agent 的 `/v1/accounts/resolve-uid` 确认在用账号，构造带助手标记的只读 `Principal`：只看本人私有图库与共享图库，不带管理员身份与查看授权，不创建私有图库；这个套接字对所有 UID 开放，所以相册服务只在它所在的目录私有于自己时才打开它，由 systemd 只绑定进助手沙箱；Host Agent 的按 UID 查询也默认关闭（`ANAS_PHOTO_ASSISTANT_LOOKUP=1` 才提供）。这个套接字只开放助手工具用到的读取路由，原图与缩略图在服务层也对助手拒绝（`internal/photoservice/assistant.go`，[ADR 0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md) 决定 6）；画面只以视图离开（`GET /assets/{id}/view`，`internal/photos/view.go`）：从像素重新编码、最长边不超过 1600 像素、不带原图元数据的 JPEG，供成员要求时交给模型去看；元数据按需从原图读出（`GET /assets/{id}/metadata`，`internal/photos/photometadata.go`）：EXIF 的全部标签与相机记下的拍摄位置，成员与助手都只能读自己看得到的照片的。
-- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见 [#518](https://github.com/zhongwater123/A-NAS/pull/518)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
-  - **套接字**：systemd 的 `anas-photos-grants.socket` 只给剪辑服务的账号（0600，属主 `a-nas-montage`），以 `grants` 之名交给相册服务；相册服务再核对对端 UID 是 31003。协议是 `unixmsg`，请求与回答的类型在 `internal/photosapi/grants.go`，原片的只读描述符随 `open` 的回答传出。这个套接字上的请求不算有人在用相册，不推迟 AI 工作。
+- 剪辑中心经项目授权读成员的视频（ADR 0038 决定 3，见[剪辑中心实施方案](montage-center.md#项目授权)；[`internal/photoservice/grants.go`](../../internal/photoservice/grants.go)、[`internal/photos/grants.go`](../../internal/photos/grants.go)）：
+  - **套接字**：systemd 的 `anas-photos-grants.socket` 只给剪辑服务的账号（0600，属主 `a-nas-montage`），以 `grants` 之名交给相册服务；相册服务再核对对端 UID 是 31003。协议是 `unixmsg`，请求与回答的类型在 `internal/photosapi/grants.go`，原片的只读描述符随 `open` 的回答传出。这个套接字上的请求哪些算有人在用相册，见[门控与三类工作](photo-ai.md#门控与三类工作)。
     - 一次接受连接失败（如描述符用尽）只退避重试，不让相册服务退出；停止时先等进行中的授权请求答完再关 Catalog，每个请求连同对 Host Agent 的调用至多两分钟。
     - 套接字随相册服务启动（服务单元的 `Wants=`），安装脚本不单独重启它：相册服务在运行时 systemd 拒绝启动它，而助手的套接字随时可能把相册服务拉起来。升级或回滚前，旧版本的 `prerm` 停下它，回到没有它的版本时不留下没人读的监听。
   - **授权身份**：每次按授权主人构造带 `Grant` 标记的 `Principal`：看得到视频、能开原片，只能往主人的私有图库导入（`canImport`），建相册、建目录、复制等其他新增与修改一律拒绝，不带管理员身份与查看授权。登记凭这次请求转发来的会话认人；之后的查询、开原片与去掉资产都按授权主人现在是否在用（Host Agent 的在用成员列表）重新判断：主人停用时回答 `owner_inactive`，与授权已撤销或不存在的 `grant_not_found` 分开，剪辑中心据此等账号恢复而不放弃项目。

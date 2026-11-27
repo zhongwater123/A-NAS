@@ -1,0 +1,37 @@
+/api/v1/network/phone-hotspot:
+  get:
+    operationId: getPhoneHotspot
+    x-anas-posture: admin
+    summary: Read the phone hotspot state and its active connection details
+    responses:
+      "200": { description: Hotspot status, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotStatus" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: updatePhoneHotspot
+    x-anas-posture: admin
+    summary: Start or stop the phone hotspot on the dedicated Wi-Fi radio
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotRequest" } } } }
+    responses:
+      "200": { description: Hotspot operation accepted or the service is unavailable, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotStatus" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+
+/api/v1/network/phone-hotspot/settings:
+  put:
+    operationId: savePhoneHotspotSettings
+    x-anas-posture: admin
+    summary: Save settings for the next time the phone hotspot starts
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotSettingsChange" } } } }
+    responses:
+      "200": { description: Saved settings without the password, content: { application/json: { schema: { $ref: "../components/phone-hotspot.yaml#/schemas/PhoneHotspotSettings" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

@@ -32,9 +32,8 @@
 - **已验证**（2026-11-18，开发者的记录见 [#579](https://github.com/zhongwater123/A-NAS/pull/579) 的提交 `c627d582`、`9a8b031e`）：
   - 第 1 步在 Windows 开发机的 WSL（x86_64）上完整跑过，得到运行环境 `40109f4bba9b6c36.tar.gz`；
   - 用签名软件源里的软件包装进 Debian 13 的 systemd 容器，一首 150 秒的歌分析到 `ready`：分离 88.8 秒、allin1 302.2 秒（7 线程），峰值 2145 MiB。
-- **未验证**：
-  - 实验 NAS 上的第 4、5 步，以及 10 首对照歌在 NAS 的处理器上的结果、用时与峰值内存；
-  - 两个单元装好后的 `systemd-analyze verify`（[测试与验证](../development/testing.md#系统测试)要求警告也算失败）：这个包不在 `make packages` 里，系统测试不装它，装到实验 NAS 后按“验证”一节补。
+  - 2026-11-19，实验 NAS 上的第 4 步（`a-nas` `99446cf5f15a`）：套接字 `active`，`systemd-analyze verify` 没有输出，Worker 没有网络、看不到数据卷，运行环境里没有 madmom 的模型文件。
+- **未验证**：实验 NAS 上的第 5 步，以及 10 首对照歌在 NAS 的处理器上的结果、用时与峰值内存。
 
 ## 步骤
 
@@ -109,6 +108,6 @@
 ## 关联
 
 - 设计：[剪辑中心的配乐](../architecture/montage-music.md)
-- 规格：[剪辑中心规格的“配乐”](https://github.com/zhongwater123/A-NAS/blob/docs/montage-center-design/docs/specs/montage-center.md#配乐)
+- 规格：[剪辑中心规格的“配乐”](../specs/montage-center.md#配乐)
 - ADR：[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)（运行环境与模型的交付做法）、[0034](../adr/0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)
 - 需求：[#559](https://github.com/zhongwater123/A-NAS/issues/559)

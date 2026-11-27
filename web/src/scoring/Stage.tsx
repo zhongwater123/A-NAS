@@ -26,6 +26,19 @@ import {
   type ScoringRatingInput,
   scoringError,
 } from "./api";
+import {
+  asideFor,
+  Bubble,
+  type CoachStep,
+  coachSteps,
+  coachTarget,
+  coachText,
+  following,
+  isAside,
+  type Practice,
+  practiceFor,
+  practiceToken,
+} from "./Coach";
 import { Guide } from "./Guide";
 import { Loupe } from "./Loupe";
 import {
@@ -33,6 +46,8 @@ import {
   formatCount,
   formatScore,
   hiddenKeys,
+  keysFor,
+  lowestScore,
   nudgeScore,
   Outbox,
   type OutboxState,
@@ -40,11 +55,10 @@ import {
   parseScore,
   pickScore,
   Stopwatch,
-  scaleKeys,
   snapScore,
   stageAction,
   typeable,
-  typingRule,
+  typingRuleFor,
 } from "./model";
 import { type Mark, Ruler } from "./Ruler";
 import styles from "./scoring.module.css";
@@ -94,11 +108,11 @@ interface Scored {
 
 type Prepared = Map<string, Promise<void>>;
 
-function prepare(prepared: Prepared, token: string): Promise<void> {
+function prepare(prepared: Prepared, token: string, src: string): Promise<void> {
   let ready = prepared.get(token);
   if (!ready) {
     const image = new Image();
-    image.src = claimImageURL(token);
+    image.src = src;
     const decoded =
       typeof image.decode === "function"
         ? image.decode().catch(() => undefined)
@@ -115,6 +129,12 @@ function sizeOf(element: Element | null) {
   if (!element) return undefined;
   const { width, height } = element.getBoundingClientRect();
   return { width: Math.round(width), height: Math.round(height) };
+}
+
+// timeOn is how long the photo the stopwatch runs for has been looked at. It
+// reads the clock outside the component, which the React purity lint asks.
+function timeOn(watch: Stopwatch): number {
+  return watch.elapsed(performance.now());
 }
 
 // answerOf is what the page sends for an answer given now: the kind and, for
@@ -203,14 +223,24 @@ function useFullscreen() {
 // The photo then glides down to its place on the ruler, and the next one,
 // decoded beforehand, takes its place. Arrows at the sides go back to the
 // last photo, and on once every item has a score.
+//
+// With coach, the stage first walks the rater through scoring a practice
+// photo from the handbook in bubbles (Coach.tsx); the practice photo is
+// scored like any other but its answer is not sent. onCoached tells that the
+// rater finished or skipped the guide. The guide can be seen again from the
+// scoring guide's sheet.
 export function Stage({
   batch,
+  coach = false,
   onBack,
   onRefused,
+  onCoached,
 }: {
   batch: ScoringRaterBatch;
+  coach?: boolean;
   onBack: () => void;
   onRefused: (text: string) => void;
+  onCoached?: () => void;
 }) {
   const outbox = outboxFor(batch.id);
   const dimensions = batch.dimensions;
@@ -220,7 +250,7 @@ export function Stage({
   const scale = batch.scale;
   const scoresHidden = batch.hideDecimals;
   const typing = typeable(scale, scoresHidden);
-  // A batch of 总分 alone shows no item names, as it always did; any other
+  // A batch of 总体 alone shows no item names, as it always did; any other
   // names what is being scored.
   const named = several || dimensions[0].id !== overall;
   // Answers keep the first item in score, and the ruler lands a scored photo
@@ -248,6 +278,10 @@ export function Stage({
   const [zoom, setZoom] = useState<{ token: string; by: "key" | "click"; view?: FullView; failure?: string }>();
   const [pointerAt, setPointerAt] = useState({ x: 0.5, y: 0.5 });
   const [delivery, setDelivery] = useState<OutboxState>(outbox.current());
+  const [practice, setPractice] = useState<Practice | undefined>(() => (coach ? practiceFor(dimensions) : undefined));
+  const [step, setStep] = useState<CoachStep | undefined>(coach ? "photo" : undefined);
+  // The step the guide goes back to after the bubble on 情绪.
+  const resumeStep = useRef<CoachStep>("free");
   const hidden = useHidden();
   const fullscreen = useFullscreen();
   const root = useRef<HTMLDivElement>(null);
@@ -267,6 +301,8 @@ export function Stage({
   // What was set on the photo being scored while the rater went back to the
   // last one; it is there again on the way back.
   const stash = useRef<{ values: Values; item: number; reached: number }>(undefined);
+  // The photo left to change the last one, with the time it had been looked at.
+  const left = useRef<{ token: string; spent: number }>(undefined);
   const fulls = useRef(new Map<string, Promise<FullView>>());
   const pointer = useRef<{ x: number; y: number }>(undefined);
 
@@ -343,23 +379,33 @@ export function Stage({
 
   // The photos in the queue are decoded ahead of their turn.
   useEffect(() => {
-    for (const claim of claims) void prepare(prepared.current, claim.token);
+    for (const claim of claims) void prepare(prepared.current, claim.token, claimImageURL(claim.token));
   }, [claims]);
 
-  const shown = revising ?? claims[0];
+  // The practice photo comes before every other.
+  const shown: ScoringClaim | undefined = practice
+    ? { token: practiceToken, expiresAt: "", width: practice.width, height: practice.height }
+    : (revising ?? claims[0]);
+  const srcOf = (token: string) => (practice && token === practiceToken ? practice.image : claimImageURL(token));
   const shownToken = shown?.token;
+  const shownSrc = shownToken && srcOf(shownToken);
   useEffect(() => {
-    if (!shownToken) return;
+    if (!shownToken || !shownSrc) return;
     let live = true;
-    void prepare(prepared.current, shownToken).then(() => {
+    void prepare(prepared.current, shownToken, shownSrc).then(() => {
       if (!live) return;
       setVisible(shownToken);
-      watch.current.start(performance.now(), true);
+      // A photo the rater comes back to after changing the last one goes on
+      // from the time it had: its time is from when it appeared until it is
+      // answered, not from the return.
+      const back = left.current?.token === shownToken ? left.current : undefined;
+      if (back) left.current = undefined;
+      watch.current.start(performance.now(), true, back?.spent);
     });
     return () => {
       live = false;
     };
-  }, [shownToken]);
+  }, [shownToken, shownSrc]);
   // The time on a photo stands still while the page is hidden or a sheet
   // covers the photo.
   useEffect(() => {
@@ -469,22 +515,82 @@ export function Stage({
   }, [delivery.waiting]);
 
   const ready = Boolean(shown) && visible === shown?.token && !guide && !rest;
-  const typedValue = typed === undefined ? value : parseScore(typed, scale);
+  const typedValue = typed === undefined ? value : parseScore(typed, scale, dimension.id);
   const typedValid = typed === undefined || typedValue !== undefined;
   // What the photo has with what is typed now.
   const withTyped: Values = typedValue === undefined ? values : { ...values, [dimension.id]: typedValue };
   // Back to the last photo also from a finished batch, where none is shown.
-  const canPrevious = previous !== undefined && !revising && !guide && !rest;
+  const canPrevious = previous !== undefined && !revising && !practice && !guide && !rest;
   const canNext = ready && typedValid && complete(withTyped);
 
+  // A photo starts without a score: none is set before it is shown or while
+  // a sheet covers it.
   const setValue = (hundredths: number) => {
-    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale) }));
+    if (!ready) return;
+    setValues((current) => ({ ...current, [dimension.id]: snapScore(hundredths, scale, dimension.id) }));
     setTyped(undefined);
+    scoredPractice();
+  };
+
+  // scoredPractice moves the guide on once the rater scored the practice
+  // photo's first 打分项: to the handbook's answer, where there is one. A score
+  // on a photo to score puts away the bubble that ends the guide.
+  const scoredPractice = () => {
+    if (practice && item === 0 && (step === "photo" || step === "item" || step === "pick")) {
+      setStep(practice.answer ? "feedback" : "acts");
+    }
+    if (!practice && step === "done") setStep(undefined);
+  };
+
+  // endPractice leaves the practice photo for the photos to score, with what
+  // was set on the one the rater was scoring when they asked for the guide
+  // again.
+  const endPractice = () => {
+    setArmed(false);
+    endCompare();
+    setTyped(undefined);
+    setPractice(undefined);
+    const kept = stash.current;
+    stash.current = undefined;
+    setValues(kept?.values ?? {});
+    setItem(kept?.item ?? 0);
+    setReached(kept?.reached ?? 0);
+  };
+
+  const skipCoach = () => {
+    if (practice) endPractice();
+    setStep(undefined);
+    onCoached?.();
+    root.current?.focus({ preventScroll: true });
+  };
+
+  // replay shows the guide again on the practice photo, keeping what is set
+  // on the photo being scored and the time it has had.
+  const replay = () => {
+    if (revising) return;
+    setGuide(false);
+    setArmed(false);
+    endCompare();
+    setZoom(undefined);
+    setTyped(undefined);
+    if (!practice) {
+      stash.current = { values: withTyped, item, reached };
+      // It is asked for from the scoring guide, which covers the photo: the
+      // time is kept for a photo that has shown, not only a ready one.
+      left.current =
+        shown && visible === shown.token ? { token: shown.token, spent: timeOn(watch.current) } : undefined;
+    }
+    setPractice(practiceFor(dimensions));
+    setValues({});
+    setItem(0);
+    setReached(0);
+    setStep("photo");
+    root.current?.focus({ preventScroll: true });
   };
 
   // go moves to another 打分项 of the photo, one already reached.
   const go = (to: number) => {
-    if (to < 0 || to > reached || to === item || !typedValid) return;
+    if (!ready || to < 0 || to > reached || to === item || !typedValid) return;
     setArmed(false);
     endCompare();
     setTyped(undefined);
@@ -496,6 +602,15 @@ export function Stage({
   // to the next photo, or back to the one the rater left to change this one.
   const answer = (kind: ScoringRatingInput["kind"], scores?: Record<string, number>) => {
     if (!shown || !ready) return;
+    // The practice photo's answer goes nowhere; answering it is having
+    // seen the guide, whether or not 开始打分 is pressed after.
+    if (practice) {
+      endPractice();
+      if (step !== undefined) setStep("done");
+      onCoached?.();
+      return;
+    }
+    if (step === "done") setStep(undefined);
     setArmed(false);
     const { body, now } = answerOf(kind, first, scores, watch.current, root.current, image.current);
     outbox.push({ token: shown.token, body });
@@ -547,6 +662,19 @@ export function Stage({
       endCompare();
       setItem(item + 1);
       setReached((furthest) => Math.max(furthest, item + 1));
+      // On the practice photo, 情绪 and a 总体 after the first 打分项 get a
+      // bubble of their own. The other steps are about the first 打分项: moving
+      // on ends them, also when the rater moves on before reaching Enter's.
+      if (practice && step !== undefined && step !== "done") {
+        const moved = isAside(step) ? step : "free";
+        const aside = asideFor(dimensions[item + 1].id);
+        if (aside) {
+          resumeStep.current = isAside(moved) ? "free" : moved;
+          setStep(aside);
+        } else {
+          setStep(isAside(moved) ? resumeStep.current : moved);
+        }
+      }
       return;
     }
     if (complete(withTyped)) answer("score", withTyped);
@@ -571,6 +699,7 @@ export function Stage({
     endCompare();
     setZoom(undefined);
     stash.current = { values: withTyped, item, reached };
+    left.current = ready && shown ? { token: shown.token, spent: timeOn(watch.current) } : undefined;
     setRevising(previous.claim);
     setValues(previous.values ?? {});
     setItem(previous.values ? at : 0);
@@ -617,7 +746,8 @@ export function Stage({
   // startZoom shows the photo at 100%, loading it the first time, while Z
   // is held or until the next click.
   const startZoom = (by: "key" | "click", at?: { x: number; y: number }) => {
-    if (!shown || !ready) return;
+    // The practice photo has no full size at the server.
+    if (!shown || !ready || practice) return;
     const token = shown.token;
     let loading = fulls.current.get(token);
     if (!loading) {
@@ -674,18 +804,22 @@ export function Stage({
     if (target.closest("input, textarea, select")) return;
     const action = stageAction(event.nativeEvent);
     if (!action) return;
+    // With no photo to confirm (a sheet covers it, it is not shown yet, or
+    // the batch is finished), Enter belongs to the button that has the
+    // focus: 继续打分, the guide's close, 返回批次. So does it on the buttons
+    // of a bubble of the guide and of a sheet over the stage.
+    if (action.kind === "confirm" && target.closest("button") && (!ready || target.closest('[role="dialog"]'))) return;
     event.preventDefault();
     event.stopPropagation();
     if (action.kind !== "zoom") setArmed(false);
     switch (action.kind) {
       case "set": {
-        const picked = pickScore(action.score, scale);
+        const picked = pickScore(action.score, scale, dimension.id);
         if (picked !== undefined) setValue(picked);
         break;
       }
       case "nudge":
-        setValues((current) => ({ ...current, [dimension.id]: nudgeScore(current[dimension.id], action.by, scale) }));
-        setTyped(undefined);
+        setValue(nudgeScore(value, action.by, scale));
         break;
       case "item":
         go(item + action.by);
@@ -740,9 +874,27 @@ export function Stage({
   const label = named ? dimension.name : "分数";
   // The keys that move a set score, under the reading.
   const fine = scale === "hundredths" || scale === "tenths";
+  const lowest = lowestScore(dimension.id) / 100;
   const keysHint =
-    (scoresHidden && fine ? hiddenKeys[scale] : scaleKeys[scale]) +
-    (several ? "　↑ ↓ 换项" : fine && !scoresHidden ? "　0–5 整数分" : scale === "whole" ? "　0–5" : "");
+    (scoresHidden && fine ? hiddenKeys[scale] : keysFor(scale, dimension.id)) +
+    (several
+      ? "　↑ ↓ 换项"
+      : fine && !scoresHidden
+        ? `　${lowest}–5 整数分`
+        : scale === "whole"
+          ? `　${lowest}–5`
+          : "");
+  // The bubble of the guide's step, while nothing covers the stage; the
+  // steps on the practice photo wait for it to show.
+  const coaching =
+    step !== undefined && step !== "free" && !guide && !rest && (step === "done" || ready) ? step : undefined;
+  const steps = practice ? coachSteps(dimensions, named, practice) : [];
+  const coachCount = coaching && coaching !== "done" ? `${steps.indexOf(coaching) + 1} / ${steps.length}` : undefined;
+  const nextStep = () => {
+    if (isAside(step)) setStep(resumeStep.current);
+    else if (step) setStep(following(step, named));
+    root.current?.focus({ preventScroll: true });
+  };
   let body;
   if (loading) {
     body = (
@@ -788,8 +940,8 @@ export function Stage({
           <img
             ref={image}
             key={shown.token}
-            src={claimImageURL(shown.token)}
-            alt="要打分的照片"
+            src={srcOf(shown.token)}
+            alt={practice ? "练习用的照片" : "要打分的照片"}
             draggable={false}
             className={styles.scPrint}
             style={fitted}
@@ -798,7 +950,7 @@ export function Stage({
             <Loupe
               view={zoom.view}
               failure={zoom.failure}
-              preview={claimImageURL(shown.token)}
+              preview={srcOf(shown.token)}
               box={{ width: fitted?.inlineSize ?? 0, height: fitted?.blockSize ?? 0 }}
               at={pointerAt}
             />
@@ -813,7 +965,7 @@ export function Stage({
               alt={
                 scoresHidden
                   ? `你打过${named ? dimension.name : ""}的照片`
-                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale)} 分的照片`
+                  : `你打过${named ? dimension.name : ""} ${formatScore(sideScore, scale, dimension.id)} 分的照片`
               }
               draggable={false}
               className={styles.scPrint}
@@ -822,7 +974,7 @@ export function Stage({
             <figcaption className={styles.scCaption}>
               你打过
               {named && <em>{dimension.name}</em>}
-              {!scoresHidden && <b>{formatScore(sideScore, scale)}</b>}
+              {!scoresHidden && <b>{formatScore(sideScore, scale, dimension.id)}</b>}
             </figcaption>
           </figure>
         )}
@@ -844,6 +996,7 @@ export function Stage({
       onKeyDown={act}
       onKeyUp={release}
       onPointerMove={track}
+      data-coach-ring={coaching && coachTarget[coaching] !== "photo" ? coachTarget[coaching] : undefined}
       data-vnas-private="照片打分只由成员本人打分"
     >
       <header className={styles.scTop}>
@@ -857,7 +1010,7 @@ export function Stage({
         <span className={styles.scCount} aria-live="polite">
           已打 <b>{formatCount(rated)}</b> 张
         </span>
-        <button type="button" className={styles.scTextLink} onClick={() => setGuide(true)}>
+        <button type="button" className={styles.scTextLink} data-coach="guide" onClick={() => setGuide(true)}>
           打分标准
         </button>
         <button
@@ -881,7 +1034,9 @@ export function Stage({
       )}
       {delivery.waiting > 0 && delivery.retrying && (
         <div className={`${styles.scBanner} ${styles.scDelivery}`} role="status">
-          有 {delivery.waiting} 个分数还没送达，连接恢复后会自动提交
+          {delivery.noSpace
+            ? `有 ${delivery.waiting} 个分数还没送达：数据卷剩余空间不足，腾出空间后会自动提交`
+            : `有 ${delivery.waiting} 个分数还没送达，连接恢复后会自动提交`}
         </div>
       )}
       <button
@@ -906,11 +1061,11 @@ export function Stage({
       >
         <ChevronRight aria-hidden="true" />
       </button>
-      <div ref={wall} className={`${styles.scWall}${side ? ` ${styles.comparing}` : ""}`}>
+      <div ref={wall} className={`${styles.scWall}${side ? ` ${styles.comparing}` : ""}`} data-coach="photo">
         {body}
       </div>
       <section className={styles.scInstrument} aria-label="打分">
-        <div className={styles.scScale}>
+        <div className={styles.scScale} data-coach="scale">
           {several && (
             <ol className={styles.scItems} aria-label="打分项">
               {dimensions.map((candidate, index) => {
@@ -932,7 +1087,7 @@ export function Stage({
                           ●
                         </b>
                       ) : (
-                        <b>{formatScore(score, scale)}</b>
+                        <b>{formatScore(score, scale, candidate.id)}</b>
                       )}
                     </button>
                   </li>
@@ -948,13 +1103,16 @@ export function Stage({
             active={side?.token}
             arriving={arriving}
             scale={scale}
+            dimension={dimension.id}
             hidden={scoresHidden}
             onChange={(next) => {
               setArmed(false);
               setValue(next);
             }}
             onRelease={() => {
-              if (ready) setArmed(true);
+              // The practice photo waits for Enter, as the guide asks, and
+              // leaves the handbook's answer up to be read.
+              if (ready && !practice) setArmed(true);
             }}
             onCompare={compare}
             rulerRef={ruler}
@@ -962,7 +1120,7 @@ export function Stage({
         </div>
         <div className={styles.scReading}>
           {named && (
-            <div className={styles.scWhich} aria-live="polite">
+            <div className={styles.scWhich} aria-live="polite" data-coach="item">
               <strong key={dimension.id}>{dimension.name}</strong>
               {several && (
                 <small>
@@ -983,7 +1141,7 @@ export function Stage({
                 </span>
               ) : (
                 <>
-                  <span className={styles.scLevel}>{formatScore(value, scale)}</span>
+                  <span className={styles.scLevel}>{formatScore(value, scale, dimension.id)}</span>
                   <span className={styles.scOutOf}>{value / 100} 分</span>
                 </>
               )}
@@ -996,13 +1154,17 @@ export function Stage({
                 value={typed ?? (value === undefined ? "" : formatScore(value, scale))}
                 placeholder="—"
                 inputMode="decimal"
-                aria-label={`${label}，${typingRule[scale]}`}
+                readOnly={!ready}
+                aria-label={`${label}，${typingRuleFor(scale, dimension.id)}`}
                 aria-invalid={!typedValid}
                 onChange={(event) => {
                   setArmed(false);
                   setTyped(event.target.value);
-                  const parsed = parseScore(event.target.value, scale);
-                  if (parsed !== undefined) setValues((current) => ({ ...current, [dimension.id]: parsed }));
+                  const parsed = parseScore(event.target.value, scale, dimension.id);
+                  if (parsed !== undefined) {
+                    setValues((current) => ({ ...current, [dimension.id]: parsed }));
+                    scoredPractice();
+                  }
                 }}
                 onBlur={() => typedValid && setTyped(undefined)}
                 onKeyDown={(event) => {
@@ -1023,27 +1185,30 @@ export function Stage({
               typedValue === undefined ? (
                 scale === "three" ? (
                   "点选一档，或按 1、3、5"
+                ) : scale === "five" ? (
+                  "点选一档，或按 1–5"
                 ) : (
-                  "在数轴上点选，或按 0–5"
+                  `在数轴上点选，或按 ${lowestScore(dimension.id) / 100}–5`
                 )
               ) : (
                 keysHint
               )
             ) : (
-              <span role="alert">{typingRule[scale]}</span>
+              <span role="alert">{typingRuleFor(scale, dimension.id)}</span>
             )}
           </p>
           <button
             type="button"
             className={[styles.scConfirm, item < last && styles.next, armed && styles.armed].filter(Boolean).join(" ")}
             disabled={!ready || typedValue === undefined}
+            data-coach="confirm"
             aria-keyshortcuts="Enter"
             onClick={confirm}
           >
             {item < last ? "下一项" : "确定"}
             <kbd aria-hidden="true">↵</kbd>
           </button>
-          <div className={styles.scActs}>
+          <div className={styles.scActs} data-coach="acts">
             <button
               type="button"
               className={styles.scAct}
@@ -1071,7 +1236,52 @@ export function Stage({
           </div>
         </div>
       </section>
-      {guide && <Guide batch={batch} onClose={() => setGuide(false)} />}
+      {guide && <Guide batch={batch} onClose={() => setGuide(false)} onReplay={revising ? undefined : replay} />}
+      {coaching && (
+        <Bubble
+          key={step}
+          root={root}
+          target={coachTarget[coaching]}
+          count={coachCount}
+          actions={
+            coaching === "done" ? (
+              <>
+                <button type="button" className={styles.scQuiet} onClick={replay}>
+                  重新看引导
+                </button>
+                <button type="button" className={styles.scPrimary} onClick={skipCoach}>
+                  开始打分
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className={styles.scQuiet} onClick={skipCoach}>
+                  跳过引导
+                </button>
+                {coaching !== "pick" && coaching !== "confirm" && (
+                  <button type="button" className={styles.scPrimary} onClick={nextStep}>
+                    下一步
+                  </button>
+                )}
+              </>
+            )
+          }
+        >
+          {coachText(coaching, {
+            scale,
+            first,
+            several,
+            hidden: scoresHidden,
+            lowest,
+            next: item < last,
+            practice,
+            picked:
+              practice?.answer && values[practice.answer.dimension] !== undefined
+                ? (values[practice.answer.dimension] ?? 0) / 100
+                : undefined,
+          })}
+        </Bubble>
+      )}
       {rest && (
         <div className={styles.scOverlay} role="dialog" aria-modal="true" aria-label="休息一下">
           <div className={styles.scRest}>

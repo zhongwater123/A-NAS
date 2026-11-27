@@ -1,0 +1,44 @@
+/* People's avatars, wherever they appear (PersonAvatar.tsx): the desktop and
+   a shared page's own tab, which loads none of the desktop's styles. Any
+   avatar disc may hold the account's picture instead of its initial. */
+.person-avatar {
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+}
+.person-avatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: inherit;
+}
+.person-avatar.pictured {
+  text-shadow: none;
+}
+.avatar-c0 {
+  background: linear-gradient(150deg, #ffbe8a, #ee7a4b);
+  color: #fff;
+}
+.avatar-c1 {
+  background: linear-gradient(150deg, #7cb8ff, #3b74e6);
+  color: #fff;
+}
+.avatar-c2 {
+  background: linear-gradient(150deg, #6fdba5, #22a067);
+  color: #fff;
+}
+.avatar-c3 {
+  background: linear-gradient(150deg, #b59cff, #7350e0);
+  color: #fff;
+}
+.avatar-c4 {
+  background: linear-gradient(150deg, #ff9fbe, #e2517f);
+  color: #fff;
+}
+.avatar-c5 {
+  background: linear-gradient(150deg, #6fd8d0, #16918a);
+  color: #fff;
+}

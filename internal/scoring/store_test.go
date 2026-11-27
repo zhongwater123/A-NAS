@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,6 +56,8 @@ type harness struct {
 	clock  *clock
 	random func() float64
 	mu     sync.Mutex
+	// full stands for a data volume at its reserve.
+	full atomic.Bool
 }
 
 // newHarness takes photos of any size, so that tests render small ones.
@@ -69,6 +72,7 @@ func newHarnessWith(t *testing.T, minLongEdge int) *harness {
 	h.random = func() float64 { return 0.99 }
 	store, err := Open(t.TempDir(), Options{
 		PhotosDir: h.photos, Photos: filesystem.NewRootFileSystem(h.photos, false), Now: h.clock.Now, MinLongEdge: minLongEdge,
+		Admits: func(string, int64) (bool, error) { return !h.full.Load(), nil },
 		Random: func() float64 {
 			h.mu.Lock()
 			defer h.mu.Unlock()
@@ -489,6 +493,42 @@ func TestRepeatsComeFromTheRatersOwnEarlierScoresAndDoNotCount(t *testing.T) {
 	}
 }
 
+// The rater's list calls a batch finished when nothing is left to score in
+// it: the photos the rater holds are still left.
+func TestABatchIsNotFinishedWhileItsRaterHoldsPhotos(t *testing.T) {
+	h := newHarness(t)
+	batch := h.batchOf(t, 2, 1)
+	h.raters(t, "a")
+	ctx := context.Background()
+	finished := func() bool {
+		t.Helper()
+		open, err := h.store.OpenBatches(ctx, "a")
+		if err != nil || len(open) != 1 {
+			t.Fatalf("open batches %+v, %v", open, err)
+		}
+		return open[0].Finished
+	}
+	claims, done, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(claims) != 2 || done {
+		t.Fatalf("claims %+v, finished %v, %v", claims, done, err)
+	}
+	if finished() {
+		t.Fatal("finished with both photos held and none scored")
+	}
+	if _, err := h.store.Submit(ctx, claims[0].Token, "a", score(6)); err != nil {
+		t.Fatal(err)
+	}
+	if finished() {
+		t.Fatal("finished with a photo still held")
+	}
+	if _, err := h.store.Submit(ctx, claims[1].Token, "a", score(7)); err != nil {
+		t.Fatal(err)
+	}
+	if !finished() {
+		t.Fatal("not finished after the last photo")
+	}
+}
+
 func TestOnlyChosenRatersRateAndClosedBatchesHandOutNothing(t *testing.T) {
 	h := newHarness(t)
 	batch := h.batchOf(t, 4, 1)
@@ -659,7 +699,8 @@ func TestCustomDimensionsAreNamedOnceAndExportedWithTheirDescription(t *testing.
 	if err != nil || harmony != (Dimension{ID: "custom_1", Name: "色彩和谐", Description: "颜色是否协调", Custom: true}) {
 		t.Fatalf("made %+v, %v", harmony, err)
 	}
-	for _, taken := range []string{"色彩和谐", "构图"} {
+	// 总分 is what overall was called before.
+	for _, taken := range []string{"色彩和谐", "构图", "总分"} {
 		if _, err := h.store.CreateDimension(ctx, "user:admin", taken, ""); !errors.Is(err, ErrNameTaken) {
 			t.Errorf("%s again: %v", taken, err)
 		}
@@ -705,6 +746,7 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 		{Tenths, []int{0, 350, 500}, []int{347, 5}},
 		{Whole, []int{0, 300, 500}, []int{350, 50}},
 		{Three, []int{100, 300, 500}, []int{0, 200, 400, 350}},
+		{Five, []int{100, 200, 300, 400, 500}, []int{0, 50, 250, 350}},
 	} {
 		for _, score := range c.fits {
 			if !c.scale.fits(score) {
@@ -717,12 +759,114 @@ func TestScalesTakeTheirOwnScores(t *testing.T) {
 			}
 		}
 	}
+	// Levels name 情绪 from calm to intense, the rest from poor to good.
+	if got := Five.describe(Emotion); got != "五档：1 很平静，2 安静，3 中间，4 有张力，5 激烈" {
+		t.Errorf("情绪 on five levels: %s", got)
+	}
+	if got := Five.describe("custom_1"); got != "五档：1 很差，2 较差，3 一般，4 好，5 很好" {
+		t.Errorf("a custom 打分项 on five levels: %s", got)
+	}
+	if got := Three.describe(Emotion); got != "三档：1 平静，3 中间，5 激烈" {
+		t.Errorf("情绪 on three levels: %s", got)
+	}
+	if got := Three.describe(Overall); got != "三档：1 差，3 中，5 好" {
+		t.Errorf("总体 on three levels: %s", got)
+	}
+	// A number line has 情绪 from 1.
+	if got := Hundredths.describe(Emotion); got != "1 到 5，两位小数：1 平静，5 激烈" {
+		t.Errorf("情绪 on the number line: %s", got)
+	}
+	if got := Whole.describe(Overall); got != "0 到 5 的整数" {
+		t.Errorf("总体 on whole points: %s", got)
+	}
+}
+
+func TestEmotionStartsAtOneOnTheNumberLineToo(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	first := h.batchOf(t, 1, 1, Emotion)
+	later := h.batchOf(t, 2, 1, Overall, Emotion)
+	h.raters(t, "a")
+	firstClaims, _, _ := h.store.Claim(ctx, first.ID, "a")
+	laterClaims, _, _ := h.store.Claim(ctx, later.ID, "a")
+	// score(1) is 0.50 and score(2) 1.00; Scores are in hundredths.
+	if _, err := h.store.Submit(ctx, firstClaims[0].Token, "a", score(1)); !errors.Is(err, ErrInvalid) {
+		t.Errorf("情绪 0.50 first: %v", err)
+	}
+	if _, err := h.store.Submit(ctx, laterClaims[0].Token, "a", withScores(6, map[string]int{Emotion: 99})); !errors.Is(err, ErrInvalid) {
+		t.Errorf("情绪 0.99 after 总体: %v", err)
+	}
+	if _, err := h.store.Submit(ctx, firstClaims[0].Token, "a", score(2)); err != nil {
+		t.Fatalf("情绪 1.00 first: %v", err)
+	}
+	// 总体 still starts at 0.
+	if _, err := h.store.Submit(ctx, laterClaims[0].Token, "a", withScores(0, map[string]int{Emotion: 100})); err != nil {
+		t.Fatalf("总体 0 with 情绪 1.00: %v", err)
+	}
+}
+
+func TestTheHandbooksDimensionsComeFirst(t *testing.T) {
+	ids := make([]string, len(BuiltIn))
+	for i, dimension := range BuiltIn {
+		ids[i] = dimension.ID
+		if i < 7 && dimension.Description == "" {
+			t.Errorf("%s has no description", dimension.ID)
+		}
+	}
+	want := []string{"composition", "light_color", "narrative", "subject", Overall, "quality", Emotion, Sharpness, "preference"}
+	if !slices.Equal(ids, want) || BuiltIn[4].Name != "总体" {
+		t.Fatalf("built-in %v, %s fifth", ids, BuiltIn[4].Name)
+	}
+}
+
+func TestAVersionFiveDatabaseKeepsItsCustomNamesUniqueWithTheHandbooksNewNames(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const at = "2026-11-24T09:00:00.000000000Z"
+	statements := []string{schemaV1, schemaV2, schemaV3, schemaV4, schemaV5, "PRAGMA user_version = 5"}
+	for number, name := range []string{"主体", "叙事性", "叙事性（自定义）", "光影", "色彩"} {
+		statements = append(statements, fmt.Sprintf(`INSERT INTO custom_dimensions (id, number, name, description, created_by, created_at)
+			VALUES ('custom_%d', %d, '%s', '', 'user:admin', '%s')`, number+1, number+1, name, at))
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_ = db.Close()
+	photos := t.TempDir()
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	catalogue, err := store.Catalogue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, dimension := range catalogue[len(BuiltIn):] {
+		names = append(names, dimension.ID+" "+dimension.Name)
+	}
+	want := []string{"custom_1 主体（自定义）", "custom_2 叙事性（custom_2）", "custom_3 叙事性（自定义）", "custom_4 光影（自定义）", "custom_5 色彩"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("custom 打分项 %q", names)
+	}
+	// The names the built-in ones had are not for a new custom one.
+	for _, former := range []string{"光影色彩", "叙事意境"} {
+		if _, err := store.CreateDimension(context.Background(), "user:admin", former, ""); !errors.Is(err, ErrNameTaken) {
+			t.Errorf("a custom 打分项 named %s", former)
+		}
+	}
 }
 
 func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	for _, bad := range []BatchInput{{Scale: "stars"}, {Scale: Whole, HideDecimals: true}, {Scale: Three, HideDecimals: true}} {
+	for _, bad := range []BatchInput{{Scale: "stars"}, {Scale: Whole, HideDecimals: true}, {Scale: Three, HideDecimals: true}, {Scale: Five, HideDecimals: true}} {
 		bad.Name, bad.Source, bad.Required, bad.Dimensions = "坏", "坏", 1, []string{Overall}
 		if _, err := h.store.CreateBatch(ctx, "user:admin", bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%q hiding decimals %v accepted: %v", bad.Scale, bad.HideDecimals, err)
@@ -768,7 +912,7 @@ func TestBatchesScoreOnTheirScaleFixedByTheFirstAnswer(t *testing.T) {
 	if err != nil || len(records) != 2 || records[1][3] != "3" || records[1][4] != "5" {
 		t.Fatalf("records %q, %v", records, err)
 	}
-	if manifest.Batch.Scale != Three || manifest.Batch.HideDecimals || !strings.HasPrefix(manifest.Columns[3].Description, "三档：1 差，3 中，5 好") {
+	if manifest.Batch.Scale != Three || manifest.Batch.HideDecimals || !strings.HasSuffix(manifest.Columns[3].Description, "三档：1 差，3 中，5 好；跳过和标记没有分数") {
 		t.Fatalf("manifest %+v", manifest)
 	}
 }
@@ -796,7 +940,7 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	}
 	_ = db.Close()
 	photos := t.TempDir()
-	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Admits: func(string, int64) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -816,9 +960,89 @@ func TestAVersionTwoDatabaseKeepsItsScores(t *testing.T) {
 	if _, err := store.db.Exec("UPDATE batches SET hide_decimals = 1, scale = 'three'"); err == nil {
 		t.Fatal("three levels with their decimals hidden")
 	}
+	// Version 5 rebuilt batches for five levels and kept its photos and scores,
+	// overall now being the 1 added above.
+	if _, err := store.db.Exec("UPDATE batches SET scale = 'five'"); err != nil {
+		t.Fatalf("five levels: %v", err)
+	}
+	if rebuilt, err := store.Stats(context.Background(), "b1"); err != nil || len(rebuilt) != 1 || rebuilt[0].Dimensions[0].Mean != 1 || rebuilt[0].Dimensions[1].Mean != 2.8 {
+		t.Fatalf("after the rebuild %+v, %v", rebuilt, err)
+	}
 	var version int
-	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(schema.Steps) {
 		t.Fatalf("version %d, %v", version, err)
+	}
+}
+
+func TestAVersionFourDatabaseIsCopiedAndKeepsItsCustomNamesUnique(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlitedb.Open(filepath.Join(dir, "scoring.db"), sqlitedb.Options{Durable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const at = "2026-11-17T09:00:00.000000000Z"
+	statements := []string{schemaV1, schemaV2, schemaV3, schemaV4, "PRAGMA user_version = 4"}
+	for number, name := range []string{"画质", "情绪", "情绪（自定义）", "色彩"} {
+		statements = append(statements, fmt.Sprintf(`INSERT INTO custom_dimensions (id, number, name, description, created_by, created_at)
+			VALUES ('custom_%d', %d, '%s', '', 'user:admin', '%s')`, number+1, number+1, name, at))
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatalf("%s: %v", statement, err)
+		}
+	}
+	_ = db.Close()
+	photos := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC) }
+	room := false
+	options := Options{
+		PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Now: now,
+		Admits: func(path string, incoming int64) (bool, error) {
+			if path != dir || incoming <= 0 {
+				t.Fatalf("unexpected backup budget for %q: %d bytes", path, incoming)
+			}
+			return room, nil
+		},
+	}
+	if _, err := Open(dir, options); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("upgrade without space for a backup: %v", err)
+	}
+	if entries, err := os.ReadDir(filepath.Join(dir, "backups")); err != nil || len(entries) != 0 {
+		t.Fatalf("backups after refused upgrade: %v, %v", entries, err)
+	}
+	room = true
+	store, err := Open(dir, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	// The custom ones named like a new built-in one keep their IDs under new
+	// names, by their ID when the first choice is taken.
+	catalogue, err := store.Catalogue(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, dimension := range catalogue[len(BuiltIn):] {
+		names = append(names, dimension.ID+" "+dimension.Name)
+	}
+	if want := []string{"custom_1 画质（自定义）", "custom_2 情绪（custom_2）", "custom_3 情绪（自定义）", "custom_4 色彩"}; !slices.Equal(names, want) {
+		t.Fatalf("custom 打分项 %q", names)
+	}
+	// The database as it was is copied first, for going back to a build of
+	// version 4, which refuses a newer one.
+	copied, err := sqlitedb.Open(filepath.Join(dir, "backups", "scoring-2026-11-24-v4.db"), sqlitedb.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = copied.Close() }()
+	var version int
+	var name string
+	if err := copied.QueryRow("SELECT name FROM custom_dimensions WHERE id = 'custom_1'").Scan(&name); err != nil || name != "画质" {
+		t.Fatalf("the copy's custom_1 %q, %v", name, err)
+	}
+	if err := copied.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("the copy's version %d, %v", version, err)
 	}
 }
 
@@ -837,7 +1061,7 @@ func TestAVersionOneDatabaseScoresOverallAlone(t *testing.T) {
 	}
 	_ = db.Close()
 	photos := t.TempDir()
-	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false)})
+	store, err := Open(dir, Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), Admits: func(string, int64) (bool, error) { return true, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -847,7 +1071,7 @@ func TestAVersionOneDatabaseScoresOverallAlone(t *testing.T) {
 		t.Fatalf("the old batch %+v, %v", batch, err)
 	}
 	var version int
-	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(migrations) {
+	if err := store.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != len(schema.Steps) {
 		t.Fatalf("version %d, %v", version, err)
 	}
 }
@@ -1133,5 +1357,138 @@ func TestTheRulerShowsTheRatersLatestTwelveScoresWithSmallThumbnails(t *testing.
 	}
 	if _, err := h.store.BatchCover(ctx, "no-such-batch"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cover of a batch that does not exist: %v", err)
+	}
+}
+
+// Every write of the module keeps the data volume's reserve (spec, 边界与失败;
+// #487 R1): at the line nothing is claimed, answered, imported, created,
+// rendered or backed up, and it all goes on once space is freed.
+func TestAtTheReserveTheModuleScoresImportsAndRendersNothing(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	batch := h.batchOf(t, 2, 1)
+	h.raters(t, "a")
+	held, _, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(held) != 2 {
+		t.Fatalf("claims %+v, %v", held, err)
+	}
+	write(t, filepath.Join(h.photos, "第二批", "a.png"), picture(t, 16, 12, 200, png.Encode))
+	waiting, err := h.store.CreateBatch(ctx, "user:admin", BatchInput{Name: "第二批", Source: "第二批", Required: 1, Dimensions: []string{Overall}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h.full.Store(true)
+	answer := score(6)
+	if _, err := h.store.Submit(ctx, held[0].Token, "a", answer); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("an answer at the reserve: %v", err)
+	}
+	if _, _, err := h.store.Claim(ctx, batch.ID, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a claim at the reserve: %v", err)
+	}
+	if _, err := h.store.ClaimFull(ctx, held[0].Token, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a full-size render at the reserve: %v", err)
+	}
+	if _, err := h.store.ClaimThumbnail(ctx, held[0].Token, "a"); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a thumbnail at the reserve: %v", err)
+	}
+	// What is already on the volume is still shown.
+	if _, err := h.store.ClaimPreview(ctx, held[0].Token, "a"); err != nil {
+		t.Fatalf("a preview at the reserve: %v", err)
+	}
+	another := BatchInput{Name: "第三批", Source: "第二批", Required: 1, Dimensions: []string{Overall}}
+	if _, err := h.store.CreateBatch(ctx, "user:admin", another); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a new batch at the reserve: %v", err)
+	}
+	if worked, err := h.store.ImportStep(ctx); worked || !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("an import at the reserve: %v, %v", worked, err)
+	}
+	if paused, err := h.store.Batch(ctx, waiting.ID); err != nil || paused.State != "importing" || !paused.WaitingForSpace || paused.Files != 0 {
+		t.Fatalf("the waiting batch %+v, %v", paused, err)
+	}
+	if err := h.store.BackupIfDue(ctx); !errors.Is(err, ErrInsufficientSpace) {
+		t.Fatalf("a backup at the reserve: %v", err)
+	}
+	if backups, _ := os.ReadDir(filepath.Join(h.store.dir, "backups")); len(backups) != 0 {
+		t.Fatalf("backups written at the reserve: %v", backups)
+	}
+	var answers int
+	_ = h.store.db.QueryRow("SELECT count(*) FROM ratings").Scan(&answers)
+	if answers != 0 {
+		t.Fatalf("%d answers kept at the reserve", answers)
+	}
+
+	h.full.Store(false)
+	if result, err := h.store.Submit(ctx, held[0].Token, "a", answer); err != nil || result.Rated != 1 {
+		t.Fatalf("the same answer once space is freed: %+v, %v", result, err)
+	}
+	h.importAll(t)
+	if done, err := h.store.Batch(ctx, waiting.ID); err != nil || done.State != "open" || done.WaitingForSpace || done.Photos != 1 {
+		t.Fatalf("the import once space is freed: %+v, %v", done, err)
+	}
+}
+
+// A rater sees the photo behind a claim while holding it or with an answer
+// for it, and only while chosen (spec, 边界与失败; #487 R2).
+func TestOnlyAHeldOrAnsweredClaimShowsItsPhoto(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	batch := h.batchOf(t, 3, 1)
+	h.raters(t, "a")
+	held, _, err := h.store.Claim(ctx, batch.ID, "a")
+	if err != nil || len(held) != 3 {
+		t.Fatalf("claims %+v, %v", held, err)
+	}
+	if _, err := h.store.Submit(ctx, held[0].Token, "a", score(4)); err != nil {
+		t.Fatal(err)
+	}
+	looks := map[string]func(token string) error{
+		"preview": func(token string) error {
+			_, err := h.store.ClaimPreview(ctx, token, "a")
+			return err
+		},
+		"thumbnail": func(token string) error {
+			_, err := h.store.ClaimThumbnail(ctx, token, "a")
+			return err
+		},
+		"full": func(token string) error {
+			_, err := h.store.ClaimFull(ctx, token, "a")
+			return err
+		},
+	}
+	for name, look := range looks {
+		for _, claim := range held[:2] {
+			if err := look(claim.Token); err != nil {
+				t.Fatalf("%s of a held or answered claim: %v", name, err)
+			}
+		}
+	}
+
+	h.clock.Advance(LeaseDuration + time.Minute)
+	for name, look := range looks {
+		if err := look(held[1].Token); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("%s after the lease ended unanswered: %v", name, err)
+		}
+		if err := look(held[0].Token); err != nil {
+			t.Fatalf("%s of the answered claim after its lease: %v", name, err)
+		}
+	}
+	// A late answer is still taken, and its photo shown again.
+	if _, err := h.store.Submit(ctx, held[2].Token, "a", score(5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := looks["preview"](held[2].Token); err != nil {
+		t.Fatalf("the preview of a late answer: %v", err)
+	}
+
+	if err := h.store.SetRater(ctx, "a", "user:admin", false); err != nil {
+		t.Fatal(err)
+	}
+	for name, look := range looks {
+		for _, claim := range held {
+			if err := look(claim.Token); !errors.Is(err, ErrNotRater) {
+				t.Fatalf("%s for a rater taken off: %v", name, err)
+			}
+		}
 	}
 }

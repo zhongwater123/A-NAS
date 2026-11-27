@@ -28,8 +28,11 @@ Environment=HERMES_WRITE_SAFE_ROOT=/nas/助手 PYTHONDONTWRITEBYTECODE=1
 # and only its scrypt hash is in the sandbox (the member's config.yaml). The Host Agent logs in
 # with the secret for a member's signed-in session (decision 10).
 WorkingDirectory=/nas/助手
+# Under PrivatePIDs= every command is process 1 of a PID namespace of its own, which gets
+# only the signals it handles, so each runs under tini; without it a stop waits out
+# TimeoutStopSec (docs/investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md).
 ExecStart=/usr/bin/tini -- /bin/bash /usr/lib/a-nas/assistant/assistant-start.sh
-ExecStartPost=/bin/bash /usr/lib/a-nas/assistant/wait-port.sh 9119
+ExecStartPost=/usr/bin/tini -- /bin/bash /usr/lib/a-nas/assistant/wait-port.sh 9119
 TimeoutStartSec=120
 # serve flushes its transcripts on SIGTERM and then dies of it; that is a clean stop.
 SuccessExitStatus=143

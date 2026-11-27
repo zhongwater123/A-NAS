@@ -198,7 +198,7 @@ if mountpoint -q /srv/a-nas/data; then rm -f -- /srv/a-nas/data/assistant/*/herm
 # activates runs, and the assistant's socket can start the photo service at
 # any time. The release before stopped the grant socket in its prerm.
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
-  anas-montage.service
+  anas-montage.service anas-workspace.service
 systemctl try-restart 'anas-kiosk@*.service' || true
 # The assistant's model gateway, the waker of its scheduled tasks and the
 # montage center's planner run only while the administrator's key is saved

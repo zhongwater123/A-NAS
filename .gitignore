@@ -15,8 +15,8 @@ Thumbs.db
 *.pem
 
 # Claude Code: per-session worktrees and each developer's own settings,
-# instructions and preview servers; .claude/settings.json and
-# .claude/skills/ are shared and committed
+# instructions and preview servers; .claude/settings.json and the skills'
+# copy in .claude/skills/ are shared and committed (AGENTS.md)
 .claude/worktrees/
 .claude/settings.local.json
 .claude/launch.json

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Hermes Agent spike for the AI assistant (docs/research/hermes-agent-runtime.md).
-# Runs on a Linux development machine with Docker and the local images
+# Runs on a Linux development machine with Docker, Go (sandbox builds broker-spike, the File
+# Broker's executor of the assistants' changes) and the local images
 # anas-ai-dev:trixie (ai/dev.Dockerfile) and anas-systemd:trixie
 # (scripts/build-system-test-image.sh). Nothing here touches a NAS.
 #
@@ -46,6 +47,8 @@
 # Several sessions on one machine share the built runtime in $HERMES_SPIKE_DIR (mounted
 # read-only) but each needs its own container: HERMES_SPIKE_NAME=<name>, and with
 # SPIKE_PRODUCT_UID also HERMES_SPIKE_RUN=<dir> for the sockets.
+# SPIKE_BROKER_NO_RESERVE=1 given to sandbox lets broker-spike write into a disk with less free
+# space than A-NAS keeps (5% of the volume, at least 10 GiB); otherwise it refuses the writes.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 work=${HERMES_SPIKE_DIR:-$HOME/hermes-spike}
@@ -98,6 +101,12 @@ case "${1:-}" in
       chmod 0700 "$run/tokens"
       key_mount+=(-v "$run/assistant:/run/a-nas-assistant" -v "$run/broker:/run/anas-spike-broker" -v "$run/tokens:/run/anas-spike-tokens")
     fi
+    # The File Broker's executor of the assistants' changes, from broker-spike/ in this
+    # checkout: the product's own code, built statically for the container.
+    broker_bin="$work/broker-spike/$name"
+    mkdir -p "$broker_bin"
+    (cd "$here/../.." && CGO_ENABLED=0 go build -trimpath -o "$broker_bin/broker-spike" ./ai/assistant-spike/broker-spike)
+    key_mount+=(-v "$broker_bin:/spike-broker:ro")
     # SPIKE_PHOTOS=1 also runs the photo service with its assistant socket and a seeded
     # library (#113), from photos-spike/ in this checkout; it needs Go with cgo.
     if [[ -n "${SPIKE_PHOTOS:-}" ]]; then
@@ -118,6 +127,7 @@ case "${1:-}" in
     # SPIKE_APPROVAL_TIMEOUT=<seconds> shortens Hermes's wait for the member's approval.
     docker exec -e SPIKE_MODEL="${SPIKE_MODEL:-}" -e SPIKE_UPSTREAM="${SPIKE_UPSTREAM:-}" -e SPIKE_NO_CACHE="${SPIKE_NO_CACHE:-}" -e SPIKE_CHANNEL="${SPIKE_CHANNEL:-}" \
       -e SPIKE_PRODUCT_UID="${SPIKE_PRODUCT_UID:-}" -e SPIKE_APPROVAL_TIMEOUT="${SPIKE_APPROVAL_TIMEOUT:-}" \
+      -e SPIKE_BROKER_NO_RESERVE="${SPIKE_BROKER_NO_RESERVE:-}" \
       "$name" bash /spike/setup.sh 2>&1 | tail -3
     docker exec "$name" systemctl start anas-assistant-probe@alice.service
     docker exec "$name" journalctl -u anas-assistant-probe@alice.service -o cat --no-pager | grep -E '^(PASS|FAIL|INFO)'
@@ -141,7 +151,7 @@ case "${1:-}" in
     docker rm -f "$name"
     ;;
   *)
-    sed -n '2,40p' "$0"
+    sed -n '2,42p' "$0"
     exit 2
     ;;
 esac

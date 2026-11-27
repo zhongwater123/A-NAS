@@ -413,11 +413,12 @@ func (s *ImageService) check(ctx context.Context, state *State, takePush bool) e
 			return nil
 		}
 	}
-	if candidate.Version == "" || slices.Contains(state.Rejected, candidate.Version) {
+	newer := candidate.Version != "" && !slices.Contains(state.Rejected, candidate.Version)
+	keepWarning := keepRollbackWarning(ctx, state, newer, s.assess)
+	if !newer || keepWarning {
 		state.LastCheckProblem = nil
 		state.Candidate, state.DownloadBytes, state.DownloadedBytes, img.Candidate, img.Restart = "", 0, 0, "", false
-		if state.Phase != PhaseRolledBack ||
-			(state.Problem != nil && state.Problem.Code == ProblemRollback && s.assess(ctx) == nil) {
+		if !keepWarning {
 			state.Phase, state.Problem = PhaseUpToDate, nil
 		}
 		return nil

@@ -65,6 +65,12 @@ if [[ "${1:-}" != --inside ]]; then
   rm -rf -- "$work"
   trap 'rm -rf -- "$work"' EXIT
   bash "$repo/scripts/apt-repository.sh" key "$work/gnupg" >/dev/null
+  # Exercise internal model packaging outside the signed repository.
+  scorer=$(bash "$repo/scripts/build-content-packages.sh" --stand-in --aesthetic-scorer-only "$work/scorer" "$repo/build")
+  dpkg-deb -x "$work/scorer/${scorer}_1_all.deb" "$work/scorer/files"
+  scorer_sha=$(jq -er .sha256 "$repo/deploy/models/qwen35-4b-aesthetic-scorer.json")
+  scorer_dir=$work/scorer/files/opt/a-nas/models/$scorer_sha
+  [[ -s "$scorer_dir/model/head.pt" && -s "$scorer_dir/licenses/Qwen3.5-4B-LICENSE.txt" ]]
   bash "$repo/scripts/build-packages.sh" "$work/previous" "$version~previous" "$repo/build" >/dev/null
   # The old package boundary predates a-nas-docker-policy. A previous package
   # made entirely by today's builder would otherwise mask its removal on a
@@ -82,6 +88,9 @@ if [[ "${1:-}" != --inside ]]; then
   legacy_product=$work/legacy-product
   previous_product=("$work"/previous/a-nas_*.deb)
   dpkg-deb --raw-extract "${previous_product[0]}" "$legacy_product"
+  # This target predates the hotspot and has no matching radio package.
+  sed -i '/^Suggests: a-nas-hotspot-radio/d' "$legacy_product/DEBIAN/control"
+  rm "$legacy_product/usr/lib/systemd/system/anas-phone-hotspot.service" "$legacy_product/usr/lib/a-nas/phone-hotspot"
   # Nor has it the photo service's grant socket for the montage center, the
   # montage center's socket for planning, or its planner.
   rm "$legacy_product/usr/lib/systemd/system/anas-montage.service" \
@@ -105,6 +114,16 @@ if [[ "${1:-}" != --inside ]]; then
   ! grep -rqE 'anas-montage|anas-photos-grants' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
     "$legacy_product/usr/lib/systemd/system" ||
     { echo "the previous release still names the montage service or its grant socket" >&2; exit 2; }
+  # Nor the shared workspace (ADR 0040). Its account stays for the same reason
+  # as the montage account's.
+  rm "$legacy_product/usr/lib/systemd/system/anas-workspace.service" \
+    "$legacy_product/usr/lib/systemd/system/multi-user.target.wants/anas-workspace.service"
+  sed -i -e 's/ *anas-workspace\.service//g' -e "s/ 'anas-workspace workspace\/workspace\.db workspace'//" \
+    -e 's/ a-nas-workspace:31004//' -e 's/ workspace\/workspace\.db//' \
+    "$legacy_product"/DEBIAN/{preinst,postinst,prerm} "$legacy_product/usr/sbin/a-nas-check"
+  ! grep -rqE 'anas-workspace|workspace\.db' "$legacy_product/DEBIAN" "$legacy_product/usr/sbin/a-nas-check" \
+    "$legacy_product/usr/lib/systemd/system" ||
+    { echo "the previous release still names the workspace service" >&2; exit 2; }
   dpkg-deb --root-owner-group -Zxz --build "$legacy_product" "${previous_product[0]}" >/dev/null
   install -d "$work/next-programs"
   cp "$repo/build/anas-host-agent" "$repo/build/anas-container-agent" "$work/next-programs/"
@@ -117,10 +136,12 @@ if [[ "${1:-}" != --inside ]]; then
   done
   upstream=$(bash "$repo/scripts/fetch-upstream-packages.sh")
   mapfile -t upstream <<<"$upstream"
+  radio=$(bash "$repo/scripts/fetch-upstream-packages.sh" "$repo/build/upstream" "$repo/deploy/upstream/hotspot-radio-amd64.json")
+  mapfile -t radio <<<"$radio"
   bash "$repo/scripts/apt-repository.sh" publish "$work/repository" dev "$work/gnupg" \
-    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy}_*.deb \
-    "$work"/next/a-nas{,-host,-docker-policy}_*.deb \
-    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" >/dev/null
+    "$work"/previous/a-nas{,-host}_*.deb "$repo"/build/packages/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$work"/next/a-nas{,-host,-docker-policy,-hotspot-radio}_*.deb \
+    "$repo/$content"/*.deb "$work"/keyring/*.deb "${upstream[@]}" "${radio[@]}" >/dev/null
   assistant=()
   if [[ -n "${ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME:-}" ]]; then
     [[ -f "$ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME" ]] || { echo "ANAS_SYSTEM_TEST_ASSISTANT_RUNTIME must name runtime.tar.gz" >&2; exit 2; }
@@ -193,7 +214,7 @@ next=$version+next
 # Each model role's manifest, as $ai/ROLE.json, for the checks below.
 ai=/tmp/ai-manifests
 install -d "$ai"
-for role in "${ai_roles[@]}"; do
+for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   cp "/src/deploy/models/${role##*:}.json" "$ai/${role%%:*}.json"
 done
 models_kept=$(for role in "${ai_roles[@]}"; do jq -r .sha256 "/src/deploy/models/${role##*:}.json"; done | sort -u | wc -l)
@@ -213,9 +234,12 @@ else
     > /etc/systemd/system/anas-ai.service.d/system-test.conf
 fi
 # AI starts once the photo library has gone unused for this long, so that the
-# test sees a photo organised in the Worker's sandbox.
+# test sees a photo organised in the Worker's sandbox; and the photo service
+# lets its vector index connection go after 5 idle seconds instead of a
+# minute, so that the test sees the instance stop without waiting it out.
 install -d /etc/systemd/system/anas-photos.service.d
-printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s\n' > /etc/systemd/system/anas-photos.service.d/system-test.conf
+printf '[Service]\nEnvironment=ANAS_PHOTOS_AI_QUIET_PERIOD=2s ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT=5s\n' \
+  > /etc/systemd/system/anas-photos.service.d/system-test.conf
 # A deleted account is removed after 10 seconds instead of 30 days, so that
 # the test sees it go (docs/specs/account-enable-and-delete.md).
 install -d /etc/systemd/system/anas-api.service.d
@@ -317,7 +341,18 @@ apt_install() {
     apt-get install -y --no-install-recommends --allow-downgrades -o Dpkg::Options::=--force-confold \
       "a-nas=$1" "a-nas-host=$1" a-nas-docker-policy >>"/tmp/$2.log" 2>&1
 }
-installed_at=$(date '+%Y-%m-%d %H:%M:%S')
+# journal_mark: the cursor of the journal's last entry. What is read after it came
+# later; a time to the second (--since) also takes what came earlier in the
+# same second. export prints __CURSOR whatever --output-fields asks for. With
+# no cursor it fails: every read after an empty mark would fail, and a check
+# that a line is absent would pass without looking.
+journal_mark() {
+  local cursor
+  cursor=$(journalctl -n 1 -o export --output-fields=__CURSOR --no-pager | sed -n 's/^__CURSOR=//p')
+  [[ -n "$cursor" ]] || { echo "no journal cursor to mark" >&2; return 1; }
+  printf '%s\n' "$cursor"
+}
+installed_at=$(journal_mark)
 for release in "$previous" "$version"; do
   if ! apt_install "$release" "install-$release" || ! a-nas-check >"/tmp/check-$release.log" 2>&1; then
     tail -n 40 "/tmp/install-$release.log" "/tmp/check-$release.log"
@@ -433,8 +468,32 @@ running() {
   systemctl status --no-pager --lines=10 "$1"
   return 1
 }
+# journal_wait SECONDS MARK TEXT MATCH...: within SECONDS (0: one look), an
+# entry after MARK that MATCH selects (-u UNIT or -t IDENTIFIER) says TEXT.
+# Returns 1 when none does and 2 when the journal cannot be read. The log is
+# read whole before grep looks: piped into grep -q, journalctl dies of SIGPIPE
+# once grep stops at an early match, and pipefail reports the line missing.
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_has() { journalctl -u "$1" --since "$2" -o cat --no-pager | grep -Fq "$3"; }
+journal_wait() {
+  local seconds=$1 mark=$2 text=$3 try log
+  shift 3
+  for ((try = 0; ; try++)); do
+    log=$(journalctl "$@" --after-cursor "$mark" -o cat --no-pager) || return 2
+    grep -qF -- "$text" <<<"$log" && return 0
+    ((try < seconds * 2)) || return 1
+    sleep 0.5
+  done
+}
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_has() { journal_wait 0 "$2" "$3" -u "$1"; } # UNIT MARK TEXT: the unit logged TEXT after MARK
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_shows() { journal_wait 180 "$2" "$3" -u "$1"; } # UNIT MARK TEXT: within three minutes; the vector sync waits, as AI work does, while the device's other work is under pressure
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+journal_lacks() { # UNIT MARK TEXT: the unit has not logged TEXT, and its journal could be read
+  local status=0
+  journal_has "$@" || status=$?
+  ((status == 1))
+}
 # smbd_listens_only_on_its_interfaces: within 30 s, smbd listens on the SMB
 # interface's address and on no wildcard address; otherwise prints where it
 # listens. smbd tells systemd it is ready before it opens its listening
@@ -499,7 +558,7 @@ check "the vector index's socket is on after the takeover" \
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
 reinstall() {
   local since
-  since=$(date '+%Y-%m-%d %H:%M:%S')
+  since=$(journal_mark) || return 1
   if ! apt-get install -y --no-install-recommends --allow-downgrades --reinstall \
     "a-nas=${2:-$version}" "a-nas-host=${2:-$version}" >"/tmp/$1.log" 2>&1; then
     echo "  apt failed; the end of /tmp/$1.log:"
@@ -507,8 +566,7 @@ reinstall() {
     return 1
   fi
   for _ in $(seq 1 150); do
-    curl -fsS "$api/healthz" >/dev/null 2>&1 &&
-      journalctl -u anas-photos --since "$since" -o cat --no-pager | grep -Fq 'photo service ready' && return
+    curl -fsS "$api/healthz" >/dev/null 2>&1 && journal_has anas-photos "$since" 'photo service ready' && return
     sleep 0.2
   done
   echo "  apt finished, but the services were not ready within 30 seconds:"
@@ -578,14 +636,13 @@ check "systemd accepts every installed A-NAS unit" \
 # restarts it, so that it listens only on the loopback and the SMB interface
 # (docs/investigations/2026-11-04-smbd-starts-before-dhcp-address.md). Waiting
 # for that restart also keeps it from landing on the checks below.
-for _ in $(seq 1 60); do journal_has anas-host-agent "$installed_at" 'data volume reconciled' && break; sleep 1; done
 check "the Host Agent writes its Samba configuration once it serves" \
-  journal_has anas-host-agent "$installed_at" 'data volume reconciled'
+  journal_wait 60 "$installed_at" 'data volume reconciled' -u anas-host-agent
 check "smbd then listens only on the loopback and SMB interface's addresses" smbd_listens_only_on_its_interfaces
 
 # --- Every service runs under its production unit (issue #38).
 # One unit per check: systemctl is-active A B succeeds when any of them is (#423).
-for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage smbd; do
+for unit in anas-host-agent anas-photos anas-api anas-shares anas-family anas-montage anas-workspace smbd; do
   check "services are active: $unit" systemctl is-active --quiet "$unit"
 done
 check "Host Agent keeps CAP_SETUID and CAP_SETGID" has_capabilities anas-host-agent
@@ -659,7 +716,13 @@ late_dropin=/etc/systemd/system/smbd.service.d/zz-system-test-late-address.conf
 ip link add anas-late0 type veth peer name anas-late1
 install -d /etc/systemd/system/smbd.service.d
 ip link set anas-late0 up
-sed "s/\b$iface\b/anas-late0/g" /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf >"$late_dropin"
+# The product waits 20 s for the address and tries again 5 s later; the
+# test's copy waits 5 s and tries again after 1 s.
+{
+  sed -e "s/\b$iface\b/anas-late0/g" -e 's/timeout 20 sh/timeout 5 sh/' /run/systemd/generator/smbd.service.d/a-nas-lan-address.conf
+  echo 'RestartSec=1s'
+} >"$late_dropin"
+check "the test's copy of smbd's address wait is shorter" grep -Fq 'timeout 5 sh' "$late_dropin"
 systemctl daemon-reload
 systemctl stop smbd
 systemctl start --no-block smbd
@@ -735,12 +798,55 @@ check "member sharing works through production service sandboxes" sharing_smoke
 # pins. Docker waits for the address pool the App Center's runbook gives it
 # (ADR 0013), then the container agent reaches it.
 upstream_pinned() {
-  local name pinned
+  local name pinned lock=${1:-/src/deploy/upstream/packages.json}
   while read -r name pinned; do
     [[ "$(dpkg-query -W -f='${Version}' "$name" 2>>"$hidden")" == "$pinned" ]] || { echo "$name is not $pinned" >>"$hidden"; return 1; }
-  done < <(jq -r '.packages[] | "\(.name) \(.version)"' /src/deploy/upstream/packages.json)
+  done < <(jq -r '.packages[] | "\(.name) \(.version)"' "$lock")
 }
 check "apt installed Docker and Caddy as A-NAS's repository pins them" upstream_pinned
+check "a standard install leaves the hotspot radio package optional" \
+  test "$(dpkg-query -W -f='${db:Status-Status}' a-nas-hotspot-radio 2>/dev/null || true)" != installed
+check "apt installs the hotspot radio package using only the signed A-NAS repository" \
+  quiet apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/a-nas.sources -o Dir::Etc::sourceparts=- \
+  install -y --no-install-recommends --no-remove "a-nas-hotspot-radio=$version"
+check "the hotspot radio package installs the pinned Debian dependencies" \
+  upstream_pinned /src/deploy/upstream/hotspot-radio-amd64.json
+check "the hotspot radio package supplies the MT7612U firmware and iw" \
+  bash -c 'test -r /usr/lib/firmware/mt7662.bin && test -r /usr/lib/firmware/mt7662_rom_patch.bin && iw --version'
+hotspot="$api/api/v1/network/phone-hotspot"
+check "the packaged phone hotspot starts off" \
+  test "$(curl -fsS -b /tmp/owner.jar "$hotspot" | jq -r .state)" = off
+check "a household member cannot read the phone hotspot" \
+  test "$(status_of -b /tmp/alice.jar "$hotspot")" = 403
+check "the administrator can save hotspot settings for the next start" \
+  jq -e '.ssid == "Guest Wi-Fi" and .passwordConfigured and .portal and (has("password") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+    -X PUT -d '{"ssid":"Guest Wi-Fi","password":"test-fixture-only","portal":true}' "$hotspot/settings")"
+check "the settings survive a fresh request while the hotspot is still off" \
+  jq -e '.state == "off" and .settings.ssid == "Guest Wi-Fi" and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "the hotspot settings file belongs to root alone" \
+  test "$(stat -c '%a:%u' /var/lib/a-nas-host/phone-hotspot.json)" = 600:0
+hotspot_routes=$(ip -4 route show default)
+check "the administrator can request the packaged hotspot" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":true}' "$hotspot"
+for _ in $(seq 1 50); do
+  [[ "$(systemctl show -p ActiveState --value anas-phone-hotspot.service)" != failed ]] || break
+  sleep 0.2
+done
+check "the packaged hotspot reports missing hardware without connection details" \
+  jq -e '.state == "failed" and (.reason == "no_wired_uplink" or .reason == "no_idle_radio") and (has("connection") | not)' \
+  <<<"$(curl -fsS -b /tmp/owner.jar "$hotspot")"
+check "a failed hotspot start preserves the host default route" test "$(ip -4 route show default)" = "$hotspot_routes"
+check "a failed hotspot start leaves no hotspot filter table" \
+  bash -c '! nft list tables | grep -Fxq "table inet anas_phone_hotspot"'
+check "the hotspot HTTPS proxy isolates wired routes and survives a host ruleset reload" \
+  quiet env ANAS_PHONE_HOTSPOT_NETWORK_TEST=1 PYTHONDONTWRITEBYTECODE=1 unshare --net \
+  python3 -m unittest discover -s /src/deploy/network
+check "the administrator can stop the packaged hotspot after a failed start" \
+  quiet curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -X PUT -d '{"enabled":false}' "$hotspot"
 check "Docker waits for its address pool" \
   bash -c '! systemctl is-active --quiet docker.service docker.socket && ! ip link show docker0 >/dev/null 2>&1'
 systemctl start docker.socket docker.service >>"$hidden" 2>&1 || true
@@ -959,13 +1065,12 @@ check "the local console reaches the terminal too" \
 check "a member's session gets no shell" terminal_refused "$lan" /tmp/lan.jar
 # The shell runs in a scope of its own, so what it logs is not the Host
 # Agent's, even under its name (issue #166).
-forged_at=$(date '+%Y-%m-%d %H:%M:%S')
+forged_at=$(journal_mark)
 scope_output=$(terminal "$lan" /tmp/owner-lan.jar $'echo "cgroup:$(cat /proc/self/cgroup)"\nlogger -t anas-host-agent "forged by a terminal"\nunshare --user true 2>/dev/null; echo "unshare:$?"\nexit 0\n' || true)
 check "the shell runs in a scope of its own" grep -Eqx 'cgroup:0::/(.*/)?anas-terminal-owner-[0-9]+\.scope' <<<"$scope_output"
 check "the shell cannot create namespaces" grep -qx 'unshare:[1-9][0-9]*' <<<"$scope_output"
-check "what a shell logs reaches the journal" \
-  bash -c "for _ in \$(seq 1 20); do journalctl -t anas-host-agent --since '$forged_at' -o cat --no-pager | grep -Fq 'forged by a terminal' && exit 0; sleep 0.2; done; exit 1"
-check "but not as the Host Agent's" fails journal_has anas-host-agent "$forged_at" 'forged by a terminal'
+check "what a shell logs reaches the journal" journal_wait 4 "$forged_at" 'forged by a terminal' -t anas-host-agent
+check "but not as the Host Agent's" journal_lacks anas-host-agent "$forged_at" 'forged by a terminal'
 check "nor in the Host Agent's log in Settings" \
   test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/system-logs?service=host-agent&q=forged" | jq '.items | length')" = 0
 
@@ -1009,13 +1114,75 @@ check "the montage service's sandbox opens no network socket" systemctl start an
 rm /etc/systemd/system/anas-montage-probe.service
 systemctl daemon-reload
 
+# --- Shared workspace (ADR 0040): its own identity and store, off the
+# network. The Product Service forwards /api/v1/workspace with the session
+# and /api/v1/workspace/mcp with a member's agent token; the workspace service
+# confirms either with the Host Agent itself.
+check "workspace store belongs to the workspace service alone" \
+  test "$(stat -c '%a %U' "$data/workspace")" = "700 a-nas-workspace"
+check "Product Service account cannot list the workspace store" denied a-nas ls "$data/workspace"
+check "the workspace socket is the service's, for the Product Service's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-workspace/workspace.sock):$(stat -c '%a %G' /run/a-nas-workspace)" = "660 a-nas-workspace:a-nas-workspace:750 a-nas-workspace"
+check "its session lookup, which also resolves agent tokens, is for the workspace account's group" \
+  test "$(stat -c '%a %U:%G' /run/a-nas-workspace-sessions)" = "750 root:a-nas-workspace"
+check "the photo service cannot ask it about agent tokens" \
+  denied a-nas-photos python3 -c "$unix_connect" /run/a-nas-workspace-sessions/workspace.sock
+check "without a session the workspace answers 401" test "$(status_of "$api/api/v1/workspace/pages")" = 401
+check "the administrator may use the workspace" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace" | jq -r .admin)" = true
+check "a member the administrator has not added is not shown it" \
+  test "$(status_of -b /tmp/alice.jar "$api/api/v1/workspace"):$(status_of -b /tmp/alice.jar "$api/api/v1/workspace/pages")" = 404:403
+printf '<!doctype html>\n<html><head><title>System test PRD</title></head>\n<body><button>Order</button></body></html>\n' >/tmp/prd.html
+workspace_page=$(curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: text/html' \
+  --data-binary @/tmp/prd.html "$api/api/v1/workspace/pages?name=prd.html" | jq -r .id || true)
+check "the administrator uploads a page" test -n "$workspace_page" -a "$workspace_page" != null
+check "the page is served in a sandbox of its own with no network" bash -c "curl -fsS -D - -o /dev/null -b /tmp/owner.jar \
+  '$api/api/v1/workspace/pages/$workspace_page/versions/1/view' | grep -qi '^content-security-policy: sandbox allow-scripts; default-src .none.'"
+curl -fsS -b /tmp/owner.jar -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' \
+  -d '{"name":"system test","kind":"claude-code"}' "$api/api/v1/session/agent-tokens" | jq -r .token >/tmp/workspace-token || true
+check "the administrator connects an agent" grep -Eqx 'anas_ws_[0-9a-f]{64}' /tmp/workspace-token
+# mcp BODY [CURL OPTION...]: a JSON-RPC request to the MCP endpoint as a
+# member's agent sends it, with the token in /tmp/workspace-token.
+mcp() {
+  curl -sS -H "Authorization: Bearer $(cat /tmp/workspace-token)" -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-06-18' "${@:2}" -d "$1" "$api/api/v1/workspace/mcp"
+}
+# workspace_tool NAME ARGUMENTS: the text of the tool's answer.
+workspace_tool() {
+  mcp "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" |
+    jq -er '.result | select(.isError != true) | .content[0].text'
+}
+check "the agent lists the pages through the Product Service" grep -q 'System test PRD' <(workspace_tool workspace_list_pages '{}' || true)
+workspace_tool workspace_edit_page "{\"page\":\"$workspace_page\",\"base_version\":1,\"note\":\"把按钮改成 Buy\",\"edits\":[{\"old_text\":\"<button>Order</button>\",\"new_text\":\"<button>Buy</button>\"}]}" >/dev/null || true
+check "the agent's edit is a new version, saved by the administrator through it" \
+  test "$(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace/pages/$workspace_page" | jq -r '.latest | "\(.version) \(.via.kind) \(.note)"')" = "2 claude-code 把按钮改成 Buy"
+check "the new version holds the change" \
+  grep -q '<button>Buy</button>' <(curl -fsS -b /tmp/owner.jar "$api/api/v1/workspace/pages/$workspace_page/versions/2/file" || true)
+check "without a token the MCP endpoint answers 401 and asks for a Bearer token" \
+  bash -c "curl -sS -D - -o /dev/null -H 'Content-Type: application/json' -d '{}' '$api/api/v1/workspace/mcp' | grep -qi '^www-authenticate: Bearer'"
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+mcp_status() { mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' -o /dev/null -w '%{http_code}' "$@"; }
+check "the MCP endpoint answers the agent" test "$(mcp_status)" = 200
+check "a browser cannot use the MCP endpoint, even with a token" test "$(mcp_status -H "Origin: $api")" = 403
+check "a session cookie does not open the MCP endpoint" test "$(status_of -b /tmp/owner.jar -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' "$api/api/v1/workspace/mcp")" = 401
+check "an agent token does not open the desktop's routes" \
+  test "$(status_of -H "Authorization: Bearer $(cat /tmp/workspace-token)" "$api/api/v1/workspace/pages")" = 401
+sed -e 's|^ExecStart=.*|ExecStart=/usr/bin/python3 /usr/local/lib/anas-montage-probe.py|' \
+  -e 's|^Type=.*|Type=oneshot|' -e '/^Restart/d' -e '/^RuntimeDirectory/d' \
+  /usr/lib/systemd/system/anas-workspace.service > /etc/systemd/system/anas-workspace-probe.service
+systemctl daemon-reload
+check "the workspace service's sandbox opens no network socket" systemctl start anas-workspace-probe.service
+rm /etc/systemd/system/anas-workspace-probe.service
+systemctl daemon-reload
+
 # --- A data volume the Host Agent cannot reconcile leaves it serving (issue
 # #166). Btrfs turns a volume read-only when it finds errors; a remount stands
-# in. The photo, share, family and montage services hold databases open for
-# writing on it, which a read-only remount refuses.
+# in. The photo, share, family, montage and workspace services hold databases
+# open for writing on it, which a read-only remount refuses.
 entries /tmp/alice.jar "$alice_private" >/dev/null || true
 scopes_before=$(systemctl list-units --plain --no-legend 'anas-files-*' 'anas-terminal-*' | awk '{print $1}')
-systemctl stop anas-photos anas-shares anas-family anas-montage
+systemctl stop anas-photos anas-shares anas-family anas-montage anas-workspace
 check "the data volume remounts read-only" mount -o remount,ro "$data"
 systemctl start anas-montage
 montage_unavailable() {
@@ -1027,9 +1194,20 @@ montage_unavailable() {
 }
 check "on a read-only volume the montage center answers montage_unavailable" montage_unavailable
 systemctl stop anas-montage
-readonly_at=$(date '+%Y-%m-%d %H:%M:%S')
+systemctl start anas-workspace
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+workspace_unavailable() {
+  for _ in $(seq 1 50); do
+    [[ "$(curl -s -b /tmp/owner.jar "$api/api/v1/workspace/pages" | jq -r .error.code)" == workspace_unavailable ]] && return 0
+    sleep 0.2
+  done
+  return 1
+}
+check "on a read-only volume the shared workspace answers workspace_unavailable" workspace_unavailable
+systemctl stop anas-workspace
+readonly_at=$(journal_mark)
 systemctl restart anas-host-agent
-for _ in $(seq 1 50); do journal_has anas-host-agent "$readonly_at" 'data-volume reconciliation failed' && break; sleep 0.2; done
+journal_wait 10 "$readonly_at" 'data-volume reconciliation failed' -u anas-host-agent || true
 check "restarting the Host Agent ends the scopes it started" \
   test -n "$scopes_before" -a -z "$(for scope in $scopes_before; do systemctl is-active --quiet "$scope" && echo "$scope"; done)"
 check "the Host Agent serves on a read-only data volume" systemctl is-active --quiet anas-host-agent
@@ -1043,16 +1221,18 @@ check "the Host Agent's log still reads in Settings" \
 check "the health check names the read-only data volume" \
   bash -c "curl -fsS -b /tmp/owner.jar '$api/api/v1/system' | jq -e '[.healthFindings[].code] | index(\"volume_read_only\")' >/dev/null"
 mount -o remount,rw "$data"
-writable_at=$(date '+%Y-%m-%d %H:%M:%S')
+writable_at=$(journal_mark)
 systemctl restart anas-host-agent
-systemctl start anas-photos anas-shares anas-family anas-montage
+systemctl start anas-photos anas-shares anas-family anas-montage anas-workspace
 check "once the volume is writable, the Host Agent reconciles it" \
-  bash -c "for _ in \$(seq 1 50); do journalctl -u anas-host-agent --since '$writable_at' -o cat --no-pager | grep -Fq 'data volume reconciled' && exit 0; sleep 0.2; done; exit 1"
+  journal_wait 10 "$writable_at" 'data volume reconciled' -u anas-host-agent
 check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
 check "the montage center recovers on the writable volume" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/montage/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
+check "the shared workspace recovers on the writable volume" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
 # --- No service identity reaches a space.
 check "Product Service account cannot list a private space" denied a-nas ls "$data/spaces/private/alice"
@@ -1208,8 +1388,7 @@ png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2
 png += chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 open(sys.argv[1], "wb").write(png)
 PY
-check "photo service becomes ready on its own" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-photos --since '$writable_at' -o cat --no-pager | grep -Fq 'photo service ready' && exit 0; sleep 1; done; exit 1"
+check "photo service becomes ready on its own" journal_wait 30 "$writable_at" 'photo service ready' -u anas-photos
 library_of() { curl -fsS -b "$1" "$api/api/v1/photos/libraries" | jq -r --arg user "$2" '[.items[] | select(.kind == "private" and .ownerUserId == $user)][0].id'; }
 alice_user=$(curl -fsS -b /tmp/alice.jar "$api/api/v1/session" | jq -r .user.id || true)
 alice_library=$(library_of /tmp/alice.jar "$alice_user" || true)
@@ -1273,8 +1452,13 @@ import os
 import socket
 from anas_ai import protocol
 
-# The template the montage center fills: the newest installed.
-TEMPLATE = max((os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")), default="")
+# The templates the montage center fills, as installed: a recut's (#596) carries a change.
+INSTALLED = {os.path.basename(p)[:-3] for p in glob.glob("/usr/lib/a-nas/assistant/montage-prompts/plan-v*.md")}
+
+
+def template(request):
+    want = "plan-v3" if request.get("change") else "plan-v2"
+    return want if want in INSTALLED else ""
 
 
 def with_body(request, fds):
@@ -1306,7 +1490,7 @@ def pick_brief(request):
                   "prefixItems": [part(len(p["slots"])) for p in parts], "items": False}}}
     data = {"catalog": [f"{card['id']} | {card['answer']['summary']}" for card in request["cards"]],
             "partCount": len(parts), "targetSeconds": round(request["music"]["seconds"])}
-    return {"data": data, "schema": schema, "template": TEMPLATE}
+    return {"data": data, "schema": schema, "template": template(request)}
 
 
 def shots_brief(request):
@@ -1326,7 +1510,7 @@ def shots_brief(request):
     schema = {"type": "object", "required": ["parts", "unmet"], "properties": {
         "unmet": {"type": "array", "items": {"type": "string"}},
         "parts": {"type": "object", "required": list(parts), "properties": parts}}}
-    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": TEMPLATE,
+    return {"data": {"design": request["picked"]["design"], "parts": list(parts)}, "schema": schema, "template": template(request),
             "slots": slots, "pictures": pictures}
 
 
@@ -1554,6 +1738,8 @@ check "the package links the models and runtime of its content packages" \
   -a "$(readlink /usr/lib/a-nas/ai/animal-embedder.onnx)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/animal-embedder.json")/$(jq -r .file "$ai/animal-embedder.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-model.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-model.json")/$(model_link_file "$ai/ocr-model.json")" \
   -a "$(readlink /usr/lib/a-nas/ai/ocr-mmproj.gguf)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/ocr-mmproj.json")/$(jq -r .file "$ai/ocr-mmproj.json")" \
+  -a "$(readlink /usr/lib/a-nas/ai/aesthetic-scorer.bundle)" = "/opt/a-nas/models/$(jq -r .sha256 "$ai/aesthetic-scorer.json")" \
+  -a ! -e /usr/lib/a-nas/ai/aesthetic-scorer.bundle \
   -a "$(readlink /usr/lib/a-nas/ai/runtime)" = "/opt/a-nas/ai-runtimes/$(ai_runtime_id /src)"
 # The OCR model comes in parts (scripts/split-model.sh), each from its own
 # content package, beside the first one the link names.
@@ -1584,8 +1770,14 @@ check "the Worker runs in its own slice, apart from the device's other work" \
   test "$(systemctl show -p Slice --value anas-ai.service)" = anas-ai.slice
 check "background work gives way to the device's other work where weights compare" \
   test "$(systemctl show -p CPUWeight --value anas.slice):$(systemctl show -p Slice --value anas-ai.slice)" = 10:anas.slice
-check "AI work yields to the pressure of the device's other work, not its own" \
-  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of"
+# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
+ai_work_yields() { # the photo service logged, as it starts, how AI work yields; otherwise prints what it logged of AI work
+  journal_has anas-photos.service "$installed_at" "AI work yields to the pressure of" && return
+  echo "  what anas-photos logged of AI work:"
+  journalctl -u anas-photos.service -o cat --no-pager | grep -F 'AI work' | tail -n 10 | sed 's/^/  | /'
+  return 1
+}
+check "AI work yields to the pressure of the device's other work, not its own" ai_work_yields
 check "search starts the Worker through its socket" semantic_search 猫
 check "the Worker runs under its own dynamic identity" dynamic_identity anas-ai.service
 check "the Worker's memory is where the photo service's gate reads it" worker_memory_beside_photos
@@ -1714,7 +1906,7 @@ while len(frame) < 9:
 sys.exit(0 if frame[3] == 4 else 1)
 PY
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle minute included
+unit_stops() { # UNIT: becomes inactive within 90 seconds, the owner's idle timeout included
   for _ in $(seq 1 180); do
     systemctl is-active --quiet "$1" || return 0
     sleep 0.5
@@ -1729,28 +1921,17 @@ same_network_namespace() {
   [[ "$index" != 0 && "$proxy" != 0 && "$(readlink "/proc/$index/ns/net")" == "$(readlink "/proc/$proxy/ns/net")" &&
     "$(readlink "/proc/$index/ns/net")" != "$(readlink /proc/1/ns/net)" ]]
 }
-# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_shows() { # UNIT SINCE TEXT: the unit logs TEXT within three minutes; the vector sync waits,
-  # as AI work does, while the device's other work is under pressure
-  for _ in $(seq 1 360); do
-    journal_has "$@" && return 0
-    sleep 0.5
-  done
-  return 1
-}
-# shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
-journal_lacks() { ! journal_has "$@"; } # UNIT SINCE TEXT: the unit has not logged TEXT
 check "the installer enables the photo service's vector index socket" \
   systemctl is-enabled --quiet anas-vectors-proxy@a-nas-photos.socket
 check "the photo service builds its vector index from the Catalog" \
   journal_shows anas-photos.service "$installed_at" "photo vector index created"
 check "and brings the organised photo into it" \
   journal_shows anas-photos.service "$installed_at" "photo vector index synced"
-journalctl -u anas-photos.service --since "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
+journalctl -u anas-photos.service --after-cursor "$installed_at" -o cat --no-pager | grep -F 'vector index' | tail -n 3 || true
 # A restart clears what the service remembers of earlier searches: the last
 # check, which spaces checks ten minutes apart, and which reasons to read the
 # Catalog it has already logged.
-searched_at=$(date '+%Y-%m-%d %H:%M:%S')
+searched_at=$(journal_mark)
 systemctl restart anas-photos
 check "the photo service starts again" journal_shows anas-photos.service "$searched_at" "photo service ready"
 check "a search reads the vector index" semantic_search 猫
@@ -1838,16 +2019,16 @@ index_rest /collections/damaged -X PUT -H 'Content-Type: application/json' -d '{
 wait "$holder"
 check "the vector index stops before the damage" unit_stops anas-vectors@a-nas-photos.service
 printf 'damaged\n' > "$vectors_state/storage/collections/damaged/config.json"
-failed_starts=0
-until as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock; do
-  failed_starts=$((failed_starts + 1))
-  ((failed_starts < 5)) || break
-  sleep 1
-done
+damaged_at=$(journal_mark)
+# The connection waits in the socket's queue and starts the instance again
+# each time a start fails, a few seconds after Qdrant panics (wait-ready.sh);
+# the third start empties the storage and answers it.
+check "a damaged vector index answers once it has started empty" \
+  as a-nas-photos python3 /usr/local/lib/grpc-answers.py /run/a-nas-vectors/a-nas-photos.sock
+failed_starts=$(journalctl -u anas-vectors@a-nas-photos.service --after-cursor "$damaged_at" -o cat --no-pager |
+  grep -c 'Failed with result' || true)
 echo "INFO starts that failed on the damaged index: $failed_starts"
-check "a damaged vector index fails to start at first" test "$failed_starts" -ge 1
-check "and starts empty after two failures in a row" \
-  test "$failed_starts" -le 3 -a ! -e "$vectors_state/storage/collections/damaged"
+check "after two failed starts in a row" test "$failed_starts" -eq 2 -a ! -e "$vectors_state/storage/collections/damaged"
 check "failed starts leave the vector index socket listening" systemctl is-active --quiet anas-vectors-proxy@a-nas-photos.socket
 # A probe in the vector index's own unit, in place of Qdrant.
 cat > /usr/local/lib/anas-vectors-probe.py <<'PY'
@@ -1891,7 +2072,7 @@ journalctl -u anas-vectors-probe@a-nas-photos.service -o cat --no-pager | grep -
 search_socket=/run/a-nas-search/search.sock
 # The Product Service holds a-nas-search through its unit's SupplementaryGroups,
 # not as a login group of a-nas.
-as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-search "$@"; }
+as_product() { setpriv --reuid=a-nas --regid=a-nas --groups=a-nas-photos,a-nas-shares,a-nas-family,a-nas-montage,a-nas-workspace,a-nas-search "$@"; }
 check "web search runs under its own account" \
   test "$(systemctl is-active anas-search):$(systemctl show -p User --value anas-search)" = active:a-nas-search
 check "web search's runtime is the one the release pins" \
@@ -2394,12 +2575,11 @@ check "disabling ends the member's SMB session" smb_sessions_end carol
 check "the disabled member cannot open SMB" smb_refused NT_STATUS_ACCOUNT_DISABLED carol carol ls
 kill "$carol_client" 2>/dev/null || true
 # Every start synchronizes identities, the disabled member's SMB entry too.
-synced_at=$(date '+%Y-%m-%d %H:%M:%S')
+synced_at=$(journal_mark)
 systemctl restart anas-api
 for _ in $(seq 1 100); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "the Product Service's start synchronizes identities with a disabled SMB account" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-api --since '$synced_at' -o cat --no-pager |
-    grep -Fq 'identity synchronization succeeded' && exit 0; sleep 1; done; exit 1"
+  journal_wait 30 "$synced_at" 'identity synchronization succeeded' -u anas-api
 
 # --- Enabling the member again gives back her sign-in and SMB with the
 # password she had (docs/specs/account-enable-and-delete.md).
@@ -2419,6 +2599,8 @@ carol_uid=$(id -u carol)
 check "the administrator has a folder named like the handover" test "$(status_of -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" -H 'Content-Type: application/json' -d '{"parentId":"","name":"carol 的文件"}' \
   "$api/api/v1/spaces/$owner_private/directories")" = 201
+check "the administrator lets her use the shared workspace" test "$(status_of -X PUT -b /tmp/owner.jar \
+  -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/workspace/admin/members/$carol_user")" = 204
 check "the administrator disables the member before deleting her" test "$(status_of -X POST -b /tmp/owner.jar \
   -H "X-CSRF-Token: $owner_csrf" "$api/api/v1/users/$carol_user/disable")" = 204
 # shellcheck disable=SC2317,SC2329 # invoked through check (SC2317 in older shellcheck)
@@ -2444,6 +2626,9 @@ check "the member is removed once her time is up" carol_gone
 check "her Linux account is gone" bash -c '! getent passwd carol && ! getent group carol'
 check "her Samba account is gone" bash -c '! pdbedit --user carol >/dev/null 2>&1'
 check "her personal space is gone" test ! -e /srv/a-nas/data/spaces/private/carol
+check "the shared workspace forgot her" test "$(python3 -c 'import sqlite3, sys
+print(sqlite3.connect("file:/srv/a-nas/data/workspace/workspace.db?mode=ro", uri=True).execute(
+    "SELECT COUNT(*) FROM members WHERE account_id = ?", (sys.argv[1],)).fetchone()[0])' "$carol_user")" = 0
 handed="/srv/a-nas/data/spaces/private/owner/carol 的文件 (2)"
 check "her files are in the administrator's personal space" grep -qx 'carol keeps this' "$handed/carol.txt"
 check "the handed-over files belong to the administrator" test "$(stat -c %U "$handed/carol.txt")" = owner
@@ -2455,11 +2640,10 @@ check "the new member gets a new UID" test "$(id -u carol)" != "$carol_uid"
 check "the new member's personal space starts empty" test ! -e /srv/a-nas/data/spaces/private/carol/carol.txt
 
 # --- Restarting the Host Agent keeps all of the above.
-restarted_at=$(date '+%Y-%m-%d %H:%M:%S')
+restarted_at=$(journal_mark)
 systemctl restart anas-host-agent
 check "Host Agent proves the identity switch again after a restart" \
-  bash -c "for _ in \$(seq 1 30); do journalctl -u anas-host-agent --since '$restarted_at' -o cat --no-pager |
-    grep -Fq 'file broker identity switch verified' && exit 0; sleep 1; done; exit 1"
+  journal_wait 30 "$restarted_at" 'file broker identity switch verified' -u anas-host-agent
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "sharing recovers after the Host Agent restarts" shares_ready
 check "Web files work after the restart" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
@@ -2885,12 +3069,18 @@ login alice "$new_password" /tmp/alice.jar >/dev/null || true
 check "the rollback keeps the member's files" grep -qx alice.txt <(entries /tmp/alice.jar "$alice_private")
 check "the upgrade copied the montage database on the data volume" \
   test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/montage/montage.db')"
+check "and the workspace database" \
+  test -n "$(find "$data/.a-nas-backups" -mindepth 3 -maxdepth 3 -path '*/workspace/workspace.db')"
 check "the compute worker is running before rollback" python3 /usr/local/lib/montage-compute-client.py
 check "apt rolls back to the previous release" reinstall rollback-previous "$previous"
 check "the previous release, which came before the montage center, has no montage unit" \
   test "$(systemctl show -p LoadState --value anas-montage.service):$(systemctl show -p ActiveState --value anas-montage.service)" = \
   not-found:inactive
 check "and the montage service stopped before its unit went" fails pgrep -u a-nas-montage
+check "nor a workspace unit, whose service stopped before its unit went" \
+  test "$(systemctl show -p LoadState --value anas-workspace.service):$(systemctl show -p ActiveState --value anas-workspace.service)" = \
+  not-found:inactive
+check "no workspace process runs on the previous release" fails pgrep -u a-nas-workspace
 check "nor the photo service's grant socket, which stopped before its unit went" \
   test "$(systemctl show -p LoadState --value anas-photos-grants.socket):$(systemctl show -p ActiveState --value anas-photos-grants.socket)" = \
   not-found:inactive
@@ -2928,6 +3118,11 @@ check "a-nas-check passes after upgrading again" quiet a-nas-check
 check "after upgrading again the montage service has its account, store and socket" \
   test "$(systemctl is-active anas-montage):$(id -u a-nas-montage):$(stat -c '%a %U' "$data/montage"):$(stat -c '%a %G' /run/a-nas-montage/montage.sock)" = \
   "active:31003:700 a-nas-montage:660 a-nas-montage"
+check "after upgrading again the workspace service has its account, store and socket" \
+  test "$(systemctl is-active anas-workspace):$(id -u a-nas-workspace):$(stat -c '%a %U' "$data/workspace"):$(stat -c '%a %G' /run/a-nas-workspace/workspace.sock)" = \
+  "active:31004:700 a-nas-workspace:660 a-nas-workspace"
+check "and the shared page is still there" \
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages/$workspace_page') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "and its socket for members' scheduled tasks is held again, in a directory only root enters" \
   test "$(systemctl is-active anas-montage-assistant.socket):$(stat -c '%a %U' /run/a-nas-montage-assistant)" = "active:700 root"
 login alice "$new_password" /tmp/alice.jar >/dev/null || true
@@ -3036,6 +3231,8 @@ check "the update service installed the next release, which passed its check" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.previous)|\(.records[0].kind)|\(.records[0].by)"' <<<"$state")" = \
   "up-to-date|$next|$version|updated|owner"
 check "dpkg has the next release, with its database step" test "$(a_nas_version):$(probe_table)" = "$next:$((steps + 1)):1"
+check "the updated release includes the matching installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$next"
 check "a-nas-check passes after the update" quiet a-nas-check
 check "an administrator goes back to the version before" test "$(update_ask revert)" = 202
 state=$(update_settled || true)
@@ -3068,6 +3265,8 @@ state=$(update_settled || true)
 check "the update service rolled back when the check failed" \
   test "$(jq -r '"\(.phase)|\(.current)|\(.problem.code)|\(.records[0].kind)|\(.records[0].version)"' <<<"$state")" = \
   "rolled-back|$version|check|rolled-back|$next"
+check "automatic rollback restores the installed hotspot package" \
+  test "$(dpkg-query -W -f='${Version}' a-nas-hotspot-radio)" = "$version"
 check "the rollback says which check failed" grep -q anas-site.service <<<"$(jq -r '.problem.detail' <<<"$state")"
 check "dpkg is back on this release, and the database with it" test "$(a_nas_version):$(probe_table)" = "$version:$steps:0"
 check "a-nas-check passes after the rollback" quiet a-nas-check
@@ -3126,11 +3325,9 @@ fi
 # --- Last, because other services keep the detached volume busy: the
 # unmount reaches the photo service's private mount namespace, and it stops
 # serving from the lost store instead of following the path.
-lost_at=$(date '+%Y-%m-%d %H:%M:%S')
+lost_at=$(journal_mark)
 umount --lazy "$data"
-check "photo service notices the data volume is gone" \
-  bash -c "for _ in \$(seq 1 15); do journalctl -u anas-photos --since '$lost_at' -o cat --no-pager |
-    grep -Fq 'photo store lost' && exit 0; sleep 1; done; exit 1"
+check "photo service notices the data volume is gone" journal_wait 15 "$lost_at" 'photo store lost' -u anas-photos
 check "photos answer unavailable while the volume is gone" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/libraries")" = 503
 

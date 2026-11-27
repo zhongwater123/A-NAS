@@ -16,14 +16,15 @@ import (
 
 // fakeHost plays apt, dpkg and a-nas-check for the service.
 type fakeHost struct {
-	installed    map[string]string
-	versions     []string // the versions of a-nas the source has, oldest first
-	updateOutput string
-	updateErr    error
-	configureErr error
-	auditOutput  string
-	checkFails   map[string]bool // a-nas versions whose a-nas-check fails
-	installFails map[string]bool // versions apt fails to install before it changes anything
+	installed     map[string]string
+	versions      []string // the versions of a-nas the source has, oldest first
+	radioReleases map[string]bool
+	updateOutput  string
+	updateErr     error
+	configureErr  error
+	auditOutput   string
+	checkFails    map[string]bool // a-nas versions whose a-nas-check fails
+	installFails  map[string]bool // versions apt fails to install before it changes anything
 	// brokenInstalls are versions whose install fails while dpkg unpacks
 	// a-nas, which it leaves half installed at the version before.
 	brokenInstalls map[string]bool
@@ -52,6 +53,34 @@ func newFakeHost() *fakeHost {
 	return &fakeHost{installed: map[string]string{"a-nas": "1", "a-nas-host": "1"}, versions: []string{"1", "2"},
 		checkFails: map[string]bool{}, installFails: map[string]bool{}, brokenInstalls: map[string]bool{},
 		halfInstalled: map[string]bool{}}
+}
+
+func TestHotspotRadioFollowsVersionsThatProvideIt(t *testing.T) {
+	host := newFakeHost()
+	host.versions = []string{"1", "2", "3"}
+	host.radioReleases = map[string]bool{"2": true, "3": true}
+	service := &Service{Commands: host}
+	ctx := t.Context()
+	if slices.Contains(service.releaseArguments(ctx, "3"), hotspotRadio+"=3") {
+		t.Fatal("the update opted in to an absent package")
+	}
+	host.installed[hotspotRadio] = "2"
+	for _, version := range []string{"2", "3"} {
+		if !slices.Contains(service.releaseArguments(ctx, version), hotspotRadio+"="+version) {
+			t.Fatalf("the installed radio package does not follow release %s", version)
+		}
+	}
+	if slices.Contains(service.releaseArguments(ctx, "1"), hotspotRadio+"=1") || !service.landed(ctx, "1") {
+		t.Fatal("a legacy release must not request a radio package that did not exist")
+	}
+	host.installed["a-nas"], host.installed["a-nas-host"] = "3", "3"
+	if service.landed(ctx, "3") {
+		t.Fatal("an older installed radio package was counted as a complete update")
+	}
+	host.installed[hotspotRadio] = "3"
+	if !service.landed(ctx, "3") {
+		t.Fatal("the complete release was not recognized")
+	}
 }
 
 func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -148,9 +177,17 @@ func (h *fakeHost) Run(_ context.Context, name string, args ...string) ([]byte, 
 		case "madison":
 			var lines []string
 			for _, version := range h.versions {
-				lines = append(lines, " a-nas | "+version+" | file:/var/local/a-nas-repository dev/main amd64 Packages")
+				if args[1] != hotspotRadio || h.radioReleases[version] {
+					lines = append(lines, " "+args[1]+" | "+version+" | file:/var/local/a-nas-repository dev/main amd64 Packages")
+				}
 			}
 			return []byte(strings.Join(lines, "\n")), nil
+		case "show":
+			_, version, _ := strings.Cut(args[1], "=")
+			if h.radioReleases[version] {
+				return []byte("Package: a-nas\nSuggests: a-nas-hotspot-radio (= " + version + ")\n"), nil
+			}
+			return []byte("Package: a-nas\n"), nil
 		case "depends":
 			_, version, _ := strings.Cut(args[len(args)-1], "=")
 			return []byte("a-nas\n  Depends: a-nas-host\n  Depends: a-nas-model-v" + version + "\n"), nil
@@ -679,9 +716,16 @@ func TestARevertWhoseWayBackFailsTheCheckIsShownUntilItPasses(t *testing.T) {
 	if state = run(t, service, RequestCheck); state.Phase != PhaseRolledBack || state.Problem.Code != ProblemRollback {
 		t.Fatalf("a check while 2 still fails = %+v, want the warning kept", state)
 	}
+	host.versions = append(host.versions, "3")
 	host.checkFails["2"] = false
-	if state = run(t, service, RequestCheck); state.Phase != PhaseUpToDate || state.Problem != nil {
-		t.Fatalf("a check once 2 passes = %+v, want up to date", state)
+	host.auditOutput = "package is half installed"
+	state = run(t, service, RequestCheck)
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback || state.Candidate != "" {
+		t.Fatalf("a check with 3 available while the dpkg audit fails = %+v, want the warning kept", state)
+	}
+	host.auditOutput = ""
+	if state = run(t, service, RequestCheck); state.Phase != PhaseReady || state.Candidate != "3" || state.Problem != nil {
+		t.Fatalf("a check once 2 passes = %+v, want 3 ready", state)
 	}
 }
 
@@ -1105,6 +1149,43 @@ func TestRestoringTheDatabasesNeedsTheMontageServiceStopped(t *testing.T) {
 		}
 		if !tc.restored && host.ran("systemctl stop anas-api") {
 			t.Errorf("%s: the other services stopped although the restore cannot go on", tc.name)
+		}
+	}
+}
+
+// The shared workspace service (ADR 0040) stops on its own before the copies
+// go back and starts after them, like the montage service: a release before
+// it has no such unit, and any other failure to stop it stops the restore.
+func TestRestoringTheDatabasesTakesTheWorkspaceServiceAlong(t *testing.T) {
+	host := newFakeHost()
+	service, _ := newService(t, host)
+	if err := service.restoreDatabases(context.Background(), "20261125T000000Z-1"); err != nil {
+		t.Fatal(err)
+	}
+	restore := slices.IndexFunc(host.calls, func(call string) bool {
+		return strings.HasPrefix(call, "sh -c") && strings.Contains(call, "for store in photos shares family montage workspace;") &&
+			strings.Contains(call, "/srv/a-nas/data/workspace/workspace.db-wal")
+	})
+	stopped := slices.Index(host.calls, "systemctl stop anas-workspace")
+	started := slices.Index(host.calls, "systemctl start anas-workspace")
+	if stopped < 0 || stopped > restore || restore > started {
+		t.Fatalf("calls = %v; want the workspace service stopped, the databases restored and the service started", host.calls)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		fails    error
+		restored bool
+	}{
+		{"no such unit", exitStatus(5), true},
+		{"stop failed", exitStatus(1), false},
+	} {
+		host := newFakeHost()
+		host.fails = map[string]error{"systemctl stop anas-workspace": tc.fails}
+		service, _ := newService(t, host)
+		err := service.restoreDatabases(context.Background(), "20261125T000000Z-1")
+		if restored := host.ran("sh -c"); (err == nil) != tc.restored || restored != tc.restored {
+			t.Errorf("%s: err = %v, restored = %t; calls = %v", tc.name, err, restored, host.calls)
 		}
 	}
 }

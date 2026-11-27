@@ -1,34 +1,33 @@
 // The serif of the window's numbers, bundled: the NAS may have no way out.
 import "@fontsource-variable/fraunces/opsz.css";
 
-import { ChevronLeft, Images, Star, Users } from "lucide-react";
+import { Images, Star, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { EmptyState, Spinner, useToasts } from "../ui/workspace";
 import workspaceStyles from "../ui/workspace.module.css";
 import { BatchesPage, RatersPage } from "./Admin";
 import { claimThumbnailURL, listBatches, listRecent, type ScoringRaterBatch, scoringError } from "./api";
-import { GuideContent } from "./Guide";
-import { formatCount, formatScore } from "./model";
+import { formatCount, formatScore, isLevels } from "./model";
 import { Stage } from "./Stage";
 import styles from "./scoring.module.css";
 import { type ScoringAccess, scoringAccess } from "./status";
 
 type Page = "rate" | "batches" | "raters";
 
-// A rater sees a batch's guide before scoring it the first time on this
-// browser; afterwards it opens straight on the photos.
-const seenKey = (userId: string, batchId: string) => `a-nas.scoring.guide.${userId}.${batchId}`;
-function guideSeen(userId: string, batchId: string): boolean {
+// A rater is walked through scoring a practice photo the first time they
+// open a batch on this browser; afterwards it opens straight on the photos.
+const coachedKey = (userId: string, batchId: string) => `a-nas.scoring.coach.${userId}.${batchId}`;
+function coached(userId: string, batchId: string): boolean {
   try {
-    return window.localStorage.getItem(seenKey(userId, batchId)) === "1";
+    return window.localStorage.getItem(coachedKey(userId, batchId)) === "1";
   } catch {
     return false;
   }
 }
-function markGuideSeen(userId: string, batchId: string) {
+function markCoached(userId: string, batchId: string) {
   try {
-    window.localStorage.setItem(seenKey(userId, batchId), "1");
+    window.localStorage.setItem(coachedKey(userId, batchId), "1");
   } catch {
     // Without storage the guide shows again next time.
   }
@@ -44,7 +43,9 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
   // without signing in again.
   const [access, setAccess] = useState(initial);
   const [page, setPage] = useState<Page>(initial.rater ? "rate" : "batches");
-  const [scoring, setScoring] = useState<{ batch: ScoringRaterBatch; guide: boolean }>();
+  // Opening a batch shows its photos, the first time on this browser after
+  // the guide on a practice photo.
+  const [scoring, setScoring] = useState<{ batch: ScoringRaterBatch; coach: boolean }>();
   const { toast, element: toasts } = useToasts(styles.scToasts);
   const refused = useCallback((text: string) => toast(text, "error"), [toast]);
   const readAccess = useCallback(() => {
@@ -61,31 +62,23 @@ export function ScoringPanel({ userId, access: initial }: { userId: string; acce
     };
   }, []);
 
-  if (scoring?.guide) {
-    return (
-      <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
-        <Calibration
-          batch={scoring.batch}
-          onBack={() => setScoring(undefined)}
-          onStart={() => {
-            markGuideSeen(userId, scoring.batch.id);
-            setScoring({ batch: scoring.batch, guide: false });
-          }}
-        />
-      </div>
-    );
-  }
   if (scoring) {
     return (
       // The stage asks this window, with its notices, to fill the screen.
       <div className={`${workspaceStyles.bkApp} ${styles.scApp}`} data-scoring-window>
-        <Stage batch={scoring.batch} onBack={() => setScoring(undefined)} onRefused={refused} />
+        <Stage
+          batch={scoring.batch}
+          coach={scoring.coach}
+          onBack={() => setScoring(undefined)}
+          onRefused={refused}
+          onCoached={() => markCoached(userId, scoring.batch.id)}
+        />
         {toasts}
       </div>
     );
   }
 
-  const open = (batch: ScoringRaterBatch) => setScoring({ batch, guide: !guideSeen(userId, batch.id) });
+  const open = (batch: ScoringRaterBatch) => setScoring({ batch, coach: !coached(userId, batch.id) });
   return (
     <div className={`${workspaceStyles.bkApp} ${styles.scApp}`}>
       {access.admin && (
@@ -215,11 +208,13 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
     <div className={styles.scCover}>
       {recent.map((item) => {
         // A batch that hides scores from raters shows none here either.
-        const score = batch.hideDecimals ? undefined : formatScore(Math.round(item.score * 100), batch.scale);
+        const score = batch.hideDecimals
+          ? undefined
+          : formatScore(Math.round(item.score * 100), batch.scale, batch.dimensions[0].id);
         const alt =
           score === undefined
             ? "你打过的照片"
-            : batch.scale === "three"
+            : isLevels(batch.scale)
               ? `你打了“${score}”的照片`
               : `你打了 ${score} 分的照片`;
         return (
@@ -229,35 +224,6 @@ function Cover({ batch }: { batch: ScoringRaterBatch }) {
           </figure>
         );
       })}
-    </div>
-  );
-}
-
-// Calibration is the guide a rater reads before the first photo of a batch.
-function Calibration({
-  batch,
-  onBack,
-  onStart,
-}: {
-  batch: ScoringRaterBatch;
-  onBack: () => void;
-  onStart: () => void;
-}) {
-  return (
-    <div className={styles.scCalibration}>
-      <header className={styles.scPageHead}>
-        <button type="button" className={styles.scBack} onClick={onBack}>
-          <ChevronLeft />
-          批次
-        </button>
-        <h2>{batch.name}</h2>
-      </header>
-      <GuideContent batch={batch} />
-      <footer className={styles.scCalibrationFoot}>
-        <button type="button" className={styles.scPrimary} onClick={onStart}>
-          开始打分
-        </button>
-      </footer>
     </div>
   );
 }

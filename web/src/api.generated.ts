@@ -234,6 +234,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/session/agent-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The coding agents the signed-in member connected (ADR 0040), newest first. Tokens nobody used for 90 days are gone; disabling the account or an administrator's password reset removes them all. */
+        get: operations["listAgentTokens"];
+        put?: never;
+        /** @description Connect a coding agent on the member's own computer. The token in the answer is shown once and reaches only the shared workspace's MCP endpoint. An account holds at most 20 tokens (409 agent_token_limit); a name of 1–40 characters and a known kind are required (422 validation_failed). */
+        post: operations["createAgentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/session/agent-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Disconnect one of the member's own agents; its later calls answer 401. */
+        delete: operations["revokeAgentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -1035,6 +1070,41 @@ export interface paths {
          * @description Administrators only. Turning web search off stops its service through the Host Agent, so the NAS reaches no engine; the choice outlasts restarts and upgrades (ADR 0030).
          */
         put: operations["updateWebSearch"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/network/phone-hotspot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the phone hotspot state and its active connection details */
+        get: operations["getPhoneHotspot"];
+        /** Start or stop the phone hotspot on the dedicated Wi-Fi radio */
+        put: operations["updatePhoneHotspot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/network/phone-hotspot/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save settings for the next time the phone hotspot starts */
+        put: operations["savePhoneHotspotSettings"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2133,6 +2203,376 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/todos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The to-dos the caller can see: every open one, by due date with those without one last, then those closed in the last 30 days, most recently closed first */
+        get: operations["listTodos"];
+        put?: never;
+        /** Add a to-do by hand; every to-do added by hand is shared with every active account */
+        post: operations["createTodo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/owners": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The active accounts a to-do can be given to, by username. Disabled accounts and those waiting to be deleted are left out; a to-do already theirs keeps them */
+        get: operations["listTodoOwners"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What to remind the caller of now, by due date: each open to-do they can see that is due within 3 days, due today or overdue, once a stage until they acknowledge it. Snoozed ones and those without a due date are left out */
+        get: operations["listTodoReminders"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/reminders/seen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record that the caller acknowledged these reminders, for them alone. Only keys the caller's reminders list now are recorded; others are ignored, so a to-do closed meanwhile does not fail the request */
+        post: operations["acknowledgeTodoReminders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Replace a to-do's fields, clearing those left out; changed when someone saved after the given version. A new due date starts its reminders over */
+        patch: operations["updateTodo"];
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Mark a to-do done or ignored, recording who and when, or open it again, which clears the snooze and starts its reminders over. Setting the status it has changes nothing; this is not an edit and keeps the version */
+        put: operations["setTodoStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{todoId}/snooze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Quiet an open to-do's reminders until today plus days, by the device's calendar; they start over on that day. A done or ignored to-do answers conflict */
+        put: operations["snoozeTodo"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the caller may use 共享工作区 (ADR 0040): 200 for administrators and the members they added, 404 for everyone else. The desktop shows the app only while this answers 200 */
+        get: operations["getWorkspaceAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The shared pages, the most recently saved first. Accounts an administrator has not added answer 403 workspace_forbidden, here and on every operation below */
+        get: operations["listWorkspacePages"];
+        put?: never;
+        /** Upload a UTF-8 HTML file as a new page, its version 1. Its title is the page's <title>, else the file's name. At most 20 MB (413 request_too_large); not UTF-8 or empty is 422 validation_failed */
+        post: operations["createWorkspacePage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        /** A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there */
+        get: operations["getWorkspacePage"];
+        put?: never;
+        post?: never;
+        /** Delete a page and all its versions for everyone. Only the account that uploaded it and administrators may (403 forbidden) */
+        delete: operations["deleteWorkspacePage"];
+        options?: never;
+        head?: never;
+        /** Change a page's title (1–200 characters after folding white space, else 422 validation_failed) */
+        patch: operations["renameWorkspacePage"];
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a whole page as its next version. baseVersion is the version it replaces; when another was saved since, nothing is saved and 409 page_changed names the latest */
+        post: operations["saveWorkspacePageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions/{version}/view": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        /** A version for the desktop's <iframe sandbox="allow-scripts">: the page with every written element marked data-anas-at (its start tag's byte offset in the source) and the frame helper script, under Content-Security-Policy "sandbox allow-scripts; default-src 'none'; …", so it runs in an opaque origin that reaches nothing. highlight lists element offsets to point at, scroll the vertical position to keep */
+        get: operations["viewWorkspacePage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/pages/{pageId}/versions/{version}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        /** A version exactly as it was saved, as an attachment named "<title>-v<version>.html", under a sandbox policy */
+        get: operations["exportWorkspacePage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/viewing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab's last, its closing included, changes nothing. No tab name or seq is 400 invalid_request */
+        put: operations["setWorkspaceViewing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/viewing/{tab}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The tab's name as it reported itself */
+                tab: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request */
+        delete: operations["clearWorkspaceViewing"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** The element the caller picked on a page, as the frame helper measured it, for the caller's agents alone; it lasts 30 minutes. The screenshot is a JPEG data URL of at most 512 KB and 4096 pixels a side (422 validation_failed) */
+        put: operations["setWorkspaceSelection"];
+        post?: never;
+        /** Forget the caller's selection */
+        delete: operations["clearWorkspaceSelection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/admin/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every active account and whether an administrator let it use the workspace. Administrators always may */
+        get: operations["listWorkspaceMembers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/admin/members/{accountId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Let an account use the workspace; adding it again changes nothing */
+        put: operations["addWorkspaceMember"];
+        post?: never;
+        /** Stop an account using the workspace. Its pages stay; its agents' calls are refused while it is not a member */
+        delete: operations["removeWorkspaceMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A stateless server keeps no stream for an agent to open; 405 after the agent's token is checked */
+        get: operations["openWorkspaceMCPStream"];
+        put?: never;
+        /** The shared workspace's MCP endpoint for members' coding agents (stateless streamable HTTP, JSON responses; docs/architecture/shared-workspace.md lists the tools). It takes an agent token as a bearer token and never a session cookie; a request carrying Origin (a browser's) or not naming the device in Host is 403 forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens 429 too_many_attempts. At most 4 MiB a request */
+        post: operations["callWorkspaceMCP"];
+        /** A stateless server keeps no session for an agent to end; 405 after the agent's token is checked */
+        delete: operations["endWorkspaceMCPSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/transfers/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        /** A page version an agent's workspace_checkout asked for, once, within 10 minutes of asking. The link is the authority, together with the agent token that asked for it, which must still work (401) for an account that may still use the workspace (403 workspace_forbidden); an unknown, used or expired link is 404 */
+        get: operations["downloadWorkspaceTransfer"];
+        /** A whole page an agent's workspace_upload asked to send, once, within 10 minutes: the next version of its page, refused with 409 page_changed when another was saved after its base version, or a new page. Checked as the download is */
+        put: operations["uploadWorkspaceTransfer"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/montage": {
         parameters: {
             query?: never;
@@ -2213,7 +2653,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job. Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
+        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
         post: operations["generateMontageFilm"];
         delete?: never;
         options?: never;
@@ -2315,7 +2755,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Plan again from the step not yet taken, when the plan was not handed back, kept failing its checks, or VNAS has not taken it; a round still planning the job is over. The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
+        /** Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project's latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
         post: operations["replanMontageJob"];
         delete?: never;
         options?: never;
@@ -2330,7 +2770,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved in the last day */
+        /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day */
         get: operations["listMontageNotices"];
         put?: never;
         post?: never;
@@ -2401,6 +2841,193 @@ export interface paths {
         };
         /** @description The background film's poster (hero/hero.jpg); 404 without one. */
         get: operations["getMontageHeroPoster"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Choose this version as the project's film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later */
+        post: operations["confirmMontageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/recut": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none */
+        post: operations["recutMontageVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409) */
+        get: operations["getMontageVersionOutline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version's videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found */
+        get: operations["getMontageVersionDraft"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/ops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, a shot whose picture the plan described with nothing to search for (empty, or longer than a search) stays as it was and the message says how many did, and with no unlocked shot to search for the shuffle is edit_refused (422). Deleting a shot between two that could each take its slots reads their videos' analysis (photos_unavailable, 503; edit_refused, 422, while their windows are made again; analysis_changed, 409, once made with another model) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders */
+        post: operations["editMontageDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job, and a requestKey used for another draft or another kind of job is a conflict (409). A revision that was saved already answers 202 with the job that saved it, done and with its version, whatever the requestKey: no new job, and nothing is filled or rendered again. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model */
+        post: operations["saveMontageDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project's song is now, as the project's song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft's songStart. */
+        get: operations["getMontageDraftSong"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle's does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos */
+        get: operations["listMontageDraftCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/versions/{versionId}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The version's shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film */
+        get: operations["getMontageVersionShots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/drafts/{draftId}/shots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The draft's shot list, as the version's: a row a shot, the slots it covers, and for a shot that took a deleted shot's slots, which */
+        get: operations["getMontageDraftShots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/montage/projects/{projectId}/frames/{assetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, montage_unavailable where the montage center has no media worker */
+        get: operations["getMontageFrame"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2535,7 +3162,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The preview behind one of the caller's own claims, answered or not */
+        /**
+         * The preview behind one of the caller's own claims while the caller holds it or has an answer for it in force
+         * @description A claim whose lease ended unanswered went back to the batch: not_found (404). A member no longer chosen as a rater gets not_rater (403) for every claim.
+         */
         get: operations["getScoringClaimImage"];
         put?: never;
         post?: never;
@@ -2554,7 +3184,7 @@ export interface paths {
         };
         /**
          * The photo behind one of the caller's own claims at its full size, which the window shows at 100%
-         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+         * @description Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported. The caller sees it on the same terms as the preview; insufficient_storage (507) when rendering it would take the data volume below its reserve.
          */
         get: operations["getScoringClaimFull"];
         put?: never;
@@ -2572,7 +3202,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims */
+        /** A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims, on the same terms as the preview */
         get: operations["getScoringClaimThumbnail"];
         put?: never;
         post?: never;
@@ -5899,7 +6529,7 @@ export interface components {
             inTrash?: boolean;
         };
         /** @enum {string} */
-        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "system";
+        ActivityCategory: "session" | "account" | "file" | "storage" | "photo" | "family" | "workspace" | "system";
         ActivityAccount: {
             id: string;
             username: string;
@@ -5911,7 +6541,7 @@ export interface components {
             /** Format: date-time */
             occurredAt: string;
             /** @enum {string} */
-            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "system" | "other";
+            category: "session" | "account" | "file" | "storage" | "photo" | "family" | "workspace" | "system" | "other";
             /** @description Action code such as session.signed_in, user.credential_reset, file.uploaded or storage.plan.succeeded. */
             action: string;
             actor?: components["schemas"]["ActivityAccount"];
@@ -5941,7 +6571,7 @@ export interface components {
             unavailable?: components["schemas"]["ActivityCategory"][];
         };
         /** @enum {string} */
-        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
+        SystemLogService: "api" | "host-agent" | "photos" | "shares" | "family" | "montage" | "workspace" | "containers" | "ai" | "media" | "kiosk" | "samba" | "caddy";
         SystemLogEntry: {
             cursor: string;
             /** Format: date-time */
@@ -6003,6 +6633,32 @@ export interface components {
             };
             /** @description The websites searches leave out after a block, the first to return first; sibling engines share a pause. */
             paused: components["schemas"]["WebSearchPausedEngine"][];
+        };
+        PhoneHotspotStatus: {
+            /** @enum {string} */
+            state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
+            /** @enum {string} */
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed" | "invalid_settings";
+            settings?: components["schemas"]["PhoneHotspotSettings"];
+            /** @description The saved settings could not be read. An administrator can replace them by saving new settings. */
+            settingsInvalid?: boolean;
+            /** @description Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected. */
+            devices?: {
+                mac: string;
+                ip?: string;
+                name?: string;
+            }[];
+            /** @description Present when the hotspot is on. The response is not cacheable. */
+            connection?: {
+                ssid: string;
+                password: string;
+                url: string;
+                /** @description Whether this running hotspot advertises a WebOS portal */
+                portal?: boolean;
+            };
+        };
+        PhoneHotspotRequest: {
+            enabled: boolean;
         };
         /** @description A website left out of searches after a block: for an hour, doubled on the next block after expiry up to a day. Concurrent answers do not extend or clear an active pause. */
         WebSearchPausedEngine: {
@@ -6692,6 +7348,112 @@ export interface components {
             vaccines: components["schemas"]["FamilyVaccineCatalog"];
             growthStandard: string;
         };
+        /**
+         * Format: date
+         * @description A calendar date without time of day or zone; today is the device's local date.
+         */
+        TodoDate: string;
+        /**
+         * @description What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one.
+         * @enum {string}
+         */
+        TodoCategory: "bill" | "medical" | "insurance" | "id_document" | "contract" | "other";
+        /**
+         * @description shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared.
+         * @enum {string}
+         */
+        TodoScope: "shared" | "private";
+        /** @enum {string} */
+        TodoStatus: "open" | "done" | "ignored";
+        /**
+         * @description soon: due within 3 days; today: due today; overdue: the due date has passed.
+         * @enum {string}
+         */
+        TodoStage: "soon" | "today" | "overdue";
+        Todo: {
+            id: string;
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+            /** @description Username of the owner when it was set, shown once the account is gone. */
+            ownerName?: string;
+            /** @description Amount in fen (分) of renminbi; there is no other currency. */
+            amountCents?: number;
+            scope: components["schemas"]["TodoScope"];
+            status: components["schemas"]["TodoStatus"];
+            /** @description The day reminders resume; the to-do is snoozed while today is before it. */
+            snoozedUntil?: components["schemas"]["TodoDate"];
+            /** @description Grows when the to-do is snoozed, opened again or given another due date, which starts its reminders over. */
+            remindRound: number;
+            /**
+             * @description Where it came from; manual: added by hand.
+             * @enum {string}
+             */
+            source: "manual";
+            /** @description Counts edits to the fields; changing the status or snoozing does not change it. */
+            version: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description Account ID of who added it. */
+            createdById: string;
+            /** @description Username of who added it, when they added it. */
+            createdByName: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /**
+             * Format: date-time
+             * @description Set while it is done or ignored.
+             */
+            closedAt?: string;
+            /** @description Account ID of who marked it done or ignored. */
+            closedById?: string;
+            /** @description Username of who marked it done or ignored, when they did. */
+            closedByName?: string;
+        };
+        TodoFields: {
+            /** @description Repeating a request with the same key returns the first to-do. */
+            requestKey?: string;
+            /** @description At most 10 characters, which a shared screen can show whole. */
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An active account's ID; absent means the whole family. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+        };
+        TodoEdit: {
+            title: string;
+            /** @description other when absent. */
+            category?: components["schemas"]["TodoCategory"];
+            due?: components["schemas"]["TodoDate"];
+            /** @description An account's ID; absent means the whole family. A new owner must be an active account. */
+            ownerId?: string;
+            /** @description Amount in fen (分) of renminbi. */
+            amountCents?: number;
+            /** @description The version the edit was made from. */
+            version: number;
+        };
+        /** @description An active account a to-do can be given to. */
+        TodoOwner: {
+            id: string;
+            username: string;
+        };
+        TodoReminder: {
+            /** @description Names this reminder to the caller; acknowledging it stops this stage until the reminders start over. */
+            key: string;
+            todoId: string;
+            stage: components["schemas"]["TodoStage"];
+            title: string;
+            category: components["schemas"]["TodoCategory"];
+            due: components["schemas"]["TodoDate"];
+            scope: components["schemas"]["TodoScope"];
+            /** @description Account ID of whom it is for; absent means the whole family. */
+            ownerId?: string;
+        };
         ScoringMe: {
             /** @description The caller is an A-NAS administrator and so administers photo scoring. */
             admin: boolean;
@@ -6699,10 +7461,10 @@ export interface components {
             rater: boolean;
         };
         /**
-         * @description How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
+         * @description How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好).
          * @enum {string}
          */
-        ScoringScale: "hundredths" | "tenths" | "whole" | "three";
+        ScoringScale: "five" | "hundredths" | "tenths" | "whole" | "three";
         ScoringRaterBatch: {
             id: string;
             name: string;
@@ -6789,6 +7551,8 @@ export interface components {
             import: {
                 /** @description Files found in the folder; 0 until it was scanned. */
                 files: number;
+                /** @description The import is paused because the data volume is at its reserve; it goes on by itself once space is freed. */
+                waitingForSpace: boolean;
                 imported: number;
                 skipped: number;
                 /** @description The skipped files by reason, most first: too_small (a photo to score whose longer side is under 2400 pixels), unsupported_type, undecodable, too_large, unreadable, missing, not_a_file, anchor_name (an anchor without a score in its name). */
@@ -8023,12 +8787,58 @@ export interface components {
             status: components["schemas"]["TaskManagerStatus"];
             items: components["schemas"]["TaskManagerFan"][];
         };
+        /**
+         * @description Which coding agent the token was issued for; the connect dialog writes the command for it.
+         * @enum {string}
+         */
+        AgentKind: "claude-code" | "codex" | "other";
+        AgentToken: {
+            id: string;
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+            /** @enum {string} */
+            scope: "workspace";
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Updated at most every 10 minutes; absent until the agent's first call.
+             */
+            lastUsedAt?: string;
+        };
+        AgentTokenList: {
+            items: components["schemas"]["AgentToken"][];
+        };
+        AgentTokenRequest: {
+            /** @description 1–40 characters after trimming, without control characters. */
+            name: string;
+            kind: components["schemas"]["AgentKind"];
+        };
+        AgentTokenCreated: {
+            agentToken: components["schemas"]["AgentToken"];
+            /** @description anas_ws_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash. */
+            token: string;
+        };
         /** @description A disk of the data volume that is not there, as the plan that added it recorded it. */
         MissingDisk: {
             id: components["schemas"]["StableResourceID"];
             model?: string;
             /** Format: int64 */
             capacityBytes?: number;
+        };
+        PhoneHotspotSettings: {
+            /** @description Empty selects the device's default hotspot name */
+            ssid: string;
+            passwordConfigured: boolean;
+            portal: boolean;
+        };
+        PhoneHotspotSettingsChange: {
+            /** @description At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name. */
+            ssid?: string;
+            /** @description Omit to retain the saved password. Empty restores a fresh random password on each start. */
+            password?: string;
+            /** @description Advertise the WebOS entry via the mobile system's network sign-in prompt */
+            portal?: boolean;
         };
         /** @description Set on a device that runs the A-NAS image (ADR 0034 decision 2). */
         SystemUpdateImage: {
@@ -8050,6 +8860,141 @@ export interface components {
         FamilyAssetIDs: {
             assetIds: string[];
         };
+        WorkspaceAccess: {
+            /** @description Administrators also choose who may use the workspace. */
+            admin: boolean;
+        };
+        /** @description An account as it was named when it acted; the name stays after the account is deleted. */
+        WorkspacePerson: {
+            id: string;
+            name: string;
+        };
+        /** @description How a version was saved, from the desktop or by a member's agent named by its token. */
+        WorkspaceVia: {
+            /** @enum {string} */
+            kind: "web" | "claude-code" | "codex" | "other";
+            name?: string;
+        };
+        WorkspaceVersion: {
+            version: number;
+            /** @description Bytes */
+            size: number;
+            savedBy: components["schemas"]["WorkspacePerson"];
+            via: components["schemas"]["WorkspaceVia"];
+            /** @description What the member asked for, in their words; empty for uploads from the desktop. */
+            note: string;
+            /** @description Offsets of the elements an agent's edit changed in this version, for the open page to point at. */
+            changed: number[];
+            /** Format: date-time */
+            savedAt: string;
+        };
+        WorkspaceViewer: {
+            member: components["schemas"]["WorkspacePerson"];
+            /** @description What the member's tab used last shows. */
+            version: number;
+            /**
+             * Format: date-time
+             * @description When the first of the member's tabs began to show the page.
+             */
+            since: string;
+        };
+        /** @description What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page. */
+        WorkspaceAgentWork: {
+            member: components["schemas"]["WorkspacePerson"];
+            via: components["schemas"]["WorkspaceVia"];
+            /** @enum {string} */
+            action: "read" | "download";
+            version: number;
+            /** Format: date-time */
+            at: string;
+        };
+        /** @description Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only. */
+        WorkspacePresence: {
+            viewers: components["schemas"]["WorkspaceViewer"][];
+            agents: components["schemas"]["WorkspaceAgentWork"][];
+        };
+        WorkspacePageSummary: {
+            id: string;
+            title: string;
+            createdBy: components["schemas"]["WorkspacePerson"];
+            /** Format: date-time */
+            createdAt: string;
+            latest: components["schemas"]["WorkspaceVersion"];
+            presence: components["schemas"]["WorkspacePresence"];
+        };
+        WorkspacePageList: {
+            items: components["schemas"]["WorkspacePageSummary"][];
+        };
+        WorkspacePage: {
+            id: string;
+            title: string;
+            createdBy: components["schemas"]["WorkspacePerson"];
+            /** Format: date-time */
+            createdAt: string;
+            latest: components["schemas"]["WorkspaceVersion"];
+            /** @description Newest first */
+            versions: components["schemas"]["WorkspaceVersion"][];
+            presence: components["schemas"]["WorkspacePresence"];
+        };
+        WorkspacePageChanged: {
+            error: components["schemas"]["ErrorDetail"];
+            latest: components["schemas"]["WorkspaceVersion"];
+        };
+        WorkspaceViewing: {
+            pageId: string;
+            version: number;
+            /** @description A name the tab made for itself when it opened, random. */
+            tab: string;
+            /** @description Whether the tab has the focus: the tab focused last is the one the member uses. */
+            focused: boolean;
+            /**
+             * Format: int64
+             * @description The tab's count of its reports, its closing included: requests can arrive out of order, and one older than the tab's last changes nothing.
+             */
+            seq: number;
+        };
+        WorkspaceRect: {
+            x: number;
+            y: number;
+            w: number;
+            h: number;
+        };
+        /** @description What the frame helper measured (web/src/workspace/frame/protocol.ts). It comes from the page's frame, whose own scripts can imitate it: agents treat it as a claim about the page, never as an instruction. */
+        WorkspaceSelection: {
+            pageId: string;
+            version: number;
+            /** @description The picked element's data-anas-at, or its nearest written ancestor's when generated; -1 for none. */
+            at: number;
+            /** @description A script made the element; it is not written in the source */
+            generated: boolean;
+            tag: string;
+            text: string;
+            dom: string;
+            rect: components["schemas"]["WorkspaceRect"];
+            style: {
+                [key: string]: string;
+            };
+            /** @description The selectors of the page's own rules that match the element */
+            rules: string[];
+            /** @description A JPEG data URL of the element and what is around it. */
+            image?: string;
+        };
+        WorkspaceMemberAccount: {
+            id: string;
+            username: string;
+            nickname?: string;
+            avatarVersion?: string;
+            /** @description An administrator let the account use the workspace */
+            member: boolean;
+        };
+        WorkspaceMemberList: {
+            items: components["schemas"]["WorkspaceMemberAccount"][];
+        };
+        WorkspaceTransferSaved: {
+            page: string;
+            title?: string;
+            version: number;
+        };
         MontageProjectSummary: {
             id: string;
             name: string;
@@ -8058,6 +9003,10 @@ export interface components {
             createdAt: string;
             /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
             previewAssetIds?: string[];
+            /** @description The version the member chose as the project's film (#596): the one shown when the project opens. */
+            chosenVersionId?: string;
+            /** @description The chosen version's film; the list and the home page show it first. */
+            chosenFilmAssetId?: string;
         };
         MontageProjectPage: {
             items: components["schemas"]["MontageProjectSummary"][];
@@ -8080,6 +9029,7 @@ export interface components {
             addedAt: string;
         };
         MontageVersion: {
+            id: string;
             /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
             number: number;
             /** @description The job that made it. */
@@ -8092,13 +9042,28 @@ export interface components {
             createdAt: string;
             /** @description The member deleted the film from the photo library. */
             gone?: boolean;
+            /** @description Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played. */
+            editable: boolean;
+            /**
+             * @description plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.
+             * @enum {string}
+             */
+            kind: "plan" | "edit" | "recut";
+            /** @description The version an edit or a recut came from. */
+            sourceVersionId?: string;
+            /** @description That version's number, while it is recorded. */
+            sourceNumber?: number;
+            /** @description An edit: the draft's revision it was rendered from. */
+            draftRevision?: number;
+            /** @description A recut: the member's sentence, 按“<change>”重剪自第 N 版. */
+            change?: string;
         };
         MontageJobStep: {
             /**
-             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2.
+             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2. An edit's are source, fill, render and save.
              * @enum {string}
              */
-            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2";
+            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2" | "source";
             /**
              * @description A step that stopped with the job shows the job's state.
              * @enum {string}
@@ -8112,18 +9077,23 @@ export interface components {
         MontageJob: {
             id: string;
             projectId: string;
+            /**
+             * @description generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
+             * @enum {string}
+             */
+            kind: "generate" | "edit" | "recut";
             /** @enum {string} */
             state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
             /** @description The step the job is at or stopped at. */
             step?: string;
             /**
-             * @description Why a waiting job waits, or what a job that needs input needs. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_error: the planning failed twice before VNAS planned; error is what failed, and replanning goes on. A job waiting for vnas says in error what it waits for.
+             * @description Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for.
              * @enum {string}
              */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable";
+            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable" | "plan_failed";
             error?: string;
             steps: components["schemas"]["MontageJobStep"][];
-            /** @description The videos missing, too long, or whose analysis failed. */
+            /** @description The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them. */
             missingAssetIds?: string[];
             /** @description The first 方案's film. */
             version?: components["schemas"]["MontageVersion"];
@@ -8147,16 +9117,21 @@ export interface components {
             versions: components["schemas"]["MontageVersion"][];
             /** @description The project's latest job, for the page to pick up where it was after a reload. */
             job?: components["schemas"]["MontageJob"];
+            /** @description The version the member chose as the project's film; the other versions stay and can be chosen instead. */
+            chosenVersionId?: string;
+            /** @description The chosen version's film. */
+            chosenFilmAssetId?: string;
         };
         MontageNotice: {
             /** @enum {string} */
-            kind: "waiting_for_planning" | "planning" | "needs_input" | "saved";
+            kind: "waiting_for_planning" | "planning" | "needs_input" | "saved" | "failed";
             jobId: string;
             projectId: string;
             /** @description The project's name. */
             project: string;
+            /** @description The job's waitReason; for failed, plan_failed is one the member plans again (replan). */
             reason?: string;
-            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. */
+            /** @description Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. For failed, the job's error. */
             detail?: string;
             /** @description The film saved, for saved. */
             filmAssetId?: string;
@@ -8228,13 +9203,151 @@ export interface components {
             defaultStart?: number;
             selection?: components["schemas"]["MontageSongSelection"];
         };
-        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
+        /** @description The first step of the plan a version was cut by. */
+        MontageFilmPlan: {
+            design: string;
+            opening: string;
+            ending: string;
+        };
+        /** @description A part of the music and of the plan. */
+        MontageFilmPart: {
+            number: number;
+            name: string;
+            summary: string;
+            /** @description The music part's strength, from the song's analysis: 安静, 中等 or 高潮. */
+            level: string;
+            /** @description The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫. */
+            label: string;
+            start: number;
+            end: number;
+        };
+        MontageDraftShot: {
+            number: number;
+            /** @description card/n: the beat that leads the shot. */
+            beat: string;
+            /** @description The video it comes from. */
+            assetId: string;
+            part: number;
+            picture: number;
+            /** @description The music's slots it covers, from 1; more than one where it took a deleted shot's. */
+            slots: number[];
+            /** @description Seconds into the film. */
+            start: number;
+            end: number;
+            /** @description Seconds into its video the rough preview plays from: where the version had it, or the beat's piece. */
+            from: number;
+            to: number;
+            /** @description What the plan asked of its picture: 规划要. */
+            query: string;
+            shotSize: string;
+            what: string;
+            locked: boolean;
+            /** @description 已换: not a beat the version had in these slots. */
+            changed: boolean;
+            /** @description 延长: it took a deleted shot's slots. */
+            extended: boolean;
+            /** @description 竖: its video is narrower than 16:9 and is shown on a blurred background. */
+            portrait: boolean;
+        };
+        /** @description A film's shots, the videos they come from, and how many of those are 竖. */
+        MontageFilmCounts: {
+            shots: number;
+            videos: number;
+            portrait: number;
+        };
+        /** @description A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here. */
+        MontageVersionOutline: {
+            versionId: string;
+            projectId: string;
+            versionNumber: number;
+            /** @description How long the film is. */
+            seconds: number;
+            plan: components["schemas"]["MontageFilmPlan"];
+            parts: components["schemas"]["MontageFilmPart"][];
+            /** @description The film's shots, none of them changed, extended or locked. */
+            shots: components["schemas"]["MontageDraftShot"][];
+            counts: components["schemas"]["MontageFilmCounts"];
+            /** @description What the plan found the videos do not have, as the planner wrote it. */
+            unmet: string[];
+        };
+        MontageDraft: {
+            id: string;
+            versionId: string;
+            projectId: string;
+            versionNumber: number;
+            /** @description A step is made on this revision (baseRevision). */
+            revision: number;
+            canUndo: boolean;
+            /** @description Where the version's excerpt starts in its song, in seconds. */
+            songStart: number;
+            /** @description The draft's song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does. */
+            songTranscode: boolean;
+            /** @description How long the film is. */
+            seconds: number;
+            plan: components["schemas"]["MontageFilmPlan"];
+            parts: components["schemas"]["MontageFilmPart"][];
+            shots: components["schemas"]["MontageDraftShot"][];
+            counts: components["schemas"]["MontageFilmCounts"];
+            /** @description What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上. */
+            message?: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description One step of an edit (ADR 0039, decision 2; docs/architecture/montage-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred. */
+        MontageDraftOp: {
+            /** @enum {string} */
+            type: "replace" | "move" | "delete" | "lock" | "unlock" | "shuffle" | "revert" | "reset" | "undo";
+            /** @description The shot's number, from 1: replace, move, delete, lock, unlock, revert. */
+            shot?: number;
+            /** @description move: the shot whose place it takes. */
+            to?: number;
+            /** @description replace: the beat, card/n, as a candidate names it. */
+            beat?: string;
+            /** @description shuffle: the same seed on the same draft picks the same beats. */
+            seed?: number;
+        };
+        MontageCandidate: {
+            beat: string;
+            assetId: string;
+            /** @description The part of its video a try plays, in seconds. */
+            from: number;
+            to: number;
+            shotSize: string;
+            what: string;
+            scene: string;
+            portrait: boolean;
+            /** @description Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen. */
+            fits: boolean;
+            /** @description 已用在第 N 镜: the shot that has it; it cannot be chosen. */
+            usedBy?: number;
+            /** @description How alike the search found it; only to order by. */
+            score?: number;
+            /** Format: date-time */
+            takenAt?: string;
+        };
+        MontageCandidates: {
+            shot: number;
+            /** @description The picture's description, which the search box starts with. */
+            query: string;
+            /** @description The other beats of the shot's card. */
+            sameCard: components["schemas"]["MontageCandidate"][];
+            /** @description The plan's spare beats for its picture. */
+            planned: components["schemas"]["MontageCandidate"][];
+            /** @description With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape. */
+            results: components["schemas"]["MontageCandidate"][];
+            /** @description The scenes the cards were described in, most cards first: eight, and the rest as 其他. */
+            scenes: {
+                scene: string;
+                cards: number;
+            }[];
+        };
+        /** @description What a photo is scored on (打分项): one of the built-in ones, composition, light_color (光影, named 光影色彩 before), narrative (叙事性, named 叙事意境 before), subject (主体), overall (总体, named 总分 before), quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
             id: components["schemas"]["ScoringDimensionID"];
             /** @description The name raters see, such as 构图. */
             name: string;
-            /** @description What raters look at; empty for the built-in ones and for custom ones made without. */
+            /** @description What raters look at; empty for sharpness, narrative and preference and for custom ones made without. */
             description: string;
             /** @description An administrator made it. */
             custom: boolean;
@@ -8431,6 +9544,7 @@ export interface components {
         FamilyCommentID: string;
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
+        TodoID: string;
         ScoringBatchID: string;
         ScoringAnchorID: number;
         ScoringClaimToken: string;
@@ -8444,10 +9558,15 @@ export interface components {
         /** @description The approval's request id from Hermes. */
         AssistantRequestID: string;
         FamilyReactionName: components["schemas"]["FamilyReactionName"];
+        WorkspacePageID: string;
+        /** @description A version number, or latest */
+        WorkspaceVersionRef: string;
         /** @description The `next` of the previous page. */
         MontageCursor: string;
         MontageProjectID: string;
         MontageJobID: string;
+        MontageVersionID: string;
+        MontageDraftID: string;
     };
     requestBodies: never;
     headers: never;
@@ -8543,6 +9662,8 @@ export type SystemLogEntry = components['schemas']['SystemLogEntry'];
 export type SystemLogPage = components['schemas']['SystemLogPage'];
 export type WebSearchCategory = components['schemas']['WebSearchCategory'];
 export type WebSearchStatus = components['schemas']['WebSearchStatus'];
+export type PhoneHotspotStatus = components['schemas']['PhoneHotspotStatus'];
+export type PhoneHotspotRequest = components['schemas']['PhoneHotspotRequest'];
 export type WebSearchPausedEngine = components['schemas']['WebSearchPausedEngine'];
 export type WebSearchSettings = components['schemas']['WebSearchSettings'];
 export type WebSearchQuery = components['schemas']['WebSearchQuery'];
@@ -8601,6 +9722,16 @@ export type FamilyVaccineSchedule = components['schemas']['FamilyVaccineSchedule
 export type FamilyTimelineEntry = components['schemas']['FamilyTimelineEntry'];
 export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
+export type TodoDate = components['schemas']['TodoDate'];
+export type TodoCategory = components['schemas']['TodoCategory'];
+export type TodoScope = components['schemas']['TodoScope'];
+export type TodoStatus = components['schemas']['TodoStatus'];
+export type TodoStage = components['schemas']['TodoStage'];
+export type Todo = components['schemas']['Todo'];
+export type TodoFields = components['schemas']['TodoFields'];
+export type TodoEdit = components['schemas']['TodoEdit'];
+export type TodoOwner = components['schemas']['TodoOwner'];
+export type TodoReminder = components['schemas']['TodoReminder'];
 export type ScoringMe = components['schemas']['ScoringMe'];
 export type ScoringScale = components['schemas']['ScoringScale'];
 export type ScoringRaterBatch = components['schemas']['ScoringRaterBatch'];
@@ -8695,11 +9826,35 @@ export type SystemThermal = components['schemas']['SystemThermal'];
 export type TaskManagerTemperature = components['schemas']['TaskManagerTemperature'];
 export type TaskManagerFan = components['schemas']['TaskManagerFan'];
 export type TaskManagerFanGroup = components['schemas']['TaskManagerFanGroup'];
+export type AgentKind = components['schemas']['AgentKind'];
+export type AgentToken = components['schemas']['AgentToken'];
+export type AgentTokenList = components['schemas']['AgentTokenList'];
+export type AgentTokenRequest = components['schemas']['AgentTokenRequest'];
+export type AgentTokenCreated = components['schemas']['AgentTokenCreated'];
 export type MissingDisk = components['schemas']['MissingDisk'];
+export type PhoneHotspotSettings = components['schemas']['PhoneHotspotSettings'];
+export type PhoneHotspotSettingsChange = components['schemas']['PhoneHotspotSettingsChange'];
 export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
 export type FamilyAssetIDs = components['schemas']['FamilyAssetIDs'];
+export type WorkspaceAccess = components['schemas']['WorkspaceAccess'];
+export type WorkspacePerson = components['schemas']['WorkspacePerson'];
+export type WorkspaceVia = components['schemas']['WorkspaceVia'];
+export type WorkspaceVersion = components['schemas']['WorkspaceVersion'];
+export type WorkspaceViewer = components['schemas']['WorkspaceViewer'];
+export type WorkspaceAgentWork = components['schemas']['WorkspaceAgentWork'];
+export type WorkspacePresence = components['schemas']['WorkspacePresence'];
+export type WorkspacePageSummary = components['schemas']['WorkspacePageSummary'];
+export type WorkspacePageList = components['schemas']['WorkspacePageList'];
+export type WorkspacePage = components['schemas']['WorkspacePage'];
+export type WorkspacePageChanged = components['schemas']['WorkspacePageChanged'];
+export type WorkspaceViewing = components['schemas']['WorkspaceViewing'];
+export type WorkspaceRect = components['schemas']['WorkspaceRect'];
+export type WorkspaceSelection = components['schemas']['WorkspaceSelection'];
+export type WorkspaceMemberAccount = components['schemas']['WorkspaceMemberAccount'];
+export type WorkspaceMemberList = components['schemas']['WorkspaceMemberList'];
+export type WorkspaceTransferSaved = components['schemas']['WorkspaceTransferSaved'];
 export type MontageProjectSummary = components['schemas']['MontageProjectSummary'];
 export type MontageProjectPage = components['schemas']['MontageProjectPage'];
 export type MontageRequestKey = components['schemas']['MontageRequestKey'];
@@ -8715,6 +9870,15 @@ export type MontageSongSection = components['schemas']['MontageSongSection'];
 export type MontageSongPart = components['schemas']['MontageSongPart'];
 export type MontageSongSelection = components['schemas']['MontageSongSelection'];
 export type MontageSong = components['schemas']['MontageSong'];
+export type MontageFilmPlan = components['schemas']['MontageFilmPlan'];
+export type MontageFilmPart = components['schemas']['MontageFilmPart'];
+export type MontageDraftShot = components['schemas']['MontageDraftShot'];
+export type MontageFilmCounts = components['schemas']['MontageFilmCounts'];
+export type MontageVersionOutline = components['schemas']['MontageVersionOutline'];
+export type MontageDraft = components['schemas']['MontageDraft'];
+export type MontageDraftOp = components['schemas']['MontageDraftOp'];
+export type MontageCandidate = components['schemas']['MontageCandidate'];
+export type MontageCandidates = components['schemas']['MontageCandidates'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -8767,6 +9931,7 @@ export type ParameterFamilyBabyId = components['parameters']['FamilyBabyID'];
 export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID'];
 export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
 export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
+export type ParameterTodoId = components['parameters']['TodoID'];
 export type ParameterScoringBatchId = components['parameters']['ScoringBatchID'];
 export type ParameterScoringAnchorId = components['parameters']['ScoringAnchorID'];
 export type ParameterScoringClaimToken = components['parameters']['ScoringClaimToken'];
@@ -8776,9 +9941,13 @@ export type ParameterAssistantTaskId = components['parameters']['AssistantTaskID
 export type ParameterAssistantMemoryId = components['parameters']['AssistantMemoryID'];
 export type ParameterAssistantRequestId = components['parameters']['AssistantRequestID'];
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
+export type ParameterWorkspacePageId = components['parameters']['WorkspacePageID'];
+export type ParameterWorkspaceVersionRef = components['parameters']['WorkspaceVersionRef'];
 export type ParameterMontageCursor = components['parameters']['MontageCursor'];
 export type ParameterMontageProjectId = components['parameters']['MontageProjectID'];
 export type ParameterMontageJobId = components['parameters']['MontageJobID'];
+export type ParameterMontageVersionId = components['parameters']['MontageVersionID'];
+export type ParameterMontageDraftId = components['parameters']['MontageDraftID'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -9224,6 +10393,78 @@ export interface operations {
                     "application/json": components["schemas"]["User"];
                 };
             };
+        };
+    };
+    listAgentTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The member's agent tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenList"];
+                };
+            };
+        };
+    };
+    createAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The new token and its value */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTokenCreated"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    revokeAgentToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
         };
     };
     listProfiles: {
@@ -10855,6 +12096,90 @@ export interface operations {
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getPhoneHotspot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hotspot status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updatePhoneHotspot: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotRequest"];
+            };
+        };
+        responses: {
+            /** @description Hotspot operation accepted or the service is unavailable */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotStatus"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    savePhoneHotspotSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotSettingsChange"];
+            };
+        };
+        responses: {
+            /** @description Saved settings without the password */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotSettings"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -12975,6 +14300,821 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
+    listTodos: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description To-dos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Todo"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoFields"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoOwners: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoOwner"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listTodoReminders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["TodoReminder"][];
+                    };
+                };
+            };
+            503: components["responses"]["ProductError"];
+        };
+    };
+    acknowledgeTodoReminders: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    keys: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    updateTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TodoEdit"];
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    setTodoStatus: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["TodoStatus"];
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    snoozeTodo: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                todoId: components["parameters"]["TodoID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    days: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The to-do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Todo"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getWorkspaceAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller may use the workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceAccess"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listWorkspacePages: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pages */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageList"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    createWorkspacePage: {
+        parameters: {
+            query?: {
+                /** @description The uploaded file's name */
+                name?: string;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description The new page */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
+        };
+    };
+    getWorkspacePage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePage"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    deleteWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    renameWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The renamed page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageSummary"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    saveWorkspacePageVersion: {
+        parameters: {
+            query: {
+                baseVersion: number;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description The new version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceVersion"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description page_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageChanged"];
+                };
+            };
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
+        };
+    };
+    viewWorkspacePage: {
+        parameters: {
+            query?: {
+                highlight?: string;
+                scroll?: string;
+            };
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The marked page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    exportWorkspacePage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description A version number, or latest */
+                version: components["parameters"]["WorkspaceVersionRef"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page's file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    setWorkspaceViewing: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceViewing"];
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    clearWorkspaceViewing: {
+        parameters: {
+            query: {
+                /** @description The tab's count of its reports, as in WorkspaceViewing */
+                seq: number;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                /** @description The tab's name as it reported itself */
+                tab: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+        };
+    };
+    setWorkspaceSelection: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceSelection"];
+            };
+        };
+        responses: {
+            /** @description Recorded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    clearWorkspaceSelection: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Forgotten */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    listWorkspaceMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The accounts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberList"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Added */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    removeWorkspaceMember: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    openWorkspaceMCPStream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            /** @description Not offered */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            429: components["responses"]["ProductError"];
+        };
+    };
+    callWorkspaceMCP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description A JSON-RPC answer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description A notification was accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a JSON-RPC request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+        };
+    };
+    endWorkspaceMCPSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            /** @description Not offered */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            429: components["responses"]["ProductError"];
+        };
+    };
+    downloadWorkspaceTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page's file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    uploadWorkspaceTransfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "text/html": string;
+            };
+        };
+        responses: {
+            /** @description Saved */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTransferSaved"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description page_changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageChanged"];
+                };
+            };
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
+        };
+    };
     getMontage: {
         parameters: {
             query?: never;
@@ -13575,6 +15715,348 @@ export interface operations {
             503: components["responses"]["ProductError"];
         };
     };
+    confirmMontageVersion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageProject"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+        };
+    };
+    recutMontageVersion: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                    /** @description What to change, as a member's ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask's page does for the ask. */
+                    change: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The recut job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionOutline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version's outline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageVersionOutline"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageDraft"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    editMontageDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    baseRevision: number;
+                    op: components["schemas"]["MontageDraftOp"];
+                };
+            };
+        };
+        responses: {
+            /** @description The draft after the step, with what it did */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageDraft"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    saveMontageDraft: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["MontageRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The edit job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageJob"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageDraftSong: {
+        parameters: {
+            query?: {
+                /** @description Seconds to start a decoded song from; ignored for other songs. */
+                start?: number;
+            };
+            header?: {
+                Range?: string;
+            };
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listMontageDraftCandidates: {
+        parameters: {
+            query: {
+                /** @description The shot's number from 1. */
+                shot: number;
+                /** @description Words to search the project's videos for. */
+                q?: string;
+                /** @description Only this shot size (景别). */
+                size?: string;
+                /** @description Only this scene; 其他 for the scenes not listed. */
+                scene?: string;
+                /** @description Only 16:9 videos. */
+                landscape?: boolean;
+            };
+            header?: never;
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MontageCandidates"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getMontageVersionShots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                versionId: components["parameters"]["MontageVersionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shot list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    getMontageDraftShots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draftId: components["parameters"]["MontageDraftID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The shot list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+        };
+    };
+    getMontageFrame: {
+        parameters: {
+            query: {
+                /** @description Milliseconds into the video. */
+                t: number;
+            };
+            header?: never;
+            path: {
+                projectId: components["parameters"]["MontageProjectID"];
+                assetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frame */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
     listModules: {
         parameters: {
             query?: never;
@@ -13745,6 +16227,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     getScoringClaimImage: {
@@ -13767,6 +16250,7 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
         };
     };
@@ -13792,8 +16276,10 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             410: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     getScoringClaimThumbnail: {
@@ -13816,7 +16302,9 @@ export interface operations {
                     "image/jpeg": string;
                 };
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     rateScoringPhoto: {
@@ -13852,6 +16340,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     listScoringSources: {
@@ -13983,6 +16472,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     deleteScoringBatch: {
@@ -14091,6 +16581,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            507: components["responses"]["ProductError"];
         };
     };
     exportScoringBatch: {

@@ -2,6 +2,7 @@ import { ChevronDown, ListChecks, Plus } from "lucide-react";
 import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 
+import { Modal } from "../ui/modal";
 import {
   type FamilyBaby,
   type FamilyScheduledDose,
@@ -13,7 +14,6 @@ import type { Draft } from "./Composer";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { daysUntil, shortDate } from "./format";
-import { Modal } from "./parts";
 
 const done = (dose: FamilyScheduledDose) => dose.status === "given" || dose.status === "replaced";
 const doseKey = (dose: FamilyScheduledDose) => `${dose.code}-${dose.dose}`;
@@ -234,7 +234,7 @@ function PlanDialog({
   onClose: () => void;
   onSave: (codes: string[]) => Promise<void>;
 }) {
-  const { catalog } = useFamily();
+  const { catalog, container } = useFamily();
   const vaccines = catalog.vaccines.vaccines;
   const [chosen, setChosen] = useState(new Set(plan));
   const [busy, setBusy] = useState(false);
@@ -249,6 +249,7 @@ function PlanDialog({
   return (
     <Modal
       title="自费疫苗计划"
+      container={container}
       busy={busy}
       wide
       onClose={onClose}
