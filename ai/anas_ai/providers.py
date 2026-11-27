@@ -22,14 +22,17 @@ import math
 import multiprocessing
 import os
 import pathlib
+import re
 import shutil
 import socket
+import ssl
 import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 
 from anas_ai import describe as montage_card
 
@@ -950,6 +953,9 @@ class LlamaReader:
             f"{model['name']}@{model['sha256'][:12]}+{mmproj['name']}@{mmproj['sha256'][:12]}"
             f"+llama.cpp-{version}+img{OCR_IMAGE_TOKENS}"
         )
+        # A RemoteDescriber, for the internal test only (#648): describe()
+        # then asks it instead of llama-server; read() never does.
+        self.remote = None
 
     def run_options(self):
         return ReadingRun()
@@ -1017,7 +1023,10 @@ class LlamaReader:
                 "cache_prompt": True, "stream": True, "stream_options": {"include_usage": True},
                 "chat_template_kwargs": {"enable_thinking": False},
             }
-            text, _, finish, prompt_tokens = self._complete(body, run)
+            complete = self._complete
+            if self.remote is not None:
+                body, complete = self.remote.request(body), self.remote.complete
+            text, _, finish, prompt_tokens = complete(body, run)
             if not errors:
                 # Evidence for the estimate, which the NAS has yet to confirm.
                 log.info("card description from %d of %d key frames: %s prompt tokens estimated, %d counted",
@@ -1025,7 +1034,8 @@ class LlamaReader:
             # Frame dimensions determine the image token count. When the
             # context cut this answer short, retrying the same frames cannot
             # make room for the requested answer budget.
-            if finish == "length" and prompt_tokens + montage_card.MAX_TOKENS > OCR_CONTEXT:
+            # (Not for a remote describer, whose context is not llama-server's.)
+            if self.remote is None and finish == "length" and prompt_tokens + montage_card.MAX_TOKENS > OCR_CONTEXT:
                 raise InvalidInput(f"{prompt_tokens} prompt tokens leave insufficient room for the card description")
             try:
                 if finish != "stop":
@@ -1219,6 +1229,195 @@ class LlamaReader:
                 return file.read().decode(errors="replace")
         except OSError:
             return ""
+
+
+# How long a busy card describer (429, 5xx) is waited for before it is asked
+# again: a shared endpoint that refuses a request cools down for about 5 s.
+DESCRIBE_BUSY_WAITS = (5, 10, 20, 40)
+# How long looking the card describer up, connecting to it and, for https,
+# the handshake may take in all, over all of its addresses.
+DESCRIBE_CONNECT_SECONDS = 15
+# A 400 that says this card's request is too long for the model: the one
+# answer that is the card's own, which asking again cannot change.
+TOO_LONG = re.compile(r"context length|context window|maximum context|too long", re.IGNORECASE)
+# The only hosts a card describer may be reached at over plain http.
+LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+class _Busy(Exception):
+    """The card describer is busy: ask again later."""
+
+
+class RemoteDescriber:
+    """Sends LlamaReader's card descriptions to an OpenAI-compatible endpoint, for the internal test only (#648).
+
+    Describing a card on the experimental NAS takes over a minute. This
+    sends the key frames off the device, and needs the Worker's network,
+    against ADR 0016: the commit that adds it is reverted before
+    videocut-center goes into main. The Worker uses it only when its unit
+    sets ANAS_AI_DESCRIBE_URL (docs/runbooks/enable-remote-card-descriptions.md).
+
+    The request is llama-server's, but for the endpoint's model name, vLLM's
+    name for the repeat penalty and no prompt cache. The answer counts as the
+    reader's model's, since the photo library takes a description only from
+    the model that reads text.
+    """
+
+    def __init__(self, url, model, key="", busy_waits=DESCRIBE_BUSY_WAITS, timeout=OCR_SILENCE_SECONDS):
+        try:
+            parts = urllib.parse.urlsplit(url)
+            port = parts.port
+        except ValueError as error:
+            raise Unavailable(f"the remote card describer's URL: {error}") from error
+        if parts.scheme not in ("http", "https") or not parts.hostname or not model:
+            raise Unavailable("a remote card describer needs an https URL and a model name")
+        # The key frames and the key go over the network: in the clear only
+        # to this machine, as the tests' stand-in does.
+        if parts.scheme != "https" and parts.hostname not in LOOPBACK_HOSTS:
+            raise Unavailable(f"the remote card describer at {parts.hostname} needs https")
+        self.host = parts.hostname
+        self._connection = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
+        self._port = port
+        self._path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
+        self._model, self._key = model, key
+        self._busy_waits, self._timeout = tuple(busy_waits), timeout
+
+    def request(self, body):
+        """llama-server's request body as the endpoint takes it."""
+        sent = dict(body, model=self._model)
+        sent.pop("cache_prompt", None)
+        if "repeat_penalty" in sent:
+            sent["repetition_penalty"] = sent.pop("repeat_penalty")
+        return sent
+
+    def complete(self, body, run):
+        """As LlamaReader._complete: the text, no log probabilities, the finish reason and the prompt tokens.
+
+        A busy endpoint (429, 5xx) is asked again after each of busy_waits.
+        Anything else it answers but 200 is the endpoint's, not the card's:
+        a key or a URL it does not take, a redirect, a request it cannot
+        serve as configured. That, one still busy, or an endpoint it cannot
+        reach is Unavailable: the photo library waits and asks again,
+        without counting it against the card. Only a 400 that says the
+        request is too long (TOO_LONG) is InvalidInput, as from llama-server.
+        """
+        for wait in self._busy_waits:
+            try:
+                return self._post(body, run)
+            except _Busy as busy:
+                log.warning("%s; asking again in %g s", busy, wait)
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                if run.terminate:
+                    raise Cancelled()
+                time.sleep(min(0.2, wait))
+        try:
+            return self._post(body, run)
+        except _Busy as busy:
+            raise Unavailable(str(busy)) from busy
+
+    def _open(self, run):
+        """The socket to the endpoint, connected and, for https, encrypted, within DESCRIBE_CONNECT_SECONDS in all.
+
+        The name is looked up on a thread of its own, so that a stop is
+        noticed at once while the resolver waits; connecting and the
+        handshake share what is left of the time over all of the addresses,
+        and a stop is noticed between them.
+        """
+        deadline = time.monotonic() + DESCRIBE_CONNECT_SECONDS
+        https = self._connection is http.client.HTTPSConnection
+        port = self._port or (443 if https else 80)
+        found = {}
+
+        def look_up():
+            try:
+                found["addresses"] = socket.getaddrinfo(self.host, port, type=socket.SOCK_STREAM)
+            except OSError as error:
+                found["error"] = error
+
+        thread = threading.Thread(target=look_up, name="describer-lookup", daemon=True)
+        thread.start()
+        while thread.is_alive():
+            if run.terminate:
+                raise Cancelled()
+            if time.monotonic() >= deadline:
+                raise Unavailable(f"the card describer at {self.host}: no address within {DESCRIBE_CONNECT_SECONDS} s")
+            thread.join(0.2)
+        if "error" in found:
+            raise Unavailable(f"the card describer at {self.host}: {found['error']}")
+        failure = f"the card describer at {self.host}: not reached within {DESCRIBE_CONNECT_SECONDS} s"
+        for family, kind, proto, _, address in found["addresses"]:
+            left = deadline - time.monotonic()
+            if run.terminate:
+                raise Cancelled()
+            if left <= 0:
+                break
+            sock = socket.socket(family, kind, proto)
+            try:
+                sock.settimeout(left)
+                sock.connect(address)
+                if https:
+                    sock.settimeout(max(deadline - time.monotonic(), 0.1))
+                    sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+                return sock
+            except OSError as error:
+                sock.close()
+                failure = f"the card describer at {self.host}: {error}"
+        raise Unavailable(failure)
+
+    def _post(self, body, run):
+        headers = {"Content-Type": "application/json"}
+        if self._key:
+            headers["Authorization"] = "Bearer " + self._key
+        connection = self._connection(self.host, self._port, timeout=self._timeout)
+        text, finish, prompt_tokens, failed = [], None, 0, None
+        try:
+            connection.sock = self._open(run)
+            # The answer may take as long as llama-server's.
+            connection.sock.settimeout(self._timeout)
+            run.attach(connection.sock)
+            connection.request("POST", self._path, json.dumps(body), headers)
+            response = connection.getresponse()
+            if response.status != 200:
+                answer = f"the card describer answered {response.status}: {response.read(500).decode(errors='replace')}"
+                if response.status == 429 or response.status >= 500:
+                    raise _Busy(answer)
+                if response.status == 400 and TOO_LONG.search(answer):
+                    raise InvalidInput(answer)
+                raise Unavailable(answer)
+            for line in response:
+                if not line.startswith(b"data: ") or line.strip() == b"data: [DONE]":
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except ValueError:
+                    failed = f"the card describer sent {line[:200]!r}"
+                    break
+                if event.get("usage"):
+                    prompt_tokens = event["usage"].get("prompt_tokens", 0)
+                if "error" in event:
+                    failed = f"the card describer failed mid-answer: {json.dumps(event['error'], ensure_ascii=False)[:500]}"
+                    break
+                for choice in event.get("choices") or []:
+                    piece = (choice.get("delta") or {}).get("content")
+                    if piece:
+                        text.append(piece)
+                    finish = choice.get("finish_reason") or finish
+                if len(text) >= 400 and len(text) % 50 == 0 and looping("".join(text)):
+                    finish = "repetition"
+                    break
+        except (OSError, http.client.HTTPException) as error:
+            if not run.terminate:
+                raise Unavailable(f"the card describer at {self.host}: {error}") from error
+        finally:
+            connection.close()
+        if run.terminate:
+            raise Cancelled()
+        if failed is None and finish is None:
+            failed = "the card describer ended the answer without saying why"
+        if failed is not None:
+            raise Failed(failed)
+        return "".join(text), [], finish, prompt_tokens
 
 
 def fake_fields(schema, digest):
