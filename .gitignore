@@ -44,3 +44,6 @@ target/
 *.log
 *.pid
 diagnostics/
+
+# Suites vnas_eval.mine writes; the cases worth keeping go into scenarios/injection.yaml.
+ai/assistant-spike/scenarios/mined/

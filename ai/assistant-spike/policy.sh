@@ -21,17 +21,19 @@ policy() {
   cp -p "$policy_orig" /usr/lib/a-nas/assistant/managed/config.yaml
   if [[ -n ${1:-} ]]; then
     "$policy_py" - "$1" <<'PY'
+import json
 import sys
 from ruamel.yaml import YAML
 yaml = YAML(typ="safe")
-yaml.default_flow_style, yaml.allow_unicode = False, True
 def merge(base, extra):
     for key, value in extra.items():
         base[key] = merge(base.get(key) or {}, value) if isinstance(value, dict) else value
     return base
 policy = merge(yaml.load(open("/usr/lib/a-nas/assistant/managed/config.yaml")), yaml.load(sys.argv[1]))
+# JSON, which is YAML too: dumped as YAML a string like "off" comes out bare, and Hermes,
+# reading YAML 1.1, takes it for false.
 with open("/usr/lib/a-nas/assistant/managed/config.yaml", "w") as out:
-    yaml.dump(policy, out)
+    json.dump(policy, out, ensure_ascii=False, indent=1)
 PY
     echo "managed policy for this run adds: $(tr '\n' ' ' <<<"$1")"
   fi

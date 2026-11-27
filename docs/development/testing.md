@@ -161,7 +161,7 @@ docker run --rm --privileged -e ANAS_ROOT_INTEGRATION=1 -e CGO_ENABLED=1 \
 - 检查存储区与套接字的属主、权限和隔离。
 - 注入数据卷故障：把卷建在 device-mapper 设备上，换成 `error` 目标使 Btrfs 转为只读，再懒卸载与重新挂载，并在上传中途强制终止相册服务，确认相册暂停服务、不写系统盘并在卷恢复后自行重新打开。
 
-真实模型测试、运行环境构建和数据集评估见[AI 开发与评估](ai-development.md)。
+真实模型测试、运行环境构建和数据集评估见[AI 开发与评估](ai-development.md)。AI 助手的行为回归（换模型、升级 Hermes、改技能说明之后）见[评分场景](assistant-scenarios.md)。
 
 相册的规模基线（4 名成员、20,000 张，约 5 分钟）与 12 MP 缩略图计时默认跳过，在同一 cgo 容器中加 `-e ANAS_PHOTO_SCALE=1` 运行 `go test -count=1 -timeout 60m -run 'TestScale' -v ./internal/photos/`；结果的解读见[相册技术设计](../architecture/photo-library.md)切片 7。
 
@@ -263,4 +263,5 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)
+- [AI 助手的评分场景](assistant-scenarios.md)
 - [协议测试](../../ai/tests/test_protocol.py)、[几何测试](../../ai/tests/test_provider_geometry.py)与[启动测试](../../ai/tests/test_worker_startup.py)

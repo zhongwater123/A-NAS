@@ -59,7 +59,7 @@ PY
 for setting in pinned vision native; do
   for file in "$managed" "$member"; do
     cp "/var/tmp/vision-$([[ $file == "$managed" ]] && echo managed || echo member).orig" "$file"
-    sed -i 's#^    args: \[/spike/anas_mcp.py\]$#&\n    env: {ANAS_SPIKE_PHOTO_PIXELS: "1"}#' "$file"
+    sed -i 's#^    args: \[/usr/lib/a-nas/assistant/anas_mcp.py\]$#&\n    env: {ANAS_SPIKE_PHOTO_PIXELS: "1"}#' "$file"
   done
   [[ $setting != pinned ]] && sed -i 's/^  api_mode: chat_completions$/&\n  supports_vision: true/' "$managed"
   [[ $setting == native ]] && sed -i 's/^  image_input_mode: text$/  image_input_mode: auto/' "$managed"
