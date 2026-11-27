@@ -1,12 +1,15 @@
 package linux
 
 import (
+	"io/fs"
 	"testing"
 	"testing/fstest"
+
+	"github.com/zhongwater123/A-NAS/internal/hoststate"
 )
 
-// The Host Agent parses /proc, .desktop entries and smartctl's output as
-// root. These fuzz targets feed each parser arbitrary input: it must return
+// The Host Agent parses /proc, .desktop entries, smartctl's output and
+// the kernel's sensor files as root. These fuzz targets feed each parser arbitrary input: it must return
 // a value or an error, never panic (#223).
 
 func FuzzTaskDesktop(f *testing.F) {
@@ -53,6 +56,53 @@ func FuzzSMART(f *testing.F) {
 	f.Add([]byte(`{"temperature":{"current":-1e309}}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = parseSMART(data)
+	})
+}
+
+// FuzzThermal feeds the readers of hwmon temperatures, the package thermal
+// zone and fans arbitrary sensor files under one sensor number: each returns
+// a plausible reading or none, never panics (#223).
+func FuzzThermal(f *testing.F) {
+	f.Add("coretemp", "1", "Package id 0", []byte("63000\n"), []byte("100000\n"), []byte("1200\n"))
+	f.Add("k10temp", "2", "Tctl", []byte("-273150"), []byte("x"), []byte("18446744073709551615"))
+	f.Add("nvme", "01", "Composite", []byte("9223372036854775807"), []byte(""), []byte("-1"))
+	f.Add("nct6798", "0", "", []byte(" 41500 "), []byte("1e9"), []byte("50001"))
+	f.Fuzz(func(t *testing.T, driver, number, label string, input, critical, fan []byte) {
+		root := fstest.MapFS{}
+		put := func(name string, data []byte) {
+			if fs.ValidPath(name) {
+				root[name] = &fstest.MapFile{Data: data}
+			}
+		}
+		for _, directory := range []string{"sys/class/hwmon/hwmon0", "sys/class/nvme/nvme0/hwmon1", "sys/class/drm/card0/device/hwmon/hwmon2"} {
+			put(directory+"/name", []byte(driver+"\n"))
+			put(directory+"/temp"+number+"_input", input)
+			put(directory+"/temp"+number+"_label", []byte(label))
+			put(directory+"/temp"+number+"_crit", critical)
+			put(directory+"/fan"+number+"_input", fan)
+			put(directory+"/fan"+number+"_label", []byte(label))
+		}
+		put("sys/class/thermal/thermal_zone0/type", []byte(driver))
+		put("sys/class/thermal/thermal_zone0/temp", input)
+		temperatures := []*hoststate.Temperature{
+			readCPUTemperature(root),
+			readDeviceTemperature(root, "sys/class/nvme/nvme0", label, "Composite"),
+			readDeviceTemperature(root, "sys/class/drm/card0/device", gpuTemperatureLabels...),
+		}
+		if zone := readPackageThermalZone(root); zone != nil {
+			temperatures = append(temperatures, temperatureFrom(*zone))
+		}
+		for _, temperature := range temperatures {
+			if temperature != nil && !temperature.Valid() {
+				t.Fatalf("an implausible temperature %+v", *temperature)
+			}
+		}
+		fans, _ := readFanSensors(root)
+		for _, reading := range fans {
+			if reading.number < 1 || reading.rpm < 0 || reading.rpm > hoststate.MaxFanRPM || reading.id == "" {
+				t.Fatalf("an implausible fan %+v", reading)
+			}
+		}
 	})
 }
 
