@@ -14,7 +14,7 @@ func TestConfigPlacesTheBrokerAndTheAssistantsChangesBesideTheirDefaults(t *test
 	if c.FileBrokerSocket != "/run/a-nas/file-broker.sock" || c.StateDir != "/var/lib/a-nas" || c.AssistantChanges != "" ||
 		c.PhotoSessionGroup != accountid.PhotoServiceUser || c.ShareSessionGroup != accountid.ShareServiceUser ||
 		c.FamilySessionGroup != accountid.FamilyServiceUser || c.FamilySessionSocket != "/run/a-nas-family-sessions/family.sock" ||
-		c.MontageSessionGroup != accountid.MontageServiceUser || c.MontageSessionSocket != "/run/a-nas-montage-sessions/montage.sock" ||
+		c.VideoCutSessionGroup != accountid.VideoCutServiceUser || c.VideoCutSessionSocket != "/run/a-nas-videocut-sessions/videocut.sock" ||
 		c.WorkspaceSessionGroup != accountid.WorkspaceServiceUser || c.WorkspaceSessionSocket != "/run/a-nas-workspace-sessions/workspace.sock" {
 		t.Fatalf("config = %+v", c)
 	}

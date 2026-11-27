@@ -173,8 +173,8 @@ systemctl daemon-reload
 # A running Worker and vector index belong to the previous release; the next
 # connection starts this release's. Clients reconnect to this release's
 # FFmpeg worker and its shared admission slots.
-systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' anas-montage-compute.socket anas-montage-compute.service || true
-systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-montage-compute.socket
+systemctl stop anas-ai.service 'anas-vectors-proxy@*.service' 'anas-vectors@*.service' anas-videocut-compute.socket anas-videocut-compute.service || true
+systemctl restart anas-ai.socket anas-ffmpeg.socket anas-vectors-proxy@a-nas-photos.socket anas-videocut-compute.socket
 # This machine's settings, with the credential key that encrypts the
 # assistant's model key: failures leave the product running and are reported
 # below.
@@ -187,24 +187,24 @@ systemctl start smbd.service || true
 # planner's restart those of their planning instances.
 systemctl stop 'anas-assistant@*.service' 'anas-assistant-cron@*.service' 'anas-assistant-curator@*.service' \
   'anas-assistant-planapi@*.service' 'anas-assistant-plan@*.service' 2>/dev/null || true
-# The montage center's planning ran in rounds of members' scheduled tasks
+# VideoCut's planning ran in rounds of members' scheduled tasks
 # before it had a planning instance and a planner of its own: the waker's
 # counts of those rounds and the receipts the rounds left in members' Hermes
 # homes have nothing left to read them.
 rm -rf -- /var/lib/anas-assistant-cron-waker
-if mountpoint -q /srv/a-nas/data; then rm -f -- /srv/a-nas/data/assistant/*/hermes/anas-montage-claim; fi
+if mountpoint -q /srv/a-nas/data; then rm -f -- /srv/a-nas/data/assistant/*/hermes/anas-videocut-claim; fi
 # The photo service's grant socket starts with it (its Wants=), in the gap
 # its restart leaves: systemd refuses to start a socket while the service it
 # activates runs, and the assistant's socket can start the photo service at
 # any time. The release before stopped the grant socket in its prerm.
 systemctl restart anas-host-agent.service anas-photos.service anas-api.service anas-shares.service anas-family.service \
-  anas-montage.service anas-workspace.service
+  anas-videocut.service anas-workspace.service
 systemctl try-restart 'anas-kiosk@*.service' || true
 # The assistant's model gateway, the waker of its scheduled tasks and the
-# montage center's planner run only while the administrator's key is saved
+# VideoCut's planner run only while the administrator's key is saved
 # (their units' condition); the Product Service's identity synchronization
 # prepares each member's assistant.
-systemctl restart anas-assistant-gateway.service anas-assistant-cron-waker.service anas-montage-planner.service || true
+systemctl restart anas-assistant-gateway.service anas-assistant-cron-waker.service anas-videocut-planner.service || true
 # A running container agent keeps its program until the administrator restarts
 # it: stopping it cancels an app installation in progress, which the App
 # Center then rolls back (docs/runbooks/install-container-agent.md). It and

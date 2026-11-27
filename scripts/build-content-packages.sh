@@ -17,12 +17,12 @@
 # Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
 # pins.
 #
-# With --montage-music it also builds the content of the montage center's
-# music analysis (docs/architecture/montage-music.md): allin1's and Demucs'
+# With --videocut-music it also builds the content of VideoCut's
+# music analysis (docs/architecture/videocut-music.md): allin1's and Demucs'
 # models, and its runtime from
-#   montage-music-runtimes/<id>.tar.gz  scripts/build-montage-music-runtime.sh's tarball
+#   videocut-music-runtimes/<id>.tar.gz  scripts/build-videocut-music-runtime.sh's tarball
 # No release depends on them while allin1's licence is pending; the
-# Experimental NAS installs them by hand (docs/runbooks/enable-montage-music.md).
+# Experimental NAS installs them by hand (docs/runbooks/enable-videocut-music.md).
 #
 # With --aesthetic-scorer-only, build just the scoring model for internal evaluation.
 # Default releases omit its weights while redistribution is pending.
@@ -34,21 +34,21 @@
 # CONTENT. Stand-ins go to a
 # directory of their own, never to a repository.
 #
-# Usage: scripts/build-content-packages.sh [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT
+# Usage: scripts/build-content-packages.sh [--stand-in] [--videocut-music | --aesthetic-scorer-only] OUT CONTENT
 set -euo pipefail
 
-stand_in=false montage_music=false aesthetic_only=false
+stand_in=false videocut_music=false aesthetic_only=false
 while [[ "${1:-}" == --* ]]; do
   case $1 in
     --stand-in) stand_in=true ;;
     --aesthetic-scorer-only) aesthetic_only=true ;;
-    --montage-music) montage_music=true ;;
+    --videocut-music) videocut_music=true ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
 done
-if [[ $# -ne 2 ]] || { "$aesthetic_only" && "$montage_music"; }; then
-  echo "usage: $0 [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT" >&2
+if [[ $# -ne 2 ]] || { "$aesthetic_only" && "$videocut_music"; }; then
+  echo "usage: $0 [--stand-in] [--videocut-music | --aesthetic-scorer-only] OUT CONTENT" >&2
   exit 2
 fi
 mkdir -p "$1"
@@ -122,8 +122,8 @@ model_manifests=()
 for role in "${model_roles[@]}"; do
   model_manifests+=("${role##*:}")
 done
-if "$montage_music"; then
-  for role in "${montage_music_roles[@]}"; do
+if "$videocut_music"; then
+  for role in "${videocut_music_roles[@]}"; do
     model_manifests+=("${role#*:}")
   done
 fi
@@ -197,9 +197,9 @@ runtime() {
 runtime "a-nas-ai-runtime-$(ai_runtime_id "$repo")" ai-runtimes "$(ai_runtime_id "$repo")" ''
 runtime "a-nas-search-runtime-$(search_runtime_id "$repo")" search-runtimes "$(search_runtime_id "$repo")" \
   "$repo/scripts/system-test-search.py"
-if "$montage_music"; then
-  runtime "a-nas-montage-music-runtime-$(montage_music_runtime_id "$repo")" montage-music-runtimes \
-    "$(montage_music_runtime_id "$repo")" ''
+if "$videocut_music"; then
+  runtime "a-nas-videocut-music-runtime-$(videocut_music_runtime_id "$repo")" videocut-music-runtimes \
+    "$(videocut_music_runtime_id "$repo")" ''
 fi
 
 # Qdrant (ADR 0028): its binary alone, out of the official tarball.

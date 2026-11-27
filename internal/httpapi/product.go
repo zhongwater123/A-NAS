@@ -21,13 +21,13 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/localorigin"
 	"github.com/zhongwater123/A-NAS/internal/modules"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/music"
 	"github.com/zhongwater123/A-NAS/internal/personalization"
 	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 	"github.com/zhongwater123/A-NAS/internal/storage"
 	"github.com/zhongwater123/A-NAS/internal/systemlog"
 	"github.com/zhongwater123/A-NAS/internal/systemupdateapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
 	"github.com/zhongwater123/A-NAS/internal/websearchapi"
 )
@@ -62,17 +62,17 @@ type ProductDependencies struct {
 	// accounts.WithUser with the session token; on a NAS the family service
 	// confirms the session itself (ADR 0029).
 	Family http.Handler
-	// Montage serves /api/v1/montage, 剪辑中心, like Family; nil while its
+	// VideoCut serves /api/v1/videocut, 剪辑中心, like Family; nil while its
 	// switch is off (ADR 0038).
-	Montage http.Handler
+	VideoCut http.Handler
 	// Workspace serves /api/v1/workspace, 共享工作区 (ADR 0040): the desktop's
 	// pages behind the session, the agents' MCP endpoint behind the agent
 	// posture, and one-time transfer links. On a NAS the workspace service
 	// confirms the session or the agent token itself.
 	Workspace http.Handler
-	// PlanGrants registers the member's planning grant for the montage
-	// center's background planning (the File Broker); nil goes on without.
-	PlanGrants montageapi.PlanRegistrar
+	// PlanGrants registers the member's planning grant for VideoCut's
+	// background planning (the File Broker); nil goes on without.
+	PlanGrants protocol.PlanRegistrar
 	// Modules are the removable modules the Product Service knows (ADR
 	// 0037): each is mounted under /api/v1/modules/<id> with the posture of
 	// its mounts and finds the caller behind the session token itself.

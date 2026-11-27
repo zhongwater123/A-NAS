@@ -94,7 +94,7 @@ type config struct {
 	// the data volume), where only root may read them. The instance secrets
 	// are the Host Agent's own, written where the executor prepares a member's
 	// assistant (Executor.AssistantTokenDir), so they have no setting; nor
-	// have the members' planning grants for the montage center, which the
+	// have the members' planning grants for VideoCut, which the
 	// File Broker keeps beside them (Executor.AssistantPlanDir).
 	AssistantSockets       string `env:"ANAS_ASSISTANT_SOCKET_DIR"`
 	AssistantChanges       string `env:"ANAS_ASSISTANT_CHANGES_DIR"`
@@ -108,19 +108,19 @@ type config struct {
 	PhotoSessionSocket string `env:"ANAS_PHOTO_SESSION_SOCKET" envDefault:"/run/a-nas-sessions/photos.sock"`
 	// PhotoAssistantLookup=1 looks accounts up by UID for the photo
 	// service's socket for members' AI assistants, as the unit sets it.
-	PhotoAssistantLookup string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
-	ShareSessionGroup    string `env:"ANAS_SHARE_SESSION_GROUP"`
-	ShareSessionSocket   string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
-	FamilySessionGroup   string `env:"ANAS_FAMILY_SESSION_GROUP"`
-	FamilySessionSocket  string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
-	MontageSessionGroup  string `env:"ANAS_MONTAGE_SESSION_GROUP"`
-	MontageSessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+	PhotoAssistantLookup  string `env:"ANAS_PHOTO_ASSISTANT_LOOKUP"`
+	ShareSessionGroup     string `env:"ANAS_SHARE_SESSION_GROUP"`
+	ShareSessionSocket    string `env:"ANAS_SHARE_SESSION_SOCKET" envDefault:"/run/a-nas-share-sessions/shares.sock"`
+	FamilySessionGroup    string `env:"ANAS_FAMILY_SESSION_GROUP"`
+	FamilySessionSocket   string `env:"ANAS_FAMILY_SESSION_SOCKET" envDefault:"/run/a-nas-family-sessions/family.sock"`
+	VideoCutSessionGroup  string `env:"ANAS_VIDEOCUT_SESSION_GROUP"`
+	VideoCutSessionSocket string `env:"ANAS_VIDEOCUT_SESSION_SOCKET" envDefault:"/run/a-nas-videocut-sessions/videocut.sock"`
 	// The shared workspace's lookup also resolves its agent tokens (ADR 0040).
 	WorkspaceSessionGroup  string `env:"ANAS_WORKSPACE_SESSION_GROUP"`
 	WorkspaceSessionSocket string `env:"ANAS_WORKSPACE_SESSION_SOCKET" envDefault:"/run/a-nas-workspace-sessions/workspace.sock"`
-	// MontageAssistantLookup=1 looks accounts up by UID for the montage
-	// center's socket for planning, as the unit sets it.
-	MontageAssistantLookup string `env:"ANAS_MONTAGE_ASSISTANT_LOOKUP"`
+	// VideoCutAssistantLookup=1 looks accounts up by UID for VideoCut's
+	// socket for planning, as the unit sets it.
+	VideoCutAssistantLookup string `env:"ANAS_VIDEOCUT_ASSISTANT_LOOKUP"`
 	// Removable modules (ADR 0037): their manifests name the stores to
 	// keep, and their units grant the group of their session lookup.
 	ModuleManifests     string `env:"ANAS_MODULE_MANIFESTS" envDefault:"/etc/a-nas/modules"`
@@ -154,8 +154,8 @@ func loadConfig(environment map[string]string) (config, error) {
 	if c.FamilySessionGroup == "" {
 		c.FamilySessionGroup = accountid.FamilyServiceUser
 	}
-	if c.MontageSessionGroup == "" {
-		c.MontageSessionGroup = accountid.MontageServiceUser
+	if c.VideoCutSessionGroup == "" {
+		c.VideoCutSessionGroup = accountid.VideoCutServiceUser
 	}
 	if c.WorkspaceSessionGroup == "" {
 		c.WorkspaceSessionGroup = accountid.WorkspaceServiceUser
@@ -289,12 +289,12 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer stopFamilyLookup()
-	stopMontageLookup, err := serveServiceSessionLookup("montage", config.MontageSessionGroup, config.MontageSessionSocket, sessions,
-		config.MontageAssistantLookup == "1", "", logger)
+	stopVideoCutLookup, err := serveServiceSessionLookup("videocut", config.VideoCutSessionGroup, config.VideoCutSessionSocket, sessions,
+		config.VideoCutAssistantLookup == "1", "", logger)
 	if err != nil {
 		return err
 	}
-	defer stopMontageLookup()
+	defer stopVideoCutLookup()
 	stopWorkspaceLookup, err := serveServiceSessionLookup("workspace", config.WorkspaceSessionGroup, config.WorkspaceSessionSocket, sessions,
 		false, accountid.AgentScopeWorkspace, logger)
 	if err != nil {
@@ -494,11 +494,11 @@ func ensureManagedStores(ctx context.Context, executor *linuxhostops.Executor, l
 		logger.ErrorContext(ctx, "family store repair failed", "error", familyErr)
 	}
 	logRepairs(logger, familyRepairs)
-	montageRepairs, montageErr := executor.EnsureMontageStore(ctx)
-	if montageErr != nil {
-		logger.ErrorContext(ctx, "montage store repair failed", "error", montageErr)
+	videoCutRepairs, videoCutErr := executor.EnsureVideoCutStore(ctx)
+	if videoCutErr != nil {
+		logger.ErrorContext(ctx, "VideoCut store repair failed", "error", videoCutErr)
 	}
-	logRepairs(logger, montageRepairs)
+	logRepairs(logger, videoCutRepairs)
 	workspaceRepairs, workspaceErr := executor.EnsureWorkspaceStore(ctx)
 	if workspaceErr != nil {
 		logger.ErrorContext(ctx, "workspace store repair failed", "error", workspaceErr)

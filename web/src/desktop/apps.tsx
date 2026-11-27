@@ -34,7 +34,7 @@ const AppCenterPanel = lazyCode(() => import("../appcenter/AppCenterPanel").then
 const AssistantPanel = lazyCode(() => import("../assistant/AssistantPanel").then((module) => module.AssistantPanel));
 const BackupCenter = lazyCode(() => import("../backup/BackupCenter").then((module) => module.BackupCenter));
 const FamilyPanel = lazyCode(() => import("../family/FamilyPanel").then((module) => module.FamilyPanel));
-const MontagePanel = lazyCode(() => import("../montage/MontagePanel").then((module) => module.MontagePanel));
+const VideoCutPanel = lazyCode(() => import("../videocut/VideoCutPanel").then((module) => module.VideoCutPanel));
 const DockerPanel = lazyCode(() => import("../docker/DockerPanel").then((module) => module.DockerPanel));
 const FilePanel = lazyCode(() => import("../files/FilePanel").then((module) => module.FilePanel));
 const MediaCenter = lazyCode(() => import("../media/MediaCenter").then((module) => module.MediaCenter));
@@ -94,8 +94,8 @@ export interface WindowContext {
   // 照片打分 shows only where its module is installed, to its administrators
   // and the raters they chose (ADR 0037).
   scoring: ScoringAccess;
-  // 剪辑中心 shows only while the device turns it on (ANAS_MONTAGE_ENABLED, ADR 0038).
-  montage: boolean;
+  // 剪辑中心 shows only while the device turns it on (ANAS_VIDEOCUT_ENABLED, ADR 0038).
+  videocut: boolean;
   // 共享工作区 shows to administrators and the members they added (ADR 0040); null to everyone else.
   workspace: WorkspaceAccess | null;
   open: OpenWindow;
@@ -356,17 +356,17 @@ const definitions = {
       />
     ),
   },
-  montage: {
+  videocut: {
     title: "剪辑中心",
     icon: Clapperboard,
-    tone: "montage",
+    tone: "videocut",
     bounds: { x: 220, y: 48, width: 1080, height: 720 },
     launcher: {
-      id: "montage",
-      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage video",
-      visible: ({ montage }) => montage,
+      id: "videocut",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage videocut video",
+      visible: ({ videocut }) => videocut,
     },
-    render: ({ session }) => <MontagePanel userId={session.user.id} />,
+    render: ({ session }) => <VideoCutPanel userId={session.user.id} />,
   },
   workspace: {
     title: "共享工作区",

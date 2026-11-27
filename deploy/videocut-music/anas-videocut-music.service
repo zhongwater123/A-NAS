@@ -1,0 +1,57 @@
+[Unit]
+Description=A-NAS VideoCut music analysis Worker (allin1)
+Documentation=https://github.com/zhongwater123/A-NAS
+Requires=anas-videocut-music.socket
+After=anas-videocut-music.socket
+
+[Service]
+Type=simple
+# Finds a song's beats, downbeats and sections with allin1 for VideoCut
+# (docs/architecture/videocut-music.md). The song arrives as two
+# streams of samples the VideoCut service decodes with the media worker; the
+# Worker has no network and no data volume, so a song cannot leave the device
+# through it. Its runtime and models are content packages of their own,
+# linked here by a-nas-videocut-music.
+User=a-nas-videocut-music
+DynamicUser=true
+Environment=PYTHONPATH=/usr/lib/a-nas/videocut-music:/usr/lib/a-nas/ai
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HF_HUB_OFFLINE=1
+Environment=MPLCONFIGDIR=/var/cache/a-nas-videocut-music/matplotlib
+Environment=NUMBA_CACHE_DIR=/var/cache/a-nas-videocut-music/numba
+# librosa, which allin1 imports once the stems are separated, asks platformdirs
+# for a cache directory and fails without a home; DynamicUser has none, so
+# it is the unit's own cache. Fontconfig reads the same variable.
+Environment=XDG_CACHE_HOME=/var/cache/a-nas-videocut-music
+ExecStart=/usr/lib/a-nas/videocut-music/runtime/bin/python -m anas_videocut_music.worker --allin1 /usr/lib/a-nas/videocut-music/allin1 --allin1-manifest /usr/lib/a-nas/videocut-music/allin1.json --demucs /usr/lib/a-nas/videocut-music/demucs --demucs-manifest /usr/lib/a-nas/videocut-music/demucs.json
+CacheDirectory=a-nas-videocut-music
+CacheDirectoryMode=0700
+UMask=0077
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectHome=true
+ProtectSystem=strict
+InaccessiblePaths=-/srv/a-nas
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# Background work under anas.slice, which gives way to everything else on the
+# device. An 8-minute song, the longest VideoCut takes (the user,
+# 2026-11-18), peaked at 4,593 MiB in a Debian 13 runtime like the NAS's; the
+# limit leaves a fifth more (docs/architecture/videocut-music.md, 用时与内存).
+# A song that needs more ends this Worker, not the device's other services.
+Slice=anas.slice
+MemoryMax=5632M
+MemorySwapMax=0
+OOMScoreAdjust=500

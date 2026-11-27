@@ -1,6 +1,6 @@
 # 0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本
 
-状态：accepted（2026-11-19 起草，同日接受：用户说“你评审就行了，没问题的话可以拆子票准备开发了”，评审没有遗留问题；第 4、5、7、8、10 项由用户 2026-11-19 定下，同日用户要求照原型补齐第 1、2、8、11 项里的界面与规则；“确认这一版”的做法与镜头清单的格式按默认定下，见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)；修订[剪辑中心规格](../specs/montage-center.md#非目标)的非目标“挑一版、快捷微调、精修”；2026-11-25 记下实现与原文不同的四处和新交互要修订的项，见“实现与后续修订”）
+状态：accepted（2026-11-19 起草，同日接受：用户说“你评审就行了，没问题的话可以拆子票准备开发了”，评审没有遗留问题；第 4、5、7、8、10 项由用户 2026-11-19 定下，同日用户要求照原型补齐第 1、2、8、11 项里的界面与规则；“确认这一版”的做法与镜头清单的格式按默认定下，见[决定记录](../decisions/2026-11-19-montage-edit-defaults.md)；修订[剪辑中心规格](../specs/videocut-center.md#非目标)的非目标“挑一版、快捷微调、精修”；2026-11-25 记下实现与原文不同的四处和新交互要修订的项，见“实现与后续修订”）
 
 剪辑中心出了方案一、方案二两条成片之后，成员要能在成片上直接改：确认一版、按音乐槽换镜头，或者说一句话让 VNAS 重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)，父 issue [#514](https://github.com/zhongwater123/A-NAS/issues/514)）。第八版网页原型已经做出了这套交互，但修改只存在浏览器里，“重剪”“修改后的渲染”“预览”都是模拟的。
 
@@ -40,7 +40,7 @@
 ## 背景
 
 - **原型**：第八版的[网页原型](https://github.com/zhongwater123/A-NAS/blob/feat/video-montage-v5/ai/montage_v8/web/index.html)（#454 的分支，只作参考）。选版页 `#/choose` 每版下面有“修改镜头”“确认这一版”和一句话的“重剪”；修改页 `#/edit/<方案>` 按音乐段落排出镜头，可以替换、拖动、删除、锁定、重洗、撤销、预览、导出镜头清单。说明见[第七版研究](https://github.com/zhongwater123/A-NAS/blob/feat/video-montage-v5/docs/research/video-montage-v7.md)：换镜头与锁定存在浏览器的 `localStorage`，预览按槽依次播原片片段，重剪只放 3 秒动画。
-- **首版**：[实施方案](../architecture/montage-center.md#首版范围)把精修、挑一版和说一句重剪都列为延后，理由是要在服务端保存编辑记录并让修改进入导出，文字搜镜头还要窗口向量的检索。
+- **首版**：[实施方案](../architecture/videocut-center.md#首版范围)把精修、挑一版和说一句重剪都列为延后，理由是要在服务端保存编辑记录并让修改进入导出，文字搜镜头还要窗口向量的检索。
 - **main 上的代码**（`99446cf5`，2026-11-19 核对）：
   - 时间线是 `fill`/`fill-N` 步骤的结果 `{clips, known}`（`internal/montage/render.go`）。音乐槽按“段落 → 画面 → 小节槽”嵌套，长度与切点来自配乐分析；一个槽由选中的节拍填，不够长时由 `fill` 按规则补上别的片段，所以一个槽可能有几段。
   - 每个画面有第一步规划写的画面描述 `query`，第二步答案还多列了一两个备用节拍；`fill` 把 `query` 抄进每个镜头，备用节拍只留在 `shots` 步骤的结果里。
@@ -84,7 +84,7 @@
    - 可以从任意一镜开始播，改一步就能马上再看，不占 FFmpeg 的后台槽位。
    - **音乐**：剪辑中心按这一版任务快照里的配乐副本与选段起点，经 `GET /drafts/{id}/song` 按 Range 送出。
    - **存为新版本**：`edit` 任务按修改稿走“查素材 → 重新填槽 → 渲染 → 存回”，不留中间的预览文件。存回的是新版本、原版本不动，所以先渲染出来再看是不是想要的；不满意就在相册里删掉，修改稿还在，可以接着改。
-   - **即时的辅助**：镜头与候选的缩略图由剪辑中心经 `open` 加 FFmpeg `frames`（JPEG，长边 320，`Interactive` 优先级）现取，不存盘，靠浏览器缓存（内容对象不可变，可以 `private, immutable`）。成员在页面上等着看，所以不用 `Background`；这是剪辑中心第一个不走 `Background` 的 FFmpeg 请求，实施方案“[FFmpeg Worker 的新操作](../architecture/montage-center.md#ffmpeg-worker-的新操作)”中“新操作都用 `Background`”在 R1 改写。单个节拍的试看也用相册的视频播放，从节拍起点播到终点。`VideoPlayer` 还不支持起止时间，实施时补上，粗预览与试看共用。
+   - **即时的辅助**：镜头与候选的缩略图由剪辑中心经 `open` 加 FFmpeg `frames`（JPEG，长边 320，`Interactive` 优先级）现取，不存盘，靠浏览器缓存（内容对象不可变，可以 `private, immutable`）。成员在页面上等着看，所以不用 `Background`；这是剪辑中心第一个不走 `Background` 的 FFmpeg 请求，实施方案“[FFmpeg Worker 的新操作](../architecture/videocut-center.md#ffmpeg-worker-的新操作)”中“新操作都用 `Background`”在 R1 改写。单个节拍的试看也用相册的视频播放，从节拍起点播到终点。`VideoPlayer` 还不支持起止时间，实施时补上，粗预览与试看共用。
    - 不选“每次预览都先渲染一遍”：一次预览就是一次完整渲染，几分钟里占着后台 FFmpeg 槽位，改一步看一次等不起；存为新版本又不覆盖原片，渲染一次就够。
 
 5. **改完另存新版本，原版本不动**（用户 2026-11-19 定）。
@@ -129,7 +129,7 @@
 
 ## 接口
 
-挂在现有的 `/api/v1/montage`，约定同[实施方案](../architecture/montage-center.md#接口)：
+挂在现有的 `/api/v1/montage`，约定同[实施方案](../architecture/videocut-center.md#接口)：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -176,7 +176,7 @@
 ## 关联
 
 - 需求：[#596](https://github.com/zhongwater123/A-NAS/issues/596)、[#514](https://github.com/zhongwater123/A-NAS/issues/514)；原型 PR [#454](https://github.com/zhongwater123/A-NAS/pull/454)
-- 规格与方案：[剪辑中心规格](../specs/montage-center.md)、[剪辑中心技术设计](../architecture/montage-center.md)、[向量索引](../architecture/vector-index.md)
+- 规格与方案：[剪辑中心规格](../specs/videocut-center.md)、[剪辑中心技术设计](../architecture/videocut-center.md)、[向量索引](../architecture/vector-index.md)
 - 决定记录：[二次编辑起草时选的两项默认做法](../decisions/2026-11-19-montage-edit-defaults.md)
 - ADR：[0038](0038-keep-montage-media-in-the-photo-library.md)、[0028](0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)
-- 代码：[`internal/montage/render.go`](../../internal/montage/render.go)、[`internal/montage/steps.go`](../../internal/montage/steps.go)、[`ai/anas_montage/domain/fill.py`](../../ai/anas_montage/domain/fill.py)、[`web/src/montage/ProjectView.tsx`](../../web/src/montage/ProjectView.tsx)、[`internal/photos/search.go`](../../internal/photos/search.go)
+- 代码：[`internal/videocut/app/render.go`](../../internal/videocut/app/render.go)、[`internal/videocut/app/steps.go`](../../internal/videocut/app/steps.go)、[`ai/anas_videocut/algo/fill.py`](../../ai/anas_videocut/algo/fill.py)、[`web/src/videocut/screens/ProjectView.tsx`](../../web/src/videocut/screens/ProjectView.tsx)、[`internal/photos/search.go`](../../internal/photos/search.go)

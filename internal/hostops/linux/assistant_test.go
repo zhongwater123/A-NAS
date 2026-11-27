@@ -295,7 +295,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		"systemd-creds encrypt --name=a-nas-assistant-deepseek --with-key=host - -",
 		"systemctl restart --no-block anas-assistant-gateway.service",
 		"systemctl start --no-block anas-assistant-cron-waker.service",
-		"systemctl start --no-block anas-montage-planner.service",
+		"systemctl start --no-block anas-videocut-planner.service",
 		"systemctl enable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 	} {
 		if !host.ran(command) {
@@ -320,7 +320,7 @@ func TestTheAssistantKeyTurnsEveryAssistantOnAndOff(t *testing.T) {
 		t.Fatalf("the credential is still there: %v", err)
 	}
 	for _, command := range []string{
-		"systemctl stop anas-assistant-cron-waker.service anas-montage-planner.service anas-assistant-gateway.service",
+		"systemctl stop anas-assistant-cron-waker.service anas-videocut-planner.service anas-assistant-gateway.service",
 		"systemctl disable --now --quiet anas-assistant-api@alice.socket anas-assistant-planapi@alice.socket anas-assistant-curator@alice.timer",
 		stopAlice,
 	} {
@@ -392,7 +392,7 @@ func TestDisablingRemovesTheSocketTheMaskLeft(t *testing.T) {
 	}
 }
 
-// A planning grant for the montage center is the member's own, left while they were signed
+// A planning grant for VideoCut is the member's own, left while they were signed
 // in: closing the account removes it, so the waker starts no round of planning for it, and a
 // later account of the same name does not inherit it. Nobody else's is touched, and it goes
 // even where no assistant unit is installed.

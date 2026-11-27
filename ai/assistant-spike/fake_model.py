@@ -11,7 +11,7 @@ test), logs every request (which tools Hermes offered), and answers deterministi
   anything else              -> "ok"
 The log also counts the image parts a request carried (#113).
 
-A conversation whose prompt is the montage center's planning template (ai/anas_montage/prompts) is planned as
+A conversation whose prompt is VideoCut's planning template (ai/anas_videocut/prompts) is planned as
 VNAS would, with the least that passes: it reads each brief, writes the smallest answer its schema allows and
 hands it in, through both steps of every 方案, until the tools say all are taken. With FAKE_MODEL_PLAN_SLEEP set,
 its first call waits that many seconds, a model call longer than any short timeout on the way. Hermes's background
@@ -31,7 +31,7 @@ SOCK, LOG = sys.argv[1], sys.argv[2]
 # The first line of the planning template; its ids and token are filled in after it.
 PLAN_PROMPT = "这是剪辑中心的一轮剪辑规划"
 PLAN_SLEEP = float(os.environ.get("FAKE_MODEL_PLAN_SLEEP", "0") or 0)
-PLAN_SKILL = "montage-planning-notes"
+PLAN_SKILL = "videocut-planning-notes"
 
 
 def text_of(content):
@@ -73,7 +73,7 @@ def strings_of(content):
 
 
 def brief_in(content):
-    """The {data, schema} a montage brief answered, from its tool result."""
+    """The {data, schema} a VideoCut brief answered, from its tool result."""
     for text in strings_of(content):
         start = text.find('{"data"')
         while start >= 0:
@@ -122,11 +122,11 @@ def planning(messages):
 
 
 def plan(messages, tools, prompt):
-    """VNAS's next step in a planning round: a call of a montage tool, or the last answer."""
+    """VNAS's next step in a planning round: a call of a videocut tool, or the last answer."""
     job = re.search(r"任务编号 (job:[A-Z2-7]+)", prompt)
     token = re.search(r"token 是 ([0-9a-f]+)", prompt)
     named = {short: next((t for t in tools if t.endswith(short)), short)
-             for short in ("montage_brief", "montage_submit_outline", "montage_shots_brief", "montage_submit_shots")}
+             for short in ("videocut_brief", "videocut_submit_outline", "videocut_shots_brief", "videocut_submit_shots")}
     if not job or not token:
         return {"text": "提示词里没有任务编号或 token"}
     ids = {"jobId": job.group(1), "attemptToken": token.group(1)}
@@ -136,21 +136,21 @@ def plan(messages, tools, prompt):
             called = call.get("function", {}).get("name") or ""
     last = messages[-1] if messages else {}
     if called is None:
-        return {"tool": named["montage_brief"], "args": json.dumps(ids), "sleep": PLAN_SLEEP}
+        return {"tool": named["videocut_brief"], "args": json.dumps(ids), "sleep": PLAN_SLEEP}
     if last.get("role") != "tool":
         return {"text": "[SILENT]"}
     said = "\n".join(strings_of(last.get("content")))
-    if called.endswith(("montage_brief", "montage_shots_brief")):
+    if called.endswith(("videocut_brief", "videocut_shots_brief")):
         brief = brief_in(last.get("content"))
         if brief is None:
             return {"text": "简报读不到：" + said[:200]}
-        submit = "montage_submit_outline" if called.endswith("montage_brief") else "montage_submit_shots"
+        submit = "videocut_submit_outline" if called.endswith("videocut_brief") else "videocut_submit_shots"
         return {"tool": named[submit], "args": json.dumps({**ids, "answer": least(brief["schema"], [0])}, ensure_ascii=False)}
-    if called.endswith("montage_submit_outline") and "大纲已收下" in said:
-        return {"tool": named["montage_shots_brief"], "args": json.dumps(ids)}
-    if called.endswith("montage_submit_shots") and "还有下一版" in said:
-        return {"tool": named["montage_brief"], "args": json.dumps(ids)}
-    if called.endswith("montage_submit_shots") and "全部方案都已收下" in said:
+    if called.endswith("videocut_submit_outline") and "大纲已收下" in said:
+        return {"tool": named["videocut_shots_brief"], "args": json.dumps(ids)}
+    if called.endswith("videocut_submit_shots") and "还有下一版" in said:
+        return {"tool": named["videocut_brief"], "args": json.dumps(ids)}
+    if called.endswith("videocut_submit_shots") and "全部方案都已收下" in said:
         return {"text": "[SILENT]"}
     return {"text": "规划停下：" + said[:300]}
 

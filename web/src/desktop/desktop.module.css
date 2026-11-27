@@ -848,7 +848,7 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .icon-share {
   background: linear-gradient(155deg, #ffb25e, #f2621c);
 }
-.icon-montage {
+.icon-videocut {
   background: linear-gradient(155deg, #8f7bff, #4b2fd6);
 }
 /* 共享工作区: pages written together, on teal. */

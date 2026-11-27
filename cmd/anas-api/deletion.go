@@ -19,9 +19,12 @@ import (
 // space's snapshots, which the Host Agent can only do while it still knows
 // the space; the Host Agent removes the space and the account from the host;
 // the other services forget the account last. The step names are stored with
-// a deletion in progress, so they must not change.
+// a deletion in progress: a deletion under way across an update skips the
+// steps stored as done, so it runs a renamed step a second time. Only a step
+// that can run twice may be renamed; the videocut step, once named montage,
+// can: run again, it only forgets the member's projects once more.
 func accountDeletionSteps(config Config, users *accounts.Service, photoService *photos.Service, fileService *files.Service,
-	removeShares, removeFamily, removeMontage, removeWorkspace func(context.Context, string) error,
+	removeShares, removeFamily, removeVideoCut, removeWorkspace func(context.Context, string) error,
 	musicService *music.Service, mediaService *media.Service, transferService *transfers.Service) []accounts.DeletionStep {
 	// The photo service names the album it handed the photos over in.
 	photosStep := func(ctx context.Context, removal accounts.Removal) (accounts.Handover, error) {
@@ -53,10 +56,10 @@ func accountDeletionSteps(config Config, users *accounts.Service, photoService *
 		accounts.ForgetStep("family", func(ctx context.Context, removal accounts.Removal) error {
 			return removeFamily(ctx, removal.UserID)
 		}),
-		// The montage center forgets the account's projects; its videos and
+		// VideoCut forgets the account's projects; its videos and
 		// films went with the photos step (ADR 0038).
-		accounts.ForgetStep("montage", func(ctx context.Context, removal accounts.Removal) error {
-			return removeMontage(ctx, removal.UserID)
+		accounts.ForgetStep("videocut", func(ctx context.Context, removal accounts.Removal) error {
+			return removeVideoCut(ctx, removal.UserID)
 		}),
 		accounts.ForgetStep("music", func(ctx context.Context, removal accounts.Removal) error {
 			return musicService.RemoveAccount(ctx, removal.UserID, removal.PrivateSpaceID)

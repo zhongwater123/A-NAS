@@ -1,6 +1,6 @@
 # 0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问
 
-状态：accepted（2026-11-18，用户；2026-11-20 用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)规划改为成员规划进程里的一次对话，决定 5 与后果已改写；2026-11-17 起草；2026-11-18 用户把规划改为由 NAS 在后台发起，决定 5 已改写；同日评审人定为 Hermes 探针（实施方案的 P1）通过后再决定，[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的两项必过都过了，决定 5 按它的结果改写；已修订 ADR 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10；2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)剪辑分析不等相册空闲，决定 4 与后果已改写；实施方案见[剪辑中心技术设计](../architecture/montage-center.md)，行为见[规格](../specs/montage-center.md)）
+状态：accepted（2026-11-18，用户；2026-11-20 用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)规划改为成员规划进程里的一次对话，决定 5 与后果已改写；2026-11-17 起草；2026-11-18 用户把规划改为由 NAS 在后台发起，决定 5 已改写；同日评审人定为 Hermes 探针（实施方案的 P1）通过后再决定，[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的两项必过都过了，决定 5 按它的结果改写；已修订 ADR 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10；2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)剪辑分析不等相册空闲，决定 4 与后果已改写；实施方案见[剪辑中心技术设计](../architecture/videocut-center.md)，行为见[规格](../specs/videocut-center.md)）
 
 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 要把视频剪辑原型接进 A-NAS。接入后，剪辑要在成员离线时继续读原片，要用本地模型看画面，要用成员的 VNAS 做规划，还要把成片放回相册。这带来几个难以逆转的选择：
 - 剪辑以什么身份运行；
@@ -43,7 +43,7 @@
 5. **规划在成员自己的 VNAS 里，由 NAS 在后台发起。**（用户 2026-11-18 改定，此前是成员打开桌面时由桌面发起；2026-11-20 用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)不再借定时任务，改为一次对话）
    - **在哪跑**：成员的规划进程 `anas-assistant-plan@<账号>`，与成员平时的 VNAS 同一个沙箱、同一个 Hermes 主目录（记忆、技能与对话记录共用），工具在进程级固定为剪辑、记忆与技能。规划是这个进程里的一次对话，标题“剪辑规划 · <项目名>”，留在成员的 VNAS 历史里，结束后照常后台复盘，VNAS 从一次次剪辑中学习。
    - **谁发起**：root 的规划发起方。剪辑中心只留下“这位成员有任务在等规划”的记号；规划发起方核对规划授权后才领取一轮、开对话，剪辑中心自己发起不了。
-   - **规划授权**：成员做开始、重新规划等操作时（见[规格](../specs/montage-center.md#本稿补充的默认规则)），产品服务带着这次请求的会话请文件代理登记，文件代理照“立即运行”核对会话。授权按成员，有期限（7 天）、有轮数上限（5 轮）：文件代理写授权，规划发起方计数。
+   - **规划授权**：成员做开始、重新规划等操作时（见[规格](../specs/videocut-center.md#本稿补充的默认规则)），产品服务带着这次请求的会话请文件代理登记，文件代理照“立即运行”核对会话。授权按成员，有期限（7 天）、有轮数上限（5 轮）：文件代理写授权，规划发起方计数。
    - **提示词**：规则是随助手运行环境发布的固定模板，规划发起方只填进经过校验的编号与数字。剪辑中心只经工具给数据，不能决定提示词。
    - **云端看不到画面**：规划进程里没有文件、终端、相册、看图与看视频的工具，模型只拿到工具给的文字与结构化数据（用户 2026-11-20 决定 3）。
    - **成员的记忆与技能进规划的提示**，复盘也可能把卡片描述里的文字写进记忆或技能；用户 2026-11-20 接受，与 2026-10-15 对普通对话接受的风险相同。
@@ -90,6 +90,6 @@
 ## 关联
 
 - 需求：[#514](https://github.com/zhongwater123/A-NAS/issues/514)；决定：[剪辑中心首版的数据归属与几项做法](../decisions/2026-11-17-montage-center-first-version.md)、[剪辑中心的规划怎样交给 VNAS](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)
-- 设计：[剪辑中心技术设计](../architecture/montage-center.md)、[规划会话](../architecture/montage-planning-session.md)、[向量索引](../architecture/vector-index.md)、[相册 AI](../architecture/photo-ai.md)
-- 规格：[剪辑中心](../specs/montage-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)
-- 代码：[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)（按对端 UID 认成员的先例）、[`internal/familyservice`](../../internal/familyservice/service.go)（转发会话与会话查询的先例）、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)（登记规划授权）、[`montage-planner.py`](../../ai/assistant/montage-planner.py)（规划发起方）
+- 设计：[剪辑中心技术设计](../architecture/videocut-center.md)、[规划会话](../architecture/videocut-planning-session.md)、[向量索引](../architecture/vector-index.md)、[相册 AI](../architecture/photo-ai.md)
+- 规格：[剪辑中心](../specs/videocut-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)
+- 代码：[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)（按对端 UID 认成员的先例）、[`internal/familyservice`](../../internal/familyservice/service.go)（转发会话与会话查询的先例）、[`assistant_plan.go`](../../internal/filebroker/rootbroker/assistant_plan.go)（登记规划授权）、[`montage-planner.py`](../../ai/assistant/videocut-planner.py)（规划发起方）

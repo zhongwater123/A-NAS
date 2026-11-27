@@ -166,7 +166,7 @@ case $cmd in
       } > "$member/config.yaml.new"
       mv "$member/config.yaml.new" "$member/config.yaml"
       # The settings of the planning instance, which its unit binds instead: the same with the
-      # servers of its own policy, which adds the montage center's planning server (the Host
+      # servers of its own policy, which adds VideoCut's planning server (the Host
       # Agent writes config-plan.yaml beside config.yaml the same way).
       plan_policy=$lib/managed-plan/config.yaml
       [[ -f "$plan_policy" ]] || plan_policy=$lib/managed/config.yaml

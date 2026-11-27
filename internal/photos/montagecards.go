@@ -16,7 +16,7 @@ import (
 // After the windows, the montage analysis cuts a video's cards and measures
 // each card's quality (montage-cards/v1, montage-quality/v1) with the
 // montage compute Worker, which runs the prototype's computation unchanged
-// (ai/anas_montage). The frames come from the FFmpeg Worker, as the
+// (ai/anas_videocut). The frames come from the FFmpeg Worker, as the
 // prototype took them: keyframes 512 wide (FFmpeg quality 3) measured by
 // blurdetect on the JPEG, shake frames 320 × 180 ten a second, and, on dark
 // keyframes, a grey frame 1920 wide for its sharp points.

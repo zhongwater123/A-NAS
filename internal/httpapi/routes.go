@@ -21,7 +21,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/modules"
-	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
 	"github.com/zhongwater123/A-NAS/internal/phonehotspotapi"
@@ -32,6 +31,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
 
@@ -94,10 +94,10 @@ func (h *productHandler) table() []apiroute.Route {
 	if h.AssistantKey != nil {
 		routes = append(routes, h.AssistantKey.Routes()...)
 	}
-	if h.Montage != nil {
+	if h.VideoCut != nil {
 		// The desktop shows 剪辑中心 while this answers. The switch is the
-		// Product Service's, so the montage service is not asked.
-		routes = append(routes, apiroute.Route{Method: get, Pattern: montageapi.PathPrefix, Posture: session,
+		// Product Service's, so the VideoCut service is not asked.
+		routes = append(routes, apiroute.Route{Method: get, Pattern: protocol.PathPrefix, Posture: session,
 			Handler: func(w http.ResponseWriter, _ *http.Request, _ accounts.Session) { w.WriteHeader(http.StatusNoContent) }})
 	}
 	return append(routes, h.mounts()...)
@@ -130,22 +130,22 @@ func (h *productHandler) mounts() []apiroute.Route {
 			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 		}
 	}
-	if h.Montage != nil {
-		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.ProductEndpoints())
+	if h.VideoCut != nil {
+		mount(protocol.PathPrefix, apiroute.Session, withUser(h.VideoCut), protocol.ProductEndpoints())
 		// The requests that may lead to planning register a planning grant
-		// first (docs/architecture/montage-center.md, 规划授权).
-		for _, endpoint := range montageapi.PlanningRoutes {
+		// first (docs/architecture/videocut-center.md, 规划授权).
+		for _, endpoint := range protocol.PlanningRoutes {
 			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
-				Handler: montageapi.RegisterPlan(h.PlanGrants, h.Montage, h.Logger)})
+				Handler: protocol.RegisterPlan(h.PlanGrants, h.VideoCut, h.Logger)})
 		}
 		// Choosing a song copies it from the member's music library here
-		// first (docs/specs/montage-center.md, 配乐).
-		var tracks montageapi.Tracks
+		// first (docs/specs/videocut-center.md, 配乐).
+		var tracks protocol.Tracks
 		if h.Music != nil {
 			tracks = h.Music
 		}
-		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
-			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
+		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: protocol.SongPath, Posture: apiroute.Mutation,
+			Handler: protocol.CopySong(tracks, h.VideoCut, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())

@@ -11,7 +11,7 @@ info:
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
     the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
     container agent, and each member's AI assistant (ADR 0024). Every operation that takes a JSON body
-    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for VideoCut, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
     feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up
     to 4 MiB from members' agents.
@@ -161,33 +161,33 @@ paths:
   /api/v1/workspace/admin/members/{accountId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1admin~1members~1{accountId}" }
   /api/v1/workspace/mcp: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1mcp" }
   /api/v1/workspace/transfers/{key}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1transfers~1{key}" }
-  /api/v1/montage: { $ref: "paths/montage.yaml#/~1api~1v1~1montage" }
-  /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
-  /api/v1/montage/projects/{projectId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}" }
-  /api/v1/montage/projects/{projectId}/assets: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1assets" }
-  /api/v1/montage/projects/{projectId}/generate: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1generate" }
-  /api/v1/montage/jobs/{jobId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}" }
-  /api/v1/montage/jobs/{jobId}/cancel: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1cancel" }
-  /api/v1/montage/jobs/{jobId}/drop-assets: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1drop-assets" }
-  /api/v1/montage/jobs/{jobId}/retry-analysis: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1retry-analysis" }
-  /api/v1/montage/jobs/{jobId}/retry: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1retry" }
-  /api/v1/montage/jobs/{jobId}/replan: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1jobs~1{jobId}~1replan" }
-  /api/v1/montage/notices: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1notices" }
-  /api/v1/montage/projects/{projectId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song" }
-  /api/v1/montage/projects/{projectId}/song/audio: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song~1audio" }
-  /api/v1/montage/hero: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero" }
-  /api/v1/montage/hero/poster: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero~1poster" }
-  /api/v1/montage/versions/{versionId}/confirm: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1confirm" }
-  /api/v1/montage/versions/{versionId}/recut: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1recut" }
-  /api/v1/montage/versions/{versionId}/outline: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1outline" }
-  /api/v1/montage/versions/{versionId}/draft: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1draft" }
-  /api/v1/montage/drafts/{draftId}/ops: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1ops" }
-  /api/v1/montage/drafts/{draftId}/save: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1save" }
-  /api/v1/montage/drafts/{draftId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1song" }
-  /api/v1/montage/drafts/{draftId}/candidates: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1candidates" }
-  /api/v1/montage/versions/{versionId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1shots" }
-  /api/v1/montage/drafts/{draftId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1shots" }
-  /api/v1/montage/projects/{projectId}/frames/{assetId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1frames~1{assetId}" }
+  /api/v1/videocut: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut" }
+  /api/v1/videocut/projects: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects" }
+  /api/v1/videocut/projects/{projectId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}" }
+  /api/v1/videocut/projects/{projectId}/assets: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assets" }
+  /api/v1/videocut/projects/{projectId}/generate: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1generate" }
+  /api/v1/videocut/jobs/{jobId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}" }
+  /api/v1/videocut/jobs/{jobId}/cancel: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1cancel" }
+  /api/v1/videocut/jobs/{jobId}/drop-assets: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1drop-assets" }
+  /api/v1/videocut/jobs/{jobId}/retry-analysis: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1retry-analysis" }
+  /api/v1/videocut/jobs/{jobId}/retry: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1retry" }
+  /api/v1/videocut/jobs/{jobId}/replan: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1replan" }
+  /api/v1/videocut/notices: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1notices" }
+  /api/v1/videocut/projects/{projectId}/song: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1song" }
+  /api/v1/videocut/projects/{projectId}/song/audio: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1song~1audio" }
+  /api/v1/videocut/hero: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1hero" }
+  /api/v1/videocut/hero/poster: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1hero~1poster" }
+  /api/v1/videocut/versions/{versionId}/confirm: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1confirm" }
+  /api/v1/videocut/versions/{versionId}/recut: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1recut" }
+  /api/v1/videocut/versions/{versionId}/outline: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1outline" }
+  /api/v1/videocut/versions/{versionId}/draft: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1draft" }
+  /api/v1/videocut/drafts/{draftId}/ops: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1ops" }
+  /api/v1/videocut/drafts/{draftId}/save: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1save" }
+  /api/v1/videocut/drafts/{draftId}/song: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1song" }
+  /api/v1/videocut/drafts/{draftId}/candidates: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1candidates" }
+  /api/v1/videocut/versions/{versionId}/shots: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1shots" }
+  /api/v1/videocut/drafts/{draftId}/shots: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1shots" }
+  /api/v1/videocut/projects/{projectId}/frames/{assetId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1frames~1{assetId}" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }

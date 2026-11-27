@@ -407,7 +407,7 @@ func (c *Client) Delete(ctx context.Context, collection string, keys []string) e
 }
 
 // DeleteMatching removes the points whose keyword field holds any of
-// values, for an owner with many points per thing: the montage center's
+// values, for an owner with many points per thing: VideoCut's
 // window vectors are many per video, and when a video goes its windows are
 // no longer there to name each point.
 func (c *Client) DeleteMatching(ctx context.Context, collection, field string, values []string) error {

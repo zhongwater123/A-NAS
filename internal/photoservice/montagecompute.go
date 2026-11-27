@@ -6,25 +6,27 @@ import (
 	"context"
 	"errors"
 
-	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
 // MontageCompute is the montage compute Worker as the photo library uses it
 // (photos.Options.Compute).
-func MontageCompute(client montagecompute.Client) photos.MontageCompute { return computeWorker{client} }
+func MontageCompute(client videocutcompute.Client) photos.MontageCompute {
+	return computeWorker{client}
+}
 
-type computeWorker struct{ client montagecompute.Client }
+type computeWorker struct{ client videocutcompute.Client }
 
 // mapped turns the Worker's unavailability into the library's, so that the
 // work waits for it rather than failing.
 func mapped(err error) error {
 	switch {
-	case errors.Is(err, montagecompute.ErrUnavailable):
+	case errors.Is(err, videocutcompute.ErrUnavailable):
 		return errors.Join(photos.ErrComputeUnavailable, err)
-	case errors.Is(err, montagecompute.ErrRefused):
+	case errors.Is(err, videocutcompute.ErrRefused):
 		return errors.Join(photos.ErrComputeInvalidResult, err)
-	case errors.Is(err, montagecompute.ErrFailed):
+	case errors.Is(err, videocutcompute.ErrFailed):
 		return errors.Join(photos.ErrComputeFailed, err)
 	default:
 		return err
@@ -32,9 +34,9 @@ func mapped(err error) error {
 }
 
 func (w computeWorker) Cards(ctx context.Context, windows []photos.CardWindow, vectors []float32, dimensions int, flat []bool) ([]photos.ComputedCard, error) {
-	list := make([]montagecompute.Window, len(windows))
+	list := make([]videocutcompute.Window, len(windows))
 	for i, window := range windows {
-		list[i] = montagecompute.Window{Start: window.Start, End: window.End}
+		list[i] = videocutcompute.Window{Start: window.Start, End: window.End}
 	}
 	cards, err := w.client.Cards(ctx, "card", list, vectors, dimensions, flat)
 	if err != nil {
@@ -63,7 +65,7 @@ func (w computeWorker) SharpPoints(ctx context.Context, frame []byte, width, hei
 }
 
 func (w computeWorker) Quality(ctx context.Context, measures photos.CardMeasures) (photos.CardQuality, error) {
-	quality, err := w.client.Quality(ctx, montagecompute.QualityInput{Moves: measures.Moves, Blurs: measures.Blurs,
+	quality, err := w.client.Quality(ctx, videocutcompute.QualityInput{Moves: measures.Moves, Blurs: measures.Blurs,
 		Blocked: measures.Blocked, Points: measures.Points})
 	if err != nil {
 		return photos.CardQuality{}, mapped(err)

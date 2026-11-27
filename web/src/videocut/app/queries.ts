@@ -1,0 +1,36 @@
+import { APIError } from "../../api/client";
+import { getProject, getSong, listProjects, type VideoCutSong } from "../api/client";
+
+// The queries the window's pages share: the projects, one project, and its
+// song (null before one is chosen).
+export const projectsKey = ["videocut", "projects"] as const;
+export const projectKey = (projectId: string) => ["videocut", "project", projectId] as const;
+export const songKey = (projectId: string) => ["videocut", "song", projectId] as const;
+export const jobKey = (jobId?: string) => ["videocut", "job", jobId] as const;
+
+export const projectsQuery = {
+  queryKey: projectsKey,
+  queryFn: ({ signal }: { signal: AbortSignal }) => listProjects(signal),
+};
+
+export const projectQuery = (projectId: string) => ({
+  queryKey: projectKey(projectId),
+  queryFn: ({ signal }: { signal: AbortSignal }) => getProject(projectId, signal),
+});
+
+// A song being analysed is asked about again until it is done, while the
+// window can be seen (shown).
+export const songQuery = (projectId: string, shown: boolean) => ({
+  queryKey: songKey(projectId),
+  queryFn: async ({ signal }: { signal: AbortSignal }): Promise<VideoCutSong | null> => {
+    try {
+      return await getSong(projectId, signal);
+    } catch (error) {
+      if (error instanceof APIError && error.code === "no_song") return null;
+      throw error;
+    }
+  },
+  refetchInterval: (query: { state: { data?: VideoCutSong | null } }) =>
+    shown && query.state.data?.state === "analyzing" ? 4_000 : false,
+  refetchIntervalInBackground: false,
+});

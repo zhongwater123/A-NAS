@@ -1,0 +1,198 @@
+package protocol
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/httpjson"
+	"github.com/zhongwater123/A-NAS/internal/videocut/app"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+)
+
+// Editing a film after it was made (#596; docs/architecture/videocut-center.md,
+// 出片后的二次编辑): confirming a version, its draft and the steps of the
+// edit, candidates for a shot, the shot lists and thumbnails.
+
+func (h *handler) confirmVersion(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	detail, err := h.store.ConfirmVersion(r.Context(), user.ID, r.PathValue("versionID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, detail)
+}
+
+func (h *handler) versionOutline(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	outline, err := h.store.VersionOutline(r.Context(), user.ID, r.PathValue("versionID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, outline)
+}
+
+func (h *handler) versionDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	draft, err := h.store.VersionDraft(r.Context(), user.ID, r.PathValue("versionID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, draft)
+}
+
+type draftOpRequest struct {
+	BaseRevision *int           `json:"baseRevision"`
+	Op           domain.DraftOp `json:"op"`
+}
+
+func (h *handler) editDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request draftOpRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	if request.BaseRevision == nil || *request.BaseRevision < 0 || request.Op.Seed != nil && *request.Op.Seed < 0 {
+		h.fail(w, r, domain.ErrInvalid)
+		return
+	}
+	draft, err := h.store.EditDraft(r.Context(), user.ID, r.PathValue("draftID"), *request.BaseRevision, request.Op)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, draft)
+}
+
+func (h *handler) draftCandidates(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	values := r.URL.Query()
+	query := domain.CandidateQuery{Q: values.Get("q"), Size: values.Get("size"), Scene: values.Get("scene")}
+	var err error
+	if query.Shot, err = strconv.Atoi(values.Get("shot")); err != nil {
+		h.fail(w, r, domain.ErrInvalid)
+		return
+	}
+	if landscape := values.Get("landscape"); landscape != "" {
+		if query.Landscape, err = strconv.ParseBool(landscape); err != nil {
+			h.fail(w, r, domain.ErrInvalid)
+			return
+		}
+	}
+	candidates, err := h.store.DraftCandidates(r.Context(), user.ID, r.PathValue("draftID"), query)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, candidates)
+}
+
+type recutRequest struct {
+	RequestKey string `json:"requestKey"`
+	Change     string `json:"change"`
+}
+
+// recut plans a version again from a sentence: like generating, it may come
+// to planning, so the planning grant is registered first.
+func (h *handler) recut(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	if !h.notePlanGrant(w, r, user) {
+		return
+	}
+	var request recutRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	job, _, err := h.store.RecutVersion(r.Context(), user.ID, r.PathValue("versionID"), request.RequestKey, request.Change)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusAccepted, job)
+}
+
+type saveDraftRequest struct {
+	RequestKey string `json:"requestKey"`
+}
+
+func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	var request saveDraftRequest
+	if !httpjson.Read(w, r, maxJSONBytes, &request) {
+		return
+	}
+	job, _, err := h.store.SaveDraft(r.Context(), user.ID, r.PathValue("draftID"), request.RequestKey)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusAccepted, job)
+}
+
+// draftSong is the song of the version a draft edits, for the rough
+// preview: the one it was made with, whatever the project's is now.
+func (h *handler) draftSong(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	audio, err := h.store.OpenDraftSongAudio(r.Context(), user.ID, r.PathValue("draftID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.serveSong(w, r, audio)
+}
+
+func (h *handler) versionShots(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	list, err := h.store.VersionShots(r.Context(), user.ID, r.PathValue("versionID"))
+	h.shotList(w, r, list, err)
+}
+
+func (h *handler) draftShots(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	list, err := h.store.DraftShots(r.Context(), user.ID, r.PathValue("draftID"))
+	h.shotList(w, r, list, err)
+}
+
+func (h *handler) shotList(w http.ResponseWriter, r *http.Request, list []byte, err error) {
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="shots.csv"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(list)
+}
+
+func (h *handler) frame(w http.ResponseWriter, r *http.Request, user accounts.User) {
+	ms, err := strconv.ParseInt(r.URL.Query().Get("t"), 10, 64)
+	if err != nil {
+		h.fail(w, r, domain.ErrInvalid)
+		return
+	}
+	jpeg, err := h.store.Thumbnail(r.Context(), user.ID, r.PathValue("projectID"), r.PathValue("assetID"), ms)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	// The video's content never changes: the same instant is the same frame.
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	_, _ = w.Write(jpeg)
+}
+
+// failEdit answers the editing errors; it reports whether err was one.
+func failEdit(w http.ResponseWriter, err error) bool {
+	var refusal *domain.EditRefusal
+	switch {
+	case errors.As(err, &refusal):
+		httpjson.WriteError(w, http.StatusUnprocessableEntity, "edit_refused", refusal.Reason)
+	case errors.Is(err, domain.ErrDraftConflict):
+		httpjson.WriteError(w, http.StatusConflict, "draft_conflict", "the draft changed since; read it again")
+	case errors.Is(err, domain.ErrNotEditable):
+		httpjson.WriteError(w, http.StatusConflict, "not_editable", "the version can only be played")
+	case errors.Is(err, domain.ErrAnalysisChanged):
+		httpjson.WriteError(w, http.StatusConflict, "analysis_changed", app.AnalysisChangedReason)
+	case errors.Is(err, domain.ErrSearchModel):
+		httpjson.WriteError(w, http.StatusConflict, "search_model_changed", "分析模型已更新，重新分析后才能搜索")
+	case errors.Is(err, domain.ErrSearchUnavailable):
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "search_unavailable", "searching the videos is not available")
+	default:
+		return false
+	}
+	return true
+}

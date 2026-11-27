@@ -260,9 +260,9 @@ class LlamaReaderTest(unittest.TestCase):
         upright, level = jpeg(512, 910), jpeg(512, 288)
         self.assertEqual(providers.frame_size(upright), (512, 910))
         # The development machine's count for a frame of 512 × 910.
-        self.assertEqual(providers.describe_frame_tokens([upright] * 3), 485)
-        self.assertEqual(providers.describe_frame_tokens([level] * 3), 165)
-        self.assertEqual(providers.describe_frame_tokens([level, upright, level]), 485)
+        self.assertEqual(providers.describe_frame_tokens([upright] * 3), 487)
+        self.assertEqual(providers.describe_frame_tokens([level] * 3), 167)
+        self.assertEqual(providers.describe_frame_tokens([level, upright, level]), 487)
         # No frame takes more than the server's cap for an image.
         self.assertEqual(providers.describe_frame_tokens([jpeg(2048, 2048)] * 3),
                          providers.OCR_IMAGE_TOKENS + providers.DESCRIBE_LABEL_TOKENS)

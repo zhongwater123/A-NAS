@@ -16,8 +16,8 @@
 # - a-nas-assistant-trial, empty, at the version of a-nas, which it depends on:
 #   the assistant's trial is part of a-nas now, and a device that had the trial
 #   updates to this package before apt removes it (ADR 0034).
-# - a-nas-montage-music, with --montage-music only: the montage center's music
-#   analysis (docs/architecture/montage-music.md) at the version of a-nas,
+# - a-nas-videocut-music, with --videocut-music only: VideoCut's music
+#   analysis (docs/architecture/videocut-music.md) at the version of a-nas,
 #   which it depends on with its runtime's and models' content packages.
 #   While allin1's licence is pending no release builds it.
 # - a-nas-docker-policy: the address-pool check and Docker's drop-ins, which
@@ -32,16 +32,16 @@
 # scripts, so the same files make the product's system extension
 # (docs/research/sysupdate-image-verification.md#第-6-项产品层做成-sysext-时软件包的约束).
 #
-# Usage: scripts/build-packages.sh [--montage-music] OUT VERSION [BUILD]
+# Usage: scripts/build-packages.sh [--videocut-music] OUT VERSION [BUILD]
 set -euo pipefail
 
-montage_music=false
-if [[ "${1:-}" == --montage-music ]]; then
-  montage_music=true
+videocut_music=false
+if [[ "${1:-}" == --videocut-music ]]; then
+  videocut_music=true
   shift
 fi
 if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "usage: $0 [--montage-music] OUT VERSION [BUILD]" >&2
+  echo "usage: $0 [--videocut-music] OUT VERSION [BUILD]" >&2
   exit 2
 fi
 mkdir -p "$1"
@@ -61,7 +61,7 @@ fi
 for binary in anas-api anas-host-agent anas-container-agent; do
   [[ -x "$build/$binary" ]] || { echo "missing $build/$binary: run make build-binaries" >&2; exit 2; }
 done
-for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-montage-music a-nas-docker-policy a-nas-hotspot-radio; do
+for package in a-nas a-nas-host a-nas-console a-nas-assistant-trial a-nas-videocut-music a-nas-docker-policy a-nas-hotspot-radio; do
   rm -f -- "$out/${package}"_*.deb
 done
 # shellcheck source=lib/content.sh
@@ -116,7 +116,7 @@ root=$work/a-nas
 lib=$root/usr/lib/a-nas
 units=$root/usr/lib/systemd/system
 share=$root/usr/share/a-nas
-install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_montage/domain" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
+install -d "$root/DEBIAN" "$lib/ai/anas_ai" "$lib/ai/qv_head" "$lib/ai/anas_videocut/ops" "$lib/ai/anas_videocut/algo" "$lib/assistant" "$lib/search" "$lib/vectors" "$lib/site" "$units" \
   "$root/usr/lib/systemd/system-generators" "$root/usr/lib/sysusers.d" "$root/usr/lib/tmpfiles.d" \
   "$root/usr/sbin" "$share/pam" "$root/usr/share/doc/a-nas"
 control a-nas "$(content_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
@@ -139,9 +139,13 @@ install -m 0755 "$repo/deploy/network/phone-hotspot.py" "$lib/phone-hotspot"
 # runtime and llama.cpp.
 install -m 0644 "$repo"/ai/anas_ai/*.py "$lib/ai/anas_ai/"
 install -m 0644 "$repo"/ai/qv_head/*.py "$lib/ai/qv_head/"
-# The montage center's compute Worker runs in the same runtime (ADR 0038).
-install -m 0644 "$repo"/ai/anas_montage/*.py "$lib/ai/anas_montage/"
-install -m 0644 "$repo"/ai/anas_montage/domain/*.py "$lib/ai/anas_montage/domain/"
+# VideoCut's compute Worker runs in the same runtime (ADR 0038):
+# worker.py, its operations (ops/) and the pure computation (algo/). Not the
+# planning templates (prompts/): the Worker never reads them; the planner
+# does, from assistant/videocut-prompts below.
+install -m 0644 "$repo"/ai/anas_videocut/*.py "$lib/ai/anas_videocut/"
+install -m 0644 "$repo"/ai/anas_videocut/ops/*.py "$lib/ai/anas_videocut/ops/"
+install -m 0644 "$repo"/ai/anas_videocut/algo/*.py "$lib/ai/anas_videocut/algo/"
 for role in "${ai_roles[@]}" "${aesthetic_role[@]}"; do
   name=${role%%:*} rest=${role#*:}
   manifest=$repo/deploy/models/${rest#*:}.json
@@ -163,13 +167,13 @@ for file in "$assistant"/*.sh "$assistant"/*.py; do
 done
 install -m 0644 "$assistant/member-skill.md" "$lib/assistant/"
 install -m 0644 "$assistant/managed-config.yaml" "$lib/assistant/managed/config.yaml"
-# The planning instance's policy adds the montage center's planning server,
+# The planning instance's policy adds VideoCut's planning server,
 # which no other unit starts, and reviews every planning
-# (docs/architecture/montage-planning-session.md); the fixed prompt templates
+# (docs/architecture/videocut-planning-session.md); the fixed prompt templates
 # the planner fills go beside it.
-install -d "$lib/assistant/managed-plan" "$lib/assistant/montage-prompts"
-derive_plan_policy "$assistant/managed-config.yaml" "$assistant/montage-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
-install -m 0644 "$repo"/ai/anas_montage/prompts/*.md "$lib/assistant/montage-prompts/"
+install -d "$lib/assistant/managed-plan" "$lib/assistant/videocut-prompts"
+derive_plan_policy "$assistant/managed-config.yaml" "$assistant/videocut-mcp.yaml" "$lib/assistant/managed-plan/config.yaml"
+install -m 0644 "$repo"/ai/anas_videocut/prompts/*.md "$lib/assistant/videocut-prompts/"
 install -m 0644 /dev/null "$lib/assistant/empty.env"
 # Members' sandboxes read the skills, whatever the builder's umask.
 cp -r "$assistant/skills" "$lib/assistant/skills"
@@ -196,14 +200,14 @@ wants() {
   install -d "$units/$1.wants"
   ln -s "../${3:-$2}" "$units/$1.wants/$2"
 }
-for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-montage anas-workspace anas-search anas-site \
-  anas-assistant-gateway anas-assistant-cron-waker anas-montage-planner; do
+for unit in anas-host-agent anas-api anas-photos anas-shares anas-family anas-videocut anas-workspace anas-search anas-site \
+  anas-assistant-gateway anas-assistant-cron-waker anas-videocut-planner; do
   wants multi-user.target "$unit.service"
 done
 wants sockets.target anas-ai.socket
 wants sockets.target anas-photos-grants.socket
-wants sockets.target anas-montage-compute.socket
-wants sockets.target anas-montage-assistant.socket
+wants sockets.target anas-videocut-compute.socket
+wants sockets.target anas-videocut-assistant.socket
 wants sockets.target anas-ffmpeg.socket
 wants sockets.target anas-photos-assistant.socket
 wants sockets.target anas-companion-assistant.socket
@@ -239,29 +243,29 @@ control a-nas-assistant-trial '' >"$root/DEBIAN/control"
 chmod 0644 "$root/DEBIAN/control"
 build "$root"
 
-# The montage center's music analysis (docs/architecture/montage-music.md):
+# VideoCut's music analysis (docs/architecture/videocut-music.md):
 # the Worker's code, its units, each model's manifest and links to the
 # content packages of its models and runtime.
-if "$montage_music"; then
-  root=$work/a-nas-montage-music
-  lib=$root/usr/lib/a-nas/montage-music
+if "$videocut_music"; then
+  root=$work/a-nas-videocut-music
+  lib=$root/usr/lib/a-nas/videocut-music
   units=$root/usr/lib/systemd/system
-  install -d "$root/DEBIAN" "$lib/anas_montage_music" "$units/sockets.target.wants" "$root/usr/share/doc/a-nas-montage-music"
-  control a-nas-montage-music "$(montage_music_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
+  install -d "$root/DEBIAN" "$lib/anas_videocut_music" "$units/sockets.target.wants" "$root/usr/share/doc/a-nas-videocut-music"
+  control a-nas-videocut-music "$(videocut_music_packages "$repo" | paste -sd, - | sed 's/,/, /g')" >"$root/DEBIAN/control"
   chmod 0644 "$root/DEBIAN/control"
-  install -m 0755 "$repo"/deploy/debian/a-nas-montage-music/DEBIAN/{postinst,prerm} "$root/DEBIAN/"
-  install -m 0644 "$repo"/ai/anas_montage_music/*.py "$lib/anas_montage_music/"
-  for role in "${montage_music_roles[@]}"; do
+  install -m 0755 "$repo"/deploy/debian/a-nas-videocut-music/DEBIAN/{postinst,prerm} "$root/DEBIAN/"
+  install -m 0644 "$repo"/ai/anas_videocut_music/*.py "$lib/anas_videocut_music/"
+  for role in "${videocut_music_roles[@]}"; do
     manifest=$repo/deploy/models/${role#*:}.json
     install -m 0644 "$manifest" "$lib/${role%%:*}.json"
     ln -s "/opt/a-nas/models/$(pin_field "$manifest" sha256)" "$lib/${role%%:*}"
   done
-  ln -s "/opt/a-nas/montage-music-runtimes/$(montage_music_runtime_id "$repo")" "$lib/runtime"
-  install -m 0644 "$repo"/deploy/montage-music/anas-montage-music.{socket,service} "$units/"
-  ln -s ../anas-montage-music.socket "$units/sockets.target.wants/anas-montage-music.socket"
+  ln -s "/opt/a-nas/videocut-music-runtimes/$(videocut_music_runtime_id "$repo")" "$lib/runtime"
+  install -m 0644 "$repo"/deploy/videocut-music/anas-videocut-music.{socket,service} "$units/"
+  ln -s ../anas-videocut-music.socket "$units/sockets.target.wants/anas-videocut-music.socket"
   printf '%s\n' 'A-NAS: https://github.com/zhongwater123/A-NAS' \
     "allin1's and Demucs' weights and the runtime keep their own licenses; see their content packages." \
-    >"$root/usr/share/doc/a-nas-montage-music/copyright"
-  chmod 0644 "$root/usr/share/doc/a-nas-montage-music/copyright"
+    >"$root/usr/share/doc/a-nas-videocut-music/copyright"
+  chmod 0644 "$root/usr/share/doc/a-nas-videocut-music/copyright"
   build "$root"
 fi

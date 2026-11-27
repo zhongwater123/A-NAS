@@ -116,13 +116,13 @@ func TestMemberSettings(t *testing.T) {
 	if plan, err := os.ReadFile(planPath); err != nil || string(plan) != string(config) {
 		t.Fatalf("config-plan.yaml %q, %v", plan, err)
 	}
-	// With one, they add its servers, the montage center's planning server: only the planning
-	// instance binds them (docs/architecture/montage-planning-session.md). The settings the
+	// With one, they add its servers, VideoCut's planning server: only the planning
+	// instance binds them (docs/architecture/videocut-planning-session.md). The settings the
 	// scheduled tasks once had for it go.
 	if err := os.MkdirAll(filepath.Join(library, "managed-plan"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	planPolicy := strings.Replace(managedPolicy, "mcp_servers:\n", "mcp_servers:\n  montage:\n    trust: full\n", 1)
+	planPolicy := strings.Replace(managedPolicy, "mcp_servers:\n", "mcp_servers:\n  videocut:\n    trust: full\n", 1)
 	if err := os.WriteFile(filepath.Join(library, "managed-plan", "config.yaml"), []byte(planPolicy), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -137,15 +137,15 @@ func TestMemberSettings(t *testing.T) {
 		MCPServers map[string]map[string]any `yaml:"mcp_servers"`
 	}
 	plan, err := os.ReadFile(planPath)
-	if err != nil || yaml.Unmarshal(plan, &planSettings) != nil || planSettings.MCPServers["montage"]["trust"] != "full" ||
+	if err != nil || yaml.Unmarshal(plan, &planSettings) != nil || planSettings.MCPServers["videocut"]["trust"] != "full" ||
 		planSettings.MCPServers["anas"] == nil {
 		t.Fatalf("config-plan.yaml:\n%s", plan)
 	}
 	if _, err := os.Stat(cronPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("config-cron.yaml is still there: %v", err)
 	}
-	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "montage") {
-		t.Fatalf("the instance's config.yaml has the montage server:\n%s", again)
+	if again, _ := os.ReadFile(configPath); strings.Contains(string(again), "videocut") {
+		t.Fatalf("the instance's config.yaml has the videocut server:\n%s", again)
 	}
 	// Preparing again keeps the secret and the file a running sandbox bound.
 	before, _ := os.Stat(configPath)
@@ -184,13 +184,13 @@ func TestMemberNamesThatYAMLReadsAsOtherThingsStayNames(t *testing.T) {
 	}
 }
 
-// The policy of a member's planning instance is the assistant's policy with the montage
-// center's planning server and a review after every planning, and nothing else changed
-// (docs/architecture/montage-planning-session.md). The package makes it by splicing text
+// The policy of a member's planning instance is the assistant's policy with VideoCut's
+// planning server and a review after every planning, and nothing else changed
+// (docs/architecture/videocut-planning-session.md). The package makes it by splicing text
 // (scripts/lib/assistant-units.sh), which no check of the text shows to be the YAML it should
 // be: here the package's own function makes it from the files the package ships, and it is read
 // as the Host Agent reads it.
-func TestThePlanPolicyIsThePolicyWithTheMontageServerAndReviews(t *testing.T) {
+func TestThePlanPolicyIsThePolicyWithTheVideoCutServerAndReviews(t *testing.T) {
 	// The root integration tests run this package's test binary in a container
 	// that has no checkout (scripts/root-integration-test.sh); make test runs it
 	// from the checkout, where the files must be there.
@@ -201,7 +201,7 @@ func TestThePlanPolicyIsThePolicyWithTheMontageServerAndReviews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policyPath, serverPath := filepath.Join(repo, "ai", "assistant", "managed-config.yaml"), filepath.Join(repo, "ai", "assistant", "montage-mcp.yaml")
+	policyPath, serverPath := filepath.Join(repo, "ai", "assistant", "managed-config.yaml"), filepath.Join(repo, "ai", "assistant", "videocut-mcp.yaml")
 	derive := func(policy, server string) (string, error) {
 		out := filepath.Join(t.TempDir(), "config.yaml")
 		command := exec.Command("bash", "-c", `set -euo pipefail; . "$1"; derive_plan_policy "$2" "$3" "$4"`, "derive",
@@ -229,34 +229,34 @@ func TestThePlanPolicyIsThePolicyWithTheMontageServerAndReviews(t *testing.T) {
 	}
 	policy, plan := read(policyPath), read(planPath)
 	servers, _ := plan["mcp_servers"].(map[string]any)
-	montage, _ := servers["montage"].(map[string]any)
+	videocut, _ := servers["videocut"].(map[string]any)
 	want := map[string]any{
-		"command": "/usr/lib/a-nas/assistant/runtime/venv/bin/python", "args": []any{"/usr/lib/a-nas/assistant/anas_montage_mcp.py"},
+		"command": "/usr/lib/a-nas/assistant/runtime/venv/bin/python", "args": []any{"/usr/lib/a-nas/assistant/anas_videocut_mcp.py"},
 		// Full trust, as nobody is there to approve a call in a planning; and every key
 		// written out, since the managed policy wins only for the keys it writes.
 		"trust": "full", "enabled": true, "lazy": false, "timeout": 120,
 		"tools": map[string]any{"prompts": false, "resources": false},
 	}
-	if !reflect.DeepEqual(montage, want) {
-		t.Fatalf("the montage server in the planning policy = %#v", montage)
+	if !reflect.DeepEqual(videocut, want) {
+		t.Fatalf("the videocut server in the planning policy = %#v", videocut)
 	}
 	skills, _ := plan["skills"].(map[string]any)
 	if skills["creation_nudge_interval"] != 1 {
 		t.Fatalf("the planning policy's skills = %#v", skills)
 	}
 	// Without them the two are the same: every other server, toolset and setting.
-	delete(servers, "montage")
+	delete(servers, "videocut")
 	delete(skills, "creation_nudge_interval")
 	if !reflect.DeepEqual(plan, policy) {
-		t.Fatal("the planning policy differs from the assistant's policy in more than the montage server and the reviews")
+		t.Fatal("the planning policy differs from the assistant's policy in more than the videocut server and the reviews")
 	}
-	if base, _ := policy["mcp_servers"].(map[string]any); base["montage"] != nil || len(base) == 0 {
+	if base, _ := policy["mcp_servers"].(map[string]any); base["videocut"] != nil || len(base) == 0 {
 		t.Fatalf("the assistant's own policy has servers %v", base)
 	}
 	// No platform's toolsets name it: only the planning instance gives it (HERMES_TUI_TOOLSETS).
 	for platform, toolsets := range policy["platform_toolsets"].(map[string]any) {
-		if slices.Contains(toolsets.([]any), any("montage")) {
-			t.Fatalf("platform %s lists the montage toolset", platform)
+		if slices.Contains(toolsets.([]any), any("videocut")) {
+			t.Fatalf("platform %s lists the videocut toolset", platform)
 		}
 	}
 	// A policy the server does not fit is refused when the package is built, and one that
@@ -267,13 +267,13 @@ func TestThePlanPolicyIsThePolicyWithTheMontageServerAndReviews(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out, err := derive(twice, serverPath); err == nil {
-		t.Fatalf("a policy that already has the montage server was spliced again into %s", out)
+		t.Fatalf("a policy that already has the videocut server was spliced again into %s", out)
 	}
 	server, _ := os.ReadFile(serverPath)
 	doubled := strings.Replace(string(raw), "mcp_servers:\n", "mcp_servers:\n"+string(server), 1)
 	var document map[string]any
 	if err := yaml.Unmarshal([]byte(doubled), &document); err == nil {
-		t.Fatal("a policy with the montage server written twice read as YAML")
+		t.Fatal("a policy with the videocut server written twice read as YAML")
 	}
 	if _, err := memberConfig("alice", "hash", []byte(doubled)); err == nil {
 		t.Fatal("the Host Agent wrote a member's settings from a policy with a key written twice")

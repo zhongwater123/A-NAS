@@ -40,8 +40,8 @@
 
 ## 关联
 
-- 推翻：#514 的“模型可能已被调用就不自动重来”（[规划会话](../architecture/montage-planning-session.md#不变的规则)）
-- 规格：[剪辑中心规格](../specs/montage-center.md)的“规划没有交回”与验收“规划（VNAS）”；默认规则的改动记在[默认做法](2026-11-17-montage-center-default-rules.md)
-- 设计：[规划会话的重试](../architecture/montage-planning-session.md#4-重试)、[剪辑中心实施方案](../architecture/montage-center.md)
-- 代码：[`internal/montage/planning.go`](../../internal/montage/planning.go)（`maxPlanRounds`、`awaitPlan`、`retryWait`）、[`internal/montage/briefs.go`](../../internal/montage/briefs.go)（`refuse`）、[`internal/montage/jobs.go`](../../internal/montage/jobs.go)（`Replan`、`Notices`）、[`web/src/montage/MontageNotices.tsx`](../../web/src/montage/MontageNotices.tsx)
-- 测试：`TestAPlanningThatDoesNotFinishIsTriedThreeRoundsThenTheJobFails`、`TestAFailedPlanningIsPlannedAgainOnlyAsTheProjectsLatestJob`、`TestThreeRefusedAnswersEndTheRoundAndItIsPlannedAgain`（[`internal/montage/planning_test.go`](../../internal/montage/planning_test.go)）
+- 推翻：#514 的“模型可能已被调用就不自动重来”（[规划会话](../architecture/videocut-planning-session.md#不变的规则)）
+- 规格：[剪辑中心规格](../specs/videocut-center.md)的“规划没有交回”与验收“规划（VNAS）”；默认规则的改动记在[默认做法](2026-11-17-montage-center-default-rules.md)
+- 设计：[规划会话的重试](../architecture/videocut-planning-session.md#4-重试)、[剪辑中心实施方案](../architecture/videocut-center.md)
+- 代码：[`internal/videocut/app/planning.go`](../../internal/videocut/app/planning.go)（`maxPlanRounds`、`awaitPlan`、`retryWait`）、[`internal/videocut/app/briefs.go`](../../internal/videocut/app/briefs.go)（`refuse`）、[`internal/videocut/app/jobs.go`](../../internal/videocut/app/jobs.go)（`Replan`、`Notices`）、[`web/src/videocut/ui/VideoCutNotices.tsx`](../../web/src/videocut/ui/VideoCutNotices.tsx)
+- 测试：`TestAPlanningThatDoesNotFinishIsTriedThreeRoundsThenTheJobFails`、`TestAFailedPlanningIsPlannedAgainOnlyAsTheProjectsLatestJob`、`TestThreeRefusedAnswersEndTheRoundAndItIsPlannedAgain`（[`internal/videocut/app/planning_test.go`](../../internal/videocut/app/planning_test.go)）

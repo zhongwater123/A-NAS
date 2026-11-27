@@ -27,7 +27,7 @@ type SessionResolver interface {
 // never the Product Service (ADR 0037 decision 3). The handler finds the
 // caller with accounts.UserFrom; Status is set so that ActiveAdministrator
 // holds for an administrator, since the lookup only names active accounts.
-// name says whose lookup failed in the log, as "scoring" or "montage".
+// name says whose lookup failed in the log, as "scoring" or "videocut".
 func Authenticate(sessions SessionResolver, name, unavailable string, logger *slog.Logger, next http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()

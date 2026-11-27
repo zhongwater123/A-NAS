@@ -128,13 +128,13 @@
 
 ### 剪辑中心
 
-按[演示手册](demo-montage-center.md)打开并走一次之后（2026-11-20 已完整出片一次，[基线](../architecture/montage-center.md#首版闭环的基线)），再核对：
+按[演示手册](demo-videocut-center.md)打开并走一次之后（2026-11-20 已完整出片一次，[基线](../architecture/videocut-center.md#首版闭环的基线)），再核对：
 
-- 生成途中刷新页面、关闭再打开窗口，进度从服务端恢复；途中 `systemctl restart anas-montage`，已完成的分析与规划不重做：相册描述的 AI Worker 调用次数与规划的轮数都不增加（[规格](../specs/montage-center.md#首版闭环实验-nas)第 2、3 步）。
-- 成员在 VNAS 历史里打开“剪辑规划 · <项目名>”，说一句要求（如“开场太快了”），复盘记下；下一次规划的对话用上了它（[规划会话](../architecture/montage-planning-session.md#学习)）。
-- 品杰一组：两个方案与第八版直连 Claude 的成片人工对比，记下差异（[规格](../specs/montage-center.md#剪辑行为迁移)）。
+- 生成途中刷新页面、关闭再打开窗口，进度从服务端恢复；途中 `systemctl restart anas-videocut`，已完成的分析与规划不重做：相册描述的 AI Worker 调用次数与规划的轮数都不增加（[规格](../specs/videocut-center.md#首版闭环实验-nas)第 2、3 步）。
+- 成员在 VNAS 历史里打开“剪辑规划 · <项目名>”，说一句要求（如“开场太快了”），复盘记下；下一次规划的对话用上了它（[规划会话](../architecture/videocut-planning-session.md#学习)）。
+- 品杰一组：两个方案与第八版直连 Claude 的成片人工对比，记下差异（[规格](../specs/videocut-center.md#剪辑行为迁移)）。
 - 渲染时在相册播放一段需要转码的视频，播放不卡；记下 FFmpeg 切片的内存峰值（2026-11-20 到了 3 GiB 上限）。
-- 配乐分析按[手册](enable-montage-music.md)第 5 步实测。
+- 配乐分析按[手册](enable-videocut-music.md)第 5 步实测。
 
 ## 验证
 

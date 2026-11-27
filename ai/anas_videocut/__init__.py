@@ -1,0 +1,6 @@
+"""VideoCut's compute Worker (docs/architecture/videocut-center.md, 剪辑计算 Worker).
+
+algo/ is the prototype's pure computation, copied unchanged from the eighth
+version (PR #454, commit 19f2d6db, ai/montage_v8/domain/), so that its results
+can be compared one for one; fixes follow as their own commits.
+"""

@@ -44,8 +44,8 @@ ADR 记录难以逆转、未来读者无法仅凭代码理解且存在真实权�
 - [0033：照片文字的更正按内容对象存，修改记录对能看到照片的人公开](0033-keep-photo-text-corrections-per-content-object-with-a-change-log.md)（修订 2026-10-30 的 OCR 决定记录中“更正记入活动记录”一项）
 - [0034：产品以签名软件源中的 Debian 软件包发布，设备以 systemd-sysupdate 双系统分区更新](0034-release-as-signed-debian-packages-and-update-devices-with-sysupdate.md)（接续 0031 决定 6）
 - [0037：可移除模块以独立服务接入，A-NAS 只提供登录、转发与存储](0037-plug-removable-modules-in-as-separate-services.md)（proposed）
-- [0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问](0038-keep-montage-media-in-the-photo-library.md)（修订 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10）
-- [0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本](0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（修订剪辑中心规格的非目标）
+- [0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问](0038-keep-montage-media-in-the-photo-library.md)（修订 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10）。2026-11-26 起（[#669](https://github.com/zhongwater123/A-NAS/issues/669)）运行时名字改为 VideoCut：服务账号 `a-nas-videocut`，固定 UID 31005（取代正文里的 `a-nas-montage` 与 31003），单元 `anas-videocut*`，数据卷上的 `videocut/videocut.db`；正文保留当时的名字
+- [0039：剪辑中心出片后的二次编辑存为服务端的修改稿，改完另存新版本](0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)（修订剪辑中心规格的非目标）。正文里的 `/api/v1/montage` 现在是 `/api/v1/videocut`（#669）
 - [0040：共享工作区以独立服务运行，页面在无来源的沙箱里展示，成员的 agent 凭 Agent令牌经 MCP 修改](0040-let-members-agents-edit-shared-pages-through-agent-tokens.md)（proposed；新增第五种路由姿态 agent）
 
 ## 格式

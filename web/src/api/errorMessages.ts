@@ -6,7 +6,7 @@ import { APIError } from "./client";
 // remain diagnostic data on APIError, never the fallback presented to users.
 const messages: Record<string, string> = {
   photos_unavailable: "相册暂时不可用：数据卷未就绪，或此设备尚未启用相册",
-  montage_unavailable: "剪辑中心暂不可用，请稍后重试",
+  videocut_unavailable: "剪辑中心暂不可用，请稍后重试",
   ai_unavailable: "暂时无法识别图片，请稍后再试",
   ...accountErrors,
   ...nameErrors,
@@ -106,7 +106,7 @@ const domains = {
     apps_unavailable: "无法连接容器代理",
   },
   music: { not_found: "内容已不存在" },
-  montage: {
+  videocut: {
     not_found: "项目或任务已不存在",
     no_song: "先选一首歌",
     job_in_progress: "这个项目已有任务在进行",

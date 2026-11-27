@@ -36,8 +36,8 @@ export interface ShellOptions {
   webSearch?: WebSearchStatus;
   // Photo scoring is installed only when a test says what the account may do.
   scoring?: Pick<ScoringMe, "admin" | "rater">;
-  // 剪辑中心 is off, as on a device without ANAS_MONTAGE_ENABLED, unless a test turns it on.
-  montage?: boolean;
+  // 剪辑中心 is off, as on a device without ANAS_VIDEOCUT_ENABLED, unless a test turns it on.
+  videocut?: boolean;
   // 共享工作区 is hidden, as for a member no administrator added, unless a test says otherwise.
   workspace?: { admin: boolean };
 }
@@ -65,22 +65,22 @@ export function shellHandlers(options: ShellOptions = {}) {
     http.get("/api/v1/modules/scoring/me", ({ response }) =>
       response(200).json(options.scoring ?? { admin: false, rater: false }),
     ),
-    http.get("/api/v1/montage", ({ response }) =>
-      options.montage
+    http.get("/api/v1/videocut", ({ response }) =>
+      options.videocut
         ? response(204).empty()
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
-    http.get("/api/v1/montage/projects", ({ response }) => response(200).json({ items: [] })),
+    http.get("/api/v1/videocut/projects", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/workspace", ({ response }) =>
       options.workspace
         ? response(200).json(options.workspace)
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
     // The device keeps no film of its own for 剪辑中心's home page.
-    http.get("/api/v1/montage/hero", ({ response }) =>
+    http.get("/api/v1/videocut/hero", ({ response }) =>
       response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
-    http.get("/api/v1/montage/notices", ({ response }) => response(200).json({ items: [] })),
+    http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [] })),
     // The rail's count of new shares, the transfer indicator and 问题反馈.
     http.get("/api/v1/shares", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/shares/notifications", ({ response }) => response(200).json({ items: [] })),

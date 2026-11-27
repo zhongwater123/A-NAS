@@ -1,0 +1,21 @@
+[Unit]
+Description=A-NAS VideoCut socket for planning by members' VNAS
+# VideoCut's socket for planning by members' VNAS
+# (docs/architecture/videocut-planning-session.md): the VideoCut MCP server of a
+# member's planning instance reaches it, and the service learns the member
+# from the peer UID; root's planner claims and reports rounds on it, naming
+# the member. Open to every UID, so its directory is root's alone; only
+# anas-assistant-plan@.service binds it into its sandbox, never a
+# conversation's instance, the scheduled tasks or the curator. systemd holds
+# it, so it outlives restarts of the VideoCut service. anas-videocut.service
+# takes it (Sockets=).
+
+[Socket]
+ListenStream=/run/a-nas-videocut-assistant/assistant.sock
+SocketMode=0666
+DirectoryMode=0700
+FileDescriptorName=assistant
+Service=anas-videocut.service
+
+[Install]
+WantedBy=sockets.target

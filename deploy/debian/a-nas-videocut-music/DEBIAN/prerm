@@ -1,0 +1,10 @@
+#!/bin/bash
+# prerm of a-nas-videocut-music: the Worker and its socket stop before their
+# files go. The VideoCut service keeps its songs waiting for the analysis.
+set -euo pipefail
+
+[[ -d /run/systemd/system ]] || exit 0
+case "${1:-}" in
+  remove | deconfigure) systemctl stop anas-videocut-music.socket anas-videocut-music.service || true ;;
+esac
+exit 0

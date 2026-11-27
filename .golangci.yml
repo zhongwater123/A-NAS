@@ -194,6 +194,110 @@ linters:
               desc: the update service runs as root in anas-update.service; use internal/systemupdate
             - pkg: "github.com/landlock-lsm/go-landlock"
               desc: the root broker confines its workers
+        # VideoCut's layers (docs/architecture/videocut-center.md,
+        # 代码结构; #639): only the inner layers are held. domain uses the
+        # standard library and the contract packages; db adds the basic
+        # libraries; app adds the FFmpeg Worker's types and, file by file,
+        # the photo library's value types until they move to photosapi.
+        videocut-domain:
+          list-mode: strict
+          files:
+            - "**/internal/videocut/domain/*.go"
+            - "!$test"
+          allow:
+            - $gostd
+            - "github.com/zhongwater123/A-NAS/internal/photosapi$"
+            - "github.com/zhongwater123/A-NAS/internal/videocutcompute$"
+        videocut-db:
+          list-mode: strict
+          files:
+            - "**/internal/videocut/db/*.go"
+            - "!$test"
+          allow:
+            - $gostd
+            - "github.com/zhongwater123/A-NAS/internal/photosapi$"
+            - "github.com/zhongwater123/A-NAS/internal/videocutcompute$"
+            - "github.com/zhongwater123/A-NAS/internal/sqlitedb$"
+            - "github.com/zhongwater123/A-NAS/internal/atomicfile$"
+            - "github.com/zhongwater123/A-NAS/internal/keylock$"
+            - "github.com/zhongwater123/A-NAS/internal/capacity$"
+            - "github.com/zhongwater123/A-NAS/internal/videocut/domain$"
+        videocut-app:
+          list-mode: lax
+          files:
+            - "**/internal/videocut/app/*.go"
+            - "!$test"
+            - "!**/internal/videocut/app/draftops.go"
+            - "!**/internal/videocut/app/editing.go"
+            - "!**/internal/videocut/app/editjobs.go"
+            - "!**/internal/videocut/app/ports.go"
+            - "!**/internal/videocut/app/projects.go"
+            - "!**/internal/videocut/app/render.go"
+            - "!**/internal/videocut/app/steps.go"
+          allow:
+            - "github.com/zhongwater123/A-NAS/internal/photosapi$"
+            - "github.com/zhongwater123/A-NAS/internal/videocutcompute$"
+            - "github.com/zhongwater123/A-NAS/internal/ffmpegworker$"
+            - "github.com/zhongwater123/A-NAS/internal/sqlitedb$"
+            - "github.com/zhongwater123/A-NAS/internal/atomicfile$"
+            - "github.com/zhongwater123/A-NAS/internal/keylock$"
+            - "github.com/zhongwater123/A-NAS/internal/capacity$"
+            - "github.com/zhongwater123/A-NAS/internal/videocut/domain$"
+            - "github.com/zhongwater123/A-NAS/internal/videocut/db$"
+          deny:
+            - pkg: "github.com/zhongwater123/A-NAS/internal"
+              desc: app uses the contract packages, the basic libraries, domain and db; the rest is behind app/ports.go
+            - pkg: "database/sql"
+              desc: the database is db's; app reads and writes through db's methods and types (#665)
+        videocut-app-photos:
+          list-mode: lax
+          files:
+            - "**/internal/videocut/app/draftops.go"
+            - "**/internal/videocut/app/editing.go"
+            - "**/internal/videocut/app/editjobs.go"
+            - "**/internal/videocut/app/ports.go"
+            - "**/internal/videocut/app/projects.go"
+            - "**/internal/videocut/app/render.go"
+            - "**/internal/videocut/app/steps.go"
+          allow:
+            - "github.com/zhongwater123/A-NAS/internal/photosapi$"
+            - "github.com/zhongwater123/A-NAS/internal/videocutcompute$"
+            - "github.com/zhongwater123/A-NAS/internal/ffmpegworker$"
+            - "github.com/zhongwater123/A-NAS/internal/sqlitedb$"
+            - "github.com/zhongwater123/A-NAS/internal/atomicfile$"
+            - "github.com/zhongwater123/A-NAS/internal/keylock$"
+            - "github.com/zhongwater123/A-NAS/internal/capacity$"
+            - "github.com/zhongwater123/A-NAS/internal/videocut/domain$"
+            - "github.com/zhongwater123/A-NAS/internal/videocut/db$"
+            - "github.com/zhongwater123/A-NAS/internal/photos$"
+          deny:
+            - pkg: "github.com/zhongwater123/A-NAS/internal"
+              desc: app uses the contract packages, the basic libraries, domain and db; the rest is behind app/ports.go
+            - pkg: "database/sql"
+              desc: the database is db's; app reads and writes through db's methods and types (#665)
+        videocut-outer:
+          list-mode: lax
+          files:
+            - "**/internal/videocut/external/*.go"
+            - "**/internal/videocut/db/*.go"
+            - "!$test"
+          deny:
+            - pkg: "github.com/zhongwater123/A-NAS/internal/videocut/app$"
+              desc: external implements app's interfaces and db serves app; neither imports it
+            - pkg: "github.com/zhongwater123/A-NAS/internal/videocut/protocol$"
+              desc: the protocol is the outermost layer
+        # Their tests too: a test that imports VideoCut makes the package
+        # depend on it all the same when it is tested.
+        videocut-users:
+          list-mode: lax
+          files:
+            - "**/internal/videocutcompute/*.go"
+            - "**/internal/photoservice/*.go"
+          deny:
+            - pkg: "github.com/zhongwater123/A-NAS/internal/videocut$"
+              desc: the compute client and the photo service do not depend on VideoCut
+            - pkg: "github.com/zhongwater123/A-NAS/internal/videocut/"
+              desc: the compute client and the photo service do not depend on VideoCut
     errcheck:
       exclude-functions:
         # A query's failure shows in rows.Err after the loop, which

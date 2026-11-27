@@ -86,19 +86,19 @@ type Config struct {
 	SharesSocket     string `env:"ANAS_SHARES_SOCKET" envDefault:"/run/a-nas-shares/shares.sock"`
 	ShareFilesSocket string `env:"ANAS_SHARE_FILES_SOCKET" envDefault:"/run/a-nas-share-files/files.sock"`
 	FamilySocket     string `env:"ANAS_FAMILY_SOCKET" envDefault:"/run/a-nas-family/family.sock"`
-	// MontageEnabled mounts /api/v1/montage, 剪辑中心 (ADR 0038). It stays off
+	// VideoCutEnabled mounts /api/v1/videocut, 剪辑中心 (ADR 0038). It stays off
 	// until the first film can be made end to end; while off the desktop
 	// shows no entry, and hiding the entry alone would not stop the API.
-	MontageEnabled bool   `env:"ANAS_MONTAGE_ENABLED"`
-	MontageSocket  string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
+	VideoCutEnabled bool   `env:"ANAS_VIDEOCUT_ENABLED"`
+	VideoCutSocket  string `env:"ANAS_VIDEOCUT_SOCKET" envDefault:"/run/a-nas-videocut/videocut.sock"`
 	// WorkspaceSocket is the shared workspace's service (ADR 0040).
 	WorkspaceSocket string `env:"ANAS_WORKSPACE_SOCKET" envDefault:"/run/a-nas-workspace/workspace.sock"`
-	// MontageMusicSocket and MontageComputeSocket reach the montage
-	// center's Workers in development, where the montage center runs in
+	// VideoCutMusicSocket and VideoCutComputeSocket reach VideoCut's
+	// Workers in development, where VideoCut runs in
 	// this process; without them its songs wait.
-	MontagePlanAnswers   string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
-	MontageMusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET"`
-	MontageComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET"`
+	VideoCutPlanAnswers   string `env:"ANAS_VIDEOCUT_PLAN_ANSWERS"`
+	VideoCutMusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET"`
+	VideoCutComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET"`
 	// ModuleSocketDir holds the API sockets of installed removable modules
 	// (ADR 0037).
 	ModuleSocketDir string `env:"ANAS_MODULE_SOCKET_DIR" envDefault:"/run/a-nas-modules"`
@@ -258,7 +258,7 @@ func loadConfig(environment map[string]string) (Config, error) {
 		value *string
 	}{
 		{"ANAS_PHOTOS_SOCKET", &c.PhotosSocket}, {"ANAS_SHARES_SOCKET", &c.SharesSocket},
-		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_MONTAGE_SOCKET", &c.MontageSocket},
+		{"ANAS_SHARE_FILES_SOCKET", &c.ShareFilesSocket}, {"ANAS_FAMILY_SOCKET", &c.FamilySocket}, {"ANAS_VIDEOCUT_SOCKET", &c.VideoCutSocket},
 		{"ANAS_WORKSPACE_SOCKET", &c.WorkspaceSocket}, {"ANAS_MODULE_SOCKET_DIR", &c.ModuleSocketDir},
 		{"ANAS_FFMPEG_SOCKET", &c.Media.Socket},
 		{"ANAS_FFMPEG_SLOTS", &c.Media.Slots}, {"ANAS_SCREENSAVER_DIRECTORY", &c.ScreensaverDirectory},
@@ -396,9 +396,9 @@ type photoServiceConfig struct {
 	AssistantSocket string `env:"ANAS_PHOTOS_ASSISTANT_SOCKET"`
 	// Without the AI component the socket is absent and photos wait for it.
 	AISocket string `env:"ANAS_AI_SOCKET" envDefault:"/run/a-nas-ai/ai.sock"`
-	// ComputeSocket is the montage compute Worker, which cuts the cards of
-	// the videos the montage center asks about (ADR 0038).
-	ComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET" envDefault:"/run/a-nas-montage-compute/compute.sock"`
+	// ComputeSocket is the VideoCut compute Worker, which cuts the cards of
+	// the videos VideoCut asks about (ADR 0038).
+	ComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET" envDefault:"/run/a-nas-videocut-compute/compute.sock"`
 	// VectorSocket reaches the photo service's own vector index (ADR 0028);
 	// the unit names it, and without it the index is off.
 	VectorSocket string `env:"ANAS_PHOTOS_VECTOR_SOCKET"`
@@ -423,8 +423,8 @@ func loadPhotoServiceConfig(environment map[string]string) (photoServiceConfig, 
 	problems := absolutePaths(map[string]*string{
 		"ANAS_PHOTOS_ROOT": &c.Root, "ANAS_PHOTOS_SOCKET": &c.Socket, "ANAS_PHOTO_SESSION_SOCKET": &c.SessionSocket,
 		"ANAS_PHOTOS_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_AI_SOCKET": &c.AISocket, "ANAS_PHOTOS_VECTOR_SOCKET": &c.VectorSocket,
-		"ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket,
-		"ANAS_FFMPEG_SOCKET":          &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
+		"ANAS_VIDEOCUT_COMPUTE_SOCKET": &c.ComputeSocket,
+		"ANAS_FFMPEG_SOCKET":           &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
 	})
 	if c.Quiet, err = envconfig.PositiveDuration("ANAS_PHOTOS_AI_QUIET_PERIOD", c.QuietPeriod); err != nil {
 		problems = append(problems, err)
@@ -479,51 +479,51 @@ func loadShareServiceConfig(environment map[string]string) (shareServiceConfig, 
 	return c, nil
 }
 
-// montageServiceConfig configures the montage service (ADR 0038), which runs
+// videoCutServiceConfig configures the VideoCut service (ADR 0038), which runs
 // from this binary as its own process and identity.
-type montageServiceConfig struct {
-	Root          string `env:"ANAS_MONTAGE_ROOT" envDefault:"/srv/a-nas/data/montage"`
-	Socket        string `env:"ANAS_MONTAGE_SOCKET" envDefault:"/run/a-nas-montage/montage.sock"`
-	SessionSocket string `env:"ANAS_MONTAGE_SESSION_SOCKET" envDefault:"/run/a-nas-montage-sessions/montage.sock"`
+type videoCutServiceConfig struct {
+	Root          string `env:"ANAS_VIDEOCUT_ROOT" envDefault:"/srv/a-nas/data/videocut"`
+	Socket        string `env:"ANAS_VIDEOCUT_SOCKET" envDefault:"/run/a-nas-videocut/videocut.sock"`
+	SessionSocket string `env:"ANAS_VIDEOCUT_SESSION_SOCKET" envDefault:"/run/a-nas-videocut-sessions/videocut.sock"`
 	// GrantSocket is the photo library's socket for project grants, which
 	// only this service's account reaches (ADR 0038 decision 3).
 	GrantSocket string `env:"ANAS_PHOTOS_GRANT_SOCKET" envDefault:"/run/a-nas-photos-grants/grants.sock"`
 	// Media decodes and probes the songs and renders the films.
 	Media MediaConfig
 	// MusicSocket reaches the music analysis Worker, allin1 in a runtime of
-	// its own (anas-montage-music.socket); ComputeSocket the compute
-	// Worker (anas-montage-compute.socket). While either is missing, songs
+	// its own (anas-videocut-music.socket); ComputeSocket the compute
+	// Worker (anas-videocut-compute.socket). While either is missing, songs
 	// wait.
-	MusicSocket   string `env:"ANAS_MONTAGE_MUSIC_SOCKET" envDefault:"/run/a-nas-montage-music/music.sock"`
-	ComputeSocket string `env:"ANAS_MONTAGE_COMPUTE_SOCKET" envDefault:"/run/a-nas-montage-compute/compute.sock"`
+	MusicSocket   string `env:"ANAS_VIDEOCUT_MUSIC_SOCKET" envDefault:"/run/a-nas-videocut-music/music.sock"`
+	ComputeSocket string `env:"ANAS_VIDEOCUT_COMPUTE_SOCKET" envDefault:"/run/a-nas-videocut-compute/compute.sock"`
 	// PlanAnswers names a directory of fixed plans (pick.json, shots.json)
 	// that stand in for the AI assistant's planning, which is not shipped
 	// yet (M9): the development machine and the system test only. Without
-	// it the montage center makes no film.
-	PlanAnswers string `env:"ANAS_MONTAGE_PLAN_ANSWERS"`
+	// it VideoCut makes no film.
+	PlanAnswers string `env:"ANAS_VIDEOCUT_PLAN_ANSWERS"`
 	// AssistantSocket is where members' planning instances and root's
-	// planner reach the montage center when systemd does not hold the
+	// planner reach VideoCut when systemd does not hold the
 	// socket (development); PlanMarkers is where the planner finds who has
-	// a job to plan (docs/architecture/montage-planning-session.md).
-	AssistantSocket string `env:"ANAS_MONTAGE_ASSISTANT_SOCKET"`
-	PlanMarkers     string `env:"ANAS_MONTAGE_PLAN_MARKERS" envDefault:"/run/a-nas-montage/plans"`
+	// a job to plan (docs/architecture/videocut-planning-session.md).
+	AssistantSocket string `env:"ANAS_VIDEOCUT_ASSISTANT_SOCKET"`
+	PlanMarkers     string `env:"ANAS_VIDEOCUT_PLAN_MARKERS" envDefault:"/run/a-nas-videocut/plans"`
 }
 
-// loadMontageServiceConfig resolves and validates the montage service's
+// loadVideoCutServiceConfig resolves and validates the VideoCut service's
 // configuration, reporting every problem at once.
-func loadMontageServiceConfig(environment map[string]string) (montageServiceConfig, error) {
-	c, err := envconfig.Parse[montageServiceConfig](environment)
+func loadVideoCutServiceConfig(environment map[string]string) (videoCutServiceConfig, error) {
+	c, err := envconfig.Parse[videoCutServiceConfig](environment)
 	if err != nil {
-		return montageServiceConfig{}, err
+		return videoCutServiceConfig{}, err
 	}
 	problems := absolutePaths(map[string]*string{
-		"ANAS_MONTAGE_ROOT": &c.Root, "ANAS_MONTAGE_SOCKET": &c.Socket, "ANAS_MONTAGE_SESSION_SOCKET": &c.SessionSocket,
+		"ANAS_VIDEOCUT_ROOT": &c.Root, "ANAS_VIDEOCUT_SOCKET": &c.Socket, "ANAS_VIDEOCUT_SESSION_SOCKET": &c.SessionSocket,
 		"ANAS_PHOTOS_GRANT_SOCKET": &c.GrantSocket, "ANAS_FFMPEG_SOCKET": &c.Media.Socket, "ANAS_FFMPEG_SLOTS": &c.Media.Slots,
-		"ANAS_MONTAGE_MUSIC_SOCKET": &c.MusicSocket, "ANAS_MONTAGE_COMPUTE_SOCKET": &c.ComputeSocket, "ANAS_MONTAGE_PLAN_ANSWERS": &c.PlanAnswers,
-		"ANAS_MONTAGE_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_MONTAGE_PLAN_MARKERS": &c.PlanMarkers,
+		"ANAS_VIDEOCUT_MUSIC_SOCKET": &c.MusicSocket, "ANAS_VIDEOCUT_COMPUTE_SOCKET": &c.ComputeSocket, "ANAS_VIDEOCUT_PLAN_ANSWERS": &c.PlanAnswers,
+		"ANAS_VIDEOCUT_ASSISTANT_SOCKET": &c.AssistantSocket, "ANAS_VIDEOCUT_PLAN_MARKERS": &c.PlanMarkers,
 	})
 	if len(problems) > 0 {
-		return montageServiceConfig{}, errors.Join(problems...)
+		return videoCutServiceConfig{}, errors.Join(problems...)
 	}
 	return c, nil
 }

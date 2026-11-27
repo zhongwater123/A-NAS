@@ -1,0 +1,334 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"syscall"
+	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
+)
+
+// A song is analysed once per content: the songs of several members with
+// the same digest share one analysis. VideoCut decodes the copy
+// with the FFmpeg worker into two streams, stereo at 44.1 kHz for allin1 and
+// mono at 22050 Hz for the loudness, the eighth version's inputs, and hands
+// them to the music analysis Worker; then the compute Worker's music
+// operation picks the default excerpt. A Worker that is away leaves the song
+// waiting, with what was found so far kept, and it is tried again later, as
+// long as it takes: asking costs nothing. An analysis the Worker took and
+// could not finish is tried analysisAttempts times, since every attempt
+// costs minutes of the Worker, and then the song cannot be used.
+
+// AnalysisVersion names how songs are analysed now: allin1's harmonix-all
+// and the eighth version's excerpt.
+const AnalysisVersion = "allin1-harmonix-all/music-v8"
+
+// analysisRetry is how long a song waits for a Worker that was away, or
+// between attempts that failed.
+const analysisRetry = 5 * time.Minute
+
+// analysisAttempts is how many times a Worker may fail on a song
+// (ErrWorkerFailed) before the song is unusable.
+const analysisAttempts = 3
+
+// analysisPoll is how often waiting songs are looked at without a wake-up.
+const analysisPoll = time.Minute
+
+func (s *Store) wakeAnalysis() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+}
+
+// AnalyzeSongs analyses the songs waiting, one content at a time, until ctx
+// ends. Songs an earlier AnalysisVersion found unusable are analysed again
+// first.
+func (s *Store) AnalyzeSongs(ctx context.Context) {
+	if err := s.requeueStale(ctx); err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "queueing songs for another analysis failed", "error", err)
+	}
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		case <-s.wake:
+		}
+		if err := s.AnalyzeWaiting(ctx); err != nil && ctx.Err() == nil {
+			s.logger.WarnContext(ctx, "finding a song to analyse failed", "error", err)
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(analysisPoll)
+	}
+}
+
+// AnalyzeWaiting analyses every song due now, one content at a time; a song
+// whose Worker is away is due again later.
+func (s *Store) AnalyzeWaiting(ctx context.Context) error {
+	for ctx.Err() == nil {
+		sha, ok, err := s.nextSong(ctx)
+		if err != nil || !ok {
+			return err
+		}
+		s.analyze(ctx, sha)
+	}
+	return ctx.Err()
+}
+
+// requeueStale queues the songs that an earlier AnalysisVersion found
+// unusable: what changed since may be what refused them. Songs that are ready
+// keep the analysis their projects were set up with.
+func (s *Store) requeueStale(ctx context.Context) error {
+	return s.db.RequeueStaleSongs(ctx, s.now(), AnalysisVersion)
+}
+
+func (s *Store) nextSong(ctx context.Context) (string, bool, error) {
+	sha, err := s.db.NextSong(ctx, s.now())
+	if errors.Is(err, db.ErrNotFound) {
+		return "", false, nil
+	}
+	return sha, err == nil, err
+}
+
+// analyze analyses the content with this digest and records it in every
+// row waiting for it.
+func (s *Store) analyze(ctx context.Context, sha string) {
+	analysis, loudness, err := s.knownStructure(ctx, sha)
+	if err != nil {
+		s.logger.WarnContext(ctx, "reading a song's analysis failed", "error", err)
+		s.wait(ctx, sha, WaitAnalyzer)
+		return
+	}
+	if analysis.Structure == nil {
+		found, err := s.findStructure(ctx, sha)
+		switch {
+		case err != nil && ctx.Err() != nil:
+			// The service is stopping; the song is as due as it was.
+			return
+		case errors.Is(err, domain.ErrNotAudio), errors.Is(err, videocutcompute.ErrWorkerRefused):
+			s.logger.InfoContext(ctx, "a song cannot be analysed", "song", sha, "error", err)
+			s.finish(ctx, sha, SongUnusable, UnusableUndecodable, songAnalysis{}, nil)
+			return
+		case errors.Is(err, domain.ErrMediaUnavailable):
+			s.logger.WarnContext(ctx, "the media worker is away; the song waits", "error", err)
+			s.wait(ctx, sha, WaitMedia)
+			return
+		case errors.Is(err, videocutcompute.ErrWorkerFailed):
+			s.logger.WarnContext(ctx, "the music analysis worker failed on a song", "song", sha, "error", err)
+			s.failed(ctx, sha, WaitAnalyzer, songAnalysis{}, nil)
+			return
+		case err != nil:
+			s.logger.WarnContext(ctx, "the music analysis worker is away; the song waits", "error", err)
+			s.wait(ctx, sha, WaitAnalyzer)
+			return
+		}
+		analysis = songAnalysis{Structure: &found.Structure, Seconds: found.Seconds}
+		loudness = found.Loudness
+		s.logger.InfoContext(ctx, "analysed a song", "song", sha, "seconds", found.Seconds)
+		// What allin1 found is kept even if the excerpt has to wait.
+		if err := s.keepStructure(ctx, sha, analysis, loudness); err != nil {
+			s.logger.WarnContext(ctx, "keeping a song's analysis failed", "error", err)
+			s.wait(ctx, sha, WaitAnalyzer)
+			return
+		}
+	}
+	if s.compute == nil {
+		s.wait(ctx, sha, WaitCompute)
+		return
+	}
+	// The excerpt is every member's who chose this content, so it names no
+	// song: each member's own title joins it when a job asks (Excerpt).
+	selection, err := s.compute.Music(ctx, videocutcompute.MusicRequest{Structure: *analysis.Structure, Loudness: loudness, Target: SongTarget})
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return
+	case errors.Is(err, videocutcompute.ErrWorkerRefused):
+		// Not one of the reasons the operation names (few_bars and the
+		// others arrive in its answer): it cannot read what allin1 found.
+		s.logger.WarnContext(ctx, "the compute worker refused a song's structure", "song", sha, "error", err)
+		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
+		return
+	case errors.Is(err, videocutcompute.ErrWorkerFailed):
+		// It took the structure and broke on it, or stopped. That may be
+		// the Worker's moment or this song's, so it counts as an attempt.
+		s.logger.WarnContext(ctx, "the compute worker failed on a song's structure", "song", sha, "error", err)
+		s.failed(ctx, sha, WaitCompute, analysis, loudness)
+		return
+	case err != nil:
+		s.logger.WarnContext(ctx, "the compute worker is away; the song waits", "error", err)
+		s.wait(ctx, sha, WaitCompute)
+		return
+	}
+	analysis.Selection, analysis.Music = &selection, selection.Music
+	if selection.Unusable != "" {
+		s.finish(ctx, sha, SongUnusable, selection.Unusable, analysis, loudness)
+		return
+	}
+	s.finish(ctx, sha, SongReady, "", analysis, loudness)
+}
+
+// knownStructure is what an earlier attempt found for the content.
+func (s *Store) knownStructure(ctx context.Context, sha string) (songAnalysis, []float32, error) {
+	text, blob, err := s.db.KnownStructure(ctx, sha)
+	if errors.Is(err, db.ErrNotFound) {
+		return songAnalysis{}, nil, nil
+	}
+	if err != nil {
+		return songAnalysis{}, nil, err
+	}
+	var analysis songAnalysis
+	if err := json.Unmarshal([]byte(text.String), &analysis); err != nil {
+		return songAnalysis{}, nil, err
+	}
+	loudness, err := domain.DecodeLoudness(blob)
+	if err != nil || analysis.Structure == nil || len(loudness) == 0 {
+		return songAnalysis{}, nil, err
+	}
+	analysis.Selection, analysis.Music = nil, nil
+	return analysis, loudness, nil
+}
+
+// findStructure decodes the copy and has the music analysis Worker read it.
+func (s *Store) findStructure(ctx context.Context, sha string) (domain.Analysis, error) {
+	if s.media == nil {
+		return domain.Analysis{}, domain.ErrMediaUnavailable
+	}
+	if s.music == nil {
+		return domain.Analysis{}, fmt.Errorf("%w: no music analysis worker", videocutcompute.ErrWorkerUnavailable)
+	}
+	file, err := os.Open(s.songPath(sha))
+	if err != nil {
+		return domain.Analysis{}, err
+	}
+	defer func() { _ = file.Close() }()
+	stereoOut, stereoIn, err := os.Pipe()
+	if err != nil {
+		return domain.Analysis{}, err
+	}
+	monoOut, monoIn, err := os.Pipe()
+	if err != nil {
+		return domain.Analysis{}, errors.Join(err, stereoOut.Close(), stereoIn.Close())
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	// The Worker reads the stereo stream to its end, then the mono one, so
+	// one decoding runs at a time. A pipe ends the same way whether the
+	// decoding finished or broke off, so the Worker analyses the streams
+	// only once whole says both were written to their end.
+	whole := make(chan error, 1)
+	decoded := make(chan error, 1)
+	go func() {
+		err := s.decodeInto(ctx, file, stereoIn, 2, domain.StereoRate)
+		if err == nil {
+			err = s.decodeInto(ctx, file, monoIn, 1, domain.MonoRate)
+		} else {
+			_ = monoIn.Close()
+		}
+		whole <- err
+		decoded <- err
+	}()
+	analysis, err := s.music.Analyze(ctx, stereoOut, monoOut, whole)
+	// A Worker that stopped reading leaves the decoding a closed pipe.
+	_ = stereoOut.Close()
+	_ = monoOut.Close()
+	decodeErr := <-decoded
+	switch {
+	case decodeErr != nil && !errors.Is(decodeErr, syscall.EPIPE):
+		// The decoding broke off by itself: what the Worker made of a
+		// stream cut short says nothing about the song.
+		return domain.Analysis{}, decodeErr
+	case err != nil:
+		return domain.Analysis{}, err
+	}
+	return analysis, nil
+}
+
+// decodeInto writes the copy's samples to pipe and closes it.
+func (s *Store) decodeInto(ctx context.Context, file *os.File, pipe *os.File, channels, rate int) error {
+	defer func() { _ = pipe.Close() }()
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	stream, err := s.media.Audio(ctx, file, ffmpegworker.AudioRequest{PCM: true, Bits: 32, Channels: channels, SampleRate: rate})
+	if err == nil {
+		_, err = io.Copy(pipe, stream)
+		err = errors.Join(err, stream.Close())
+	}
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ffmpegworker.ErrUnreadable), errors.Is(err, ffmpegworker.ErrInvalid), errors.Is(err, ffmpegworker.ErrTooLarge):
+		return fmt.Errorf("%w: %v", domain.ErrNotAudio, err)
+	}
+	return fmt.Errorf("%w: %w", domain.ErrMediaUnavailable, err)
+}
+
+func (s *Store) keepStructure(ctx context.Context, sha string, analysis songAnalysis, loudness []float32) error {
+	encoded, err := json.Marshal(analysis)
+	if err != nil {
+		return err
+	}
+	return s.db.KeepSongStructure(ctx, sha, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, s.now())
+}
+
+// finish records the analysis in every row of the content still waiting.
+func (s *Store) finish(ctx context.Context, sha, state, reason string, analysis songAnalysis, loudness []float32) {
+	encoded, err := json.Marshal(analysis)
+	if err == nil {
+		err = s.db.FinishSong(ctx, sha, state, reason, string(encoded), domain.EncodeLoudness(loudness), AnalysisVersion, s.now())
+	}
+	if err != nil {
+		s.logger.WarnContext(ctx, "recording a song's analysis failed", "error", err)
+		s.wait(ctx, sha, WaitAnalyzer)
+	}
+}
+
+// wait leaves the content's rows waiting for a Worker that is away.
+func (s *Store) wait(ctx context.Context, sha, why string) {
+	if err := s.db.WaitSong(ctx, sha, why, s.now().Add(analysisRetry)); err != nil {
+		s.logger.WarnContext(ctx, "recording a waiting song failed", "error", err)
+	}
+}
+
+// failed counts an analysis a Worker took and could not finish, and leaves
+// the content waiting for that Worker (why). It is tried again later, until
+// analysisAttempts of them failed: then it cannot be used, and the Worker is
+// free for other songs; analysis and loudness are what was found of it so
+// far.
+func (s *Store) failed(ctx context.Context, sha, why string, analysis songAnalysis, loudness []float32) {
+	var attempts int
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
+		if err := tx.FailSongAttempt(ctx, sha, why, s.now().Add(analysisRetry)); err != nil {
+			return err
+		}
+		// A member who chose the content later joins the count of those
+		// already waiting.
+		var err error
+		attempts, err = tx.SongAttempts(ctx, sha)
+		return err
+	})
+	if err != nil {
+		s.logger.WarnContext(ctx, "recording a failed analysis failed", "error", err)
+		return
+	}
+	if attempts >= analysisAttempts {
+		s.logger.WarnContext(ctx, "a song's analysis failed too often; the song cannot be used", "song", sha, "attempts", attempts)
+		s.finish(ctx, sha, SongUnusable, UnusableAnalysisFailed, analysis, loudness)
+	}
+}

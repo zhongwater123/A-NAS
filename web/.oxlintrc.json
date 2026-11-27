@@ -99,6 +99,31 @@
         "jsx-a11y/no-noninteractive-element-interactions": "off",
         "jsx-a11y/no-static-element-interactions": "off"
       }
+    },
+    {
+      // 剪辑中心's pure functions (#639): they may take types from an api/ folder, never call one, and use no React.
+      // The rule sees the import as written, not the file it resolves to: from a folder under lib/, ../../api is
+      // videocut's own, from lib/ itself the site-wide one. So every relative path into an api/ folder, videocut's or
+      // the site-wide src/api/, at any depth, is held to types; neither has anything a pure function may call.
+      "files": ["src/videocut/lib/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(\\.\\.?/)+(videocut/)?api(/.*)?$",
+                "allowTypeImports": true,
+                "message": "videocut/lib/ takes only types from an api/ folder: use import type."
+              },
+              {
+                "regex": "^react(-dom)?(/.*)?$",
+                "message": "videocut/lib/ holds pure functions and does not use React."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "ignorePatterns": ["src/assistant/hermes/**", "src/companion/dsh-pet/**", "src/*.generated.ts"]

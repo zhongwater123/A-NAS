@@ -1,0 +1,369 @@
+package app
+
+import (
+	"bytes"
+	"cmp"
+	"context"
+	"encoding/csv"
+	"errors"
+	"fmt"
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/videocut/db"
+	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
+)
+
+// What editing a film reads besides the draft (#596): candidates for a
+// shot, confirming a version, the shot list, and thumbnails.
+
+// --- candidates ---
+
+const (
+	// maxResults is how many of a search's beats are listed, best first.
+	maxResults = 60
+	// shownScenes is how many scenes the filter lists; the rest are 其他.
+	shownScenes = 8
+	otherScene  = "其他"
+)
+
+// DraftCandidates lists the beats that could lead a shot of owner's draft.
+func (s *Store) DraftCandidates(ctx context.Context, owner, draftID string, query domain.CandidateQuery) (domain.Candidates, error) {
+	// The photo library counts a search's words without the blank around
+	// them (photos.QueryText); so does this.
+	q := strings.TrimSpace(query.Q)
+	if !validText(q, photos.MaxQueryRunes) || !validText(query.Size, MaxNameRunes) || !validText(query.Scene, MaxNameRunes) {
+		return domain.Candidates{}, domain.ErrInvalid
+	}
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
+	if err != nil {
+		return domain.Candidates{}, err
+	}
+	state := draft.state
+	i, err := domain.ShotAt(state, query.Shot)
+	if err != nil {
+		return domain.Candidates{}, err
+	}
+	shot := state.Shots[i]
+	slot := state.Slots[shot.First]
+	length := state.Length(shot)
+	scenes := src.scenes()
+	answer := domain.Candidates{Shot: query.Shot, Query: src.query(slot.Part, slot.Picture), SameCard: []domain.Candidate{}, Planned: []domain.Candidate{},
+		Results: []domain.Candidate{}, Scenes: scenes}
+	listed := map[string]bool{shot.Beat: true}
+	add := func(list *[]domain.Candidate, beat string, score *float64) {
+		if listed[beat] {
+			return
+		}
+		if _, _, ok := src.beat(beat); !ok {
+			return
+		}
+		listed[beat] = true
+		*list = append(*list, src.candidate(state, beat, length, score))
+	}
+	card, _, _ := src.beat(shot.Beat)
+	for n := range card.Times {
+		add(&answer.SameCard, domain.BeatID(card.ID, n+1), nil)
+	}
+	for _, beat := range src.planned.Answer.Parts[slot.Part-1].Pictures[slot.Picture-1].Beats {
+		add(&answer.Planned, beat, nil)
+	}
+	keep := func(candidate domain.Candidate) bool {
+		if query.Size != "" && candidate.ShotSize != query.Size {
+			return false
+		}
+		if query.Landscape && candidate.Portrait {
+			return false
+		}
+		switch query.Scene {
+		case "":
+			return true
+		case otherScene:
+			return !slices.ContainsFunc(scenes, func(c domain.SceneCount) bool { return c.Scene == candidate.Scene && c.Scene != otherScene })
+		}
+		return candidate.Scene == query.Scene
+	}
+	var results []domain.Candidate
+	searching := q != ""
+	if !searching {
+		for _, id := range src.catalog {
+			for n := range src.cards[id].Times {
+				add(&results, domain.BeatID(id, n+1), nil)
+			}
+		}
+	} else {
+		found, err := s.searchBeats(ctx, src, []string{q})
+		if err != nil {
+			return domain.Candidates{}, err
+		}
+		for _, hit := range found[0] {
+			score := hit.score
+			add(&results, hit.beat, &score)
+		}
+	}
+	for _, candidate := range results {
+		if keep(candidate) && (!searching || len(answer.Results) < maxResults) {
+			answer.Results = append(answer.Results, candidate)
+		}
+	}
+	return answer, nil
+}
+
+func (src *editSource) candidate(state domain.DraftState, beat string, length float64, score *float64) domain.Candidate {
+	card, n, _ := src.beat(beat)
+	about := src.about[card.ID]
+	video, from, to := src.piece(beat, length)
+	candidate := domain.Candidate{Beat: beat, AssetID: video, From: from, To: to, ShotSize: about.Beats[n-1].ShotSize,
+		What: about.Beats[n-1].What, Scene: about.Scene, Portrait: src.portrait(beat), Fits: src.covers(beat, length, slowMost),
+		UsedBy: state.UsedBy(beat), Score: score}
+	if taken := src.videos[video].TakenAt; taken != nil {
+		at := taken.Add(time.Duration(card.Times[n-1] * float64(time.Second)))
+		candidate.TakenAt = &at
+	}
+	return candidate
+}
+
+// scenes are the catalog's scenes by how many cards were described in
+// them, the first shownScenes and the rest together as 其他.
+func (src *editSource) scenes() []domain.SceneCount {
+	counts := map[string]int{}
+	for _, id := range src.catalog {
+		counts[src.about[id].Scene]++
+	}
+	all := []domain.SceneCount{}
+	for scene, cards := range counts {
+		if scene != "" {
+			all = append(all, domain.SceneCount{Scene: scene, Cards: cards})
+		}
+	}
+	slices.SortFunc(all, func(a, b domain.SceneCount) int {
+		return cmp.Or(cmp.Compare(b.Cards, a.Cards), cmp.Compare(a.Scene, b.Scene))
+	})
+	if len(all) <= shownScenes {
+		return all
+	}
+	rest := 0
+	for _, scene := range all[shownScenes:] {
+		rest += scene.Cards
+	}
+	return append(all[:shownScenes:shownScenes], domain.SceneCount{Scene: otherScene, Cards: rest})
+}
+
+// --- confirming a version ---
+
+// ConfirmVersion makes owner's version the project's film. No film is
+// deleted; another version can be confirmed later
+// (docs/decisions/2026-11-19-montage-edit-defaults.md).
+func (s *Store) ConfirmVersion(ctx context.Context, owner, versionID string) (domain.ProjectDetail, error) {
+	var projectID string
+	err := s.db.Update(ctx, func(tx *db.Tx) error {
+		var err error
+		projectID, err = tx.VersionProject(ctx, owner, versionID)
+		if errors.Is(err, db.ErrNotFound) {
+			return domain.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		return tx.ChooseVersion(ctx, projectID, versionID, s.now())
+	})
+	if err != nil {
+		return domain.ProjectDetail{}, err
+	}
+	return s.Project(ctx, owner, projectID)
+}
+
+// --- the shot list ---
+
+// shotListHeader names the shot list's columns
+// (docs/decisions/2026-11-19-montage-edit-defaults.md).
+var shotListHeader = []string{"镜号", "音乐槽", "成片起（秒）", "成片止（秒）", "段落", "资产 ID", "拍摄时间", "原片起（秒）", "原片止（秒）", "放慢", "改过", "备注"}
+
+// byteOrderMark lets a spreadsheet open the UTF-8 list as UTF-8.
+const byteOrderMark = "\uFEFF"
+
+func formatSeconds(value float64) string { return strconv.FormatFloat(value, 'f', 2, 64) }
+
+func (src *editSource) takenAt(video string, at float64) string {
+	taken := src.videos[video].TakenAt
+	if taken == nil {
+		return ""
+	}
+	return taken.Add(time.Duration(at * float64(time.Second))).Format(time.DateTime)
+}
+
+func (src *editSource) partName(part int) string {
+	if part >= 1 && part <= len(src.picked.Parts) {
+		return src.picked.Parts[part-1].Name
+	}
+	return ""
+}
+
+// asText keeps a spreadsheet from reading a cell as a formula: the plan's
+// names and notes are a model's words. A leading apostrophe shows the text
+// as it is.
+func asText(cell string) string {
+	if cell != "" && strings.ContainsRune("=+-@\t\r", rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
+}
+
+func writeList(rows [][]string) ([]byte, error) {
+	for _, row := range rows {
+		for i, cell := range row {
+			row[i] = asText(cell)
+		}
+	}
+	var out bytes.Buffer
+	out.WriteString(byteOrderMark)
+	w := csv.NewWriter(&out)
+	w.UseCRLF = true
+	if err := w.Write(shotListHeader); err != nil {
+		return nil, err
+	}
+	if err := w.WriteAll(rows); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// VersionShots is owner's version's shot list, a row a shot of its film.
+func (s *Store) VersionShots(ctx context.Context, owner, versionID string) ([]byte, error) {
+	src, err := s.versionSource(ctx, owner, versionID)
+	if err != nil {
+		return nil, err
+	}
+	slots := src.slots()
+	var rows [][]string
+	for n, clip := range src.clips {
+		slot := slices.IndexFunc(slots, func(slot domain.DraftSlot) bool { return slot.Start == clip.Slot[0] && slot.End == clip.Slot[1] })
+		slow := clip.Slow
+		if slow == 0 {
+			slow = 1
+		}
+		at := clip.Slot[0]
+		for _, before := range src.clips[:n] {
+			if before.Slot == clip.Slot {
+				at += before.Share
+			}
+		}
+		rows = append(rows, []string{strconv.Itoa(n + 1), strconv.Itoa(slot + 1), formatSeconds(at), formatSeconds(at + clip.Share),
+			src.partName(clip.Part), clip.Video, src.takenAt(clip.Video, clip.Start), formatSeconds(clip.Start), formatSeconds(clip.End),
+			strconv.FormatFloat(slow, 'f', -1, 64), "否", ""})
+	}
+	return writeList(rows)
+}
+
+// DraftShots is owner's draft's shot list, a row a shot. Where a shot took
+// a deleted shot's slots, the note says so. Until the draft is saved as a
+// version, a shot's piece of its video is where the rough preview plays.
+func (s *Store) DraftShots(ctx context.Context, owner, draftID string) ([]byte, error) {
+	src, draft, err := s.openDraft(ctx, owner, draftID, nil)
+	if err != nil {
+		return nil, err
+	}
+	state := draft.state
+	var rows [][]string
+	for n, shot := range src.view(draftID, draft.revision, false, state, draft.updated).Shots {
+		own := state.Shots[n]
+		slots := strconv.Itoa(own.First + 1)
+		if own.Last > own.First {
+			slots += "–" + strconv.Itoa(own.Last+1)
+		}
+		changed, slow, note := "否", "", ""
+		if shot.Changed {
+			changed = "是"
+		} else {
+			slow = "1"
+			for _, clip := range src.clips {
+				if clip.Beat == shot.Beat && clip.Slow > 0 {
+					slow = strconv.FormatFloat(clip.Slow, 'f', -1, 64)
+				}
+			}
+		}
+		if own.Last > own.First {
+			var taken []string
+			for i := own.First; i <= own.Last; i++ {
+				if state.Slots[i].Beat != state.Original(own) {
+					taken = append(taken, strconv.Itoa(i+1))
+				}
+			}
+			note = fmt.Sprintf("第 %s 槽的镜头已删除，由这一镜延长补上", strings.Join(taken, "、"))
+		}
+		rows = append(rows, []string{strconv.Itoa(shot.Number), slots, formatSeconds(shot.Start), formatSeconds(shot.End), src.partName(shot.Part),
+			shot.AssetID, src.takenAt(shot.AssetID, shot.From), formatSeconds(shot.From), formatSeconds(shot.To), slow, changed, note})
+	}
+	return writeList(rows)
+}
+
+// --- thumbnails ---
+
+const (
+	// thumbnailEdge is a thumbnail's longer side.
+	thumbnailEdge = 320
+	// thumbnailQuality is the JPEG's quality scale (2 best, 31 worst).
+	thumbnailQuality = 5
+	// MaxThumbnails is how many thumbnails are taken at once: the member
+	// waits for them, so they are Interactive and outside VideoCut's
+	// one Background request.
+	MaxThumbnails = 4
+)
+
+// Thumbnail is a frame of a video of owner's project at ms milliseconds,
+// a JPEG whose longer side is thumbnailEdge. It is not kept: the content
+// does not change, so the browser keeps it.
+func (s *Store) Thumbnail(ctx context.Context, owner, projectID, assetID string, ms int64) ([]byte, error) {
+	if ms < 0 || ms > math.MaxInt32 {
+		return nil, domain.ErrInvalid
+	}
+	if s.editing == nil {
+		return nil, domain.ErrJobsUnavailable
+	}
+	grantID, object, err := s.db.ReadyProjectAsset(ctx, owner, projectID, assetID)
+	if errors.Is(err, db.ErrNotFound) || err == nil && !grantID.Valid {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case s.thumbnails <- struct{}{}:
+		defer func() { <-s.thumbnails }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	file, opened, err := s.grants.Open(ctx, grantID.String, assetID)
+	if assetGone(err) {
+		return nil, domain.ErrNotFound // there is no frame of it
+	}
+	if err != nil {
+		return nil, domain.GrantError(err)
+	}
+	defer func() { _ = file.Close() }()
+	if opened != object {
+		return nil, domain.ErrNotFound // the video is not the one the project holds
+	}
+	var frame []byte
+	request := ffmpegworker.FramesRequest{Times: []float64{float64(ms) / 1000}, Format: ffmpegworker.FormatJPEG,
+		LongEdge: thumbnailEdge, Quality: thumbnailQuality}
+	_, err = s.editing.Frames(ffmpegworker.WithPriority(ctx, ffmpegworker.Interactive), file, request, func(jpeg []byte) error {
+		if frame != nil {
+			return errors.New("more than one frame")
+		}
+		frame = bytes.Clone(jpeg)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", domain.ErrMediaUnavailable, err)
+	}
+	if frame == nil {
+		return nil, fmt.Errorf("%w: no frame", domain.ErrMediaUnavailable)
+	}
+	return frame, nil
+}

@@ -124,7 +124,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
 - 复用 M1 的持久任务表：缩略图完成后，在同一事务中为该原图对象排入 `embedding/v1` 与 `objects/v1` 任务（`v1` 是处理流程版本，模型 ID 随结果保存）；后台先做向量、再做检测。向量只依赖原图字节，以对象为键，副本与重复照片共用。缩略图与 AI 任务由两个循环分别领取。
 - 缩略图任务照旧立即执行；AI 任务只在门控允许时领取，按[三类工作](#门控与三类工作)。
 - 更换模型后，第一次见到新模型 ID 时把旧模型的向量全部重新排队；旧向量在新向量写入前继续保留。
-- **剪辑中心的分析**（[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）：只为剪辑中心经项目授权请求过的视频排 `montage-windows/v1`，视频仍不进 `inLocalAI`。
+- **剪辑中心的分析**（[剪辑中心实施方案](videocut-center.md#剪辑分析)的“剪辑分析”）：只为剪辑中心经项目授权请求过的视频排 `montage-windows/v1`，视频仍不进 `inLocalAI`。
   - **入队**：已有当前分析身份的完整窗口就不排；两个授权请求同一个视频只排一次。分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。相册服务启动后、AI 运行器还没问过 Worker 时，只有一种身份的完整窗口也算完成，第一轮发现模型不同再重排。
   - **调度**：每轮先做它。先用只读查询确认有到期的剪辑任务，再删掉已没有授权引用的待做任务，然后领一个。一个视频一个任务，每轮只做 30 个窗口（一块），没做完就放回队首、不耗尝试次数，下一轮先问门控；块内每 30 秒续一次租约。
   - **取帧与编码**：用 FFmpeg Worker 的 `frames`（后台优先级），按缩略图的流程转成长边 512、质量 82 的 JPEG，灰度标准差小于 8 记为纯色，再交给 `embed_image`。
@@ -132,11 +132,11 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - **挂断**：门控对正在做的块单独回答内存（`Gate.ContinueForMember`），所以 CPU 压力同时存在也不会掩盖内存不足。挂断后本轮结束，和暂停的检测一样按原因卸载模型，照片的 AI 工作也等下一轮；已算完的窗口保留。
   - **失败**：取帧或解码失败按缩略图的规则分类；AI Worker 自己的错误按照片向量的规则记 `io`，最多试 3 次；超过 6 小时（10,800 个窗口）的视频记 `too_long`，不分析。
   - **结果**：存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用。写入前确认任务还在，块进行中视频被清除或分析被删除时丢弃这一块。同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
-  - **交给剪辑中心**：`lookup` 一次读出全部资产的分析进度；`analysis` 答一个视频的分析，JSON 只有状态、身份与计数，窗口向量与卡片放在封口的只读 memfd 里（[`unixmsg.WriteSealedFile`](../../internal/unixmsg/memfd_linux.go)），所以应答大小与视频长短无关。格式与读取上限以 [`GrantAnalysis`](../../internal/photos/montagewindows.go) 的注释和 `ReadWindows` 为准。只答当前身份的结果：读取期间窗口被重做，只答 `windowsState: queued`；描述被重试或输入变化，`descriptionsState` 改答 `queued`，不给描述。剪辑中心先按 `lookup` 判断四个阶段，读 `analysis` 时再核对一次，有一个不是 `done` 就继续等分析（`waiting(analysis)`），不拿缺了卡片或描述的结果去规划（[`analysisKey`](../../internal/montage/steps.go)，[#584](https://github.com/zhongwater123/A-NAS/issues/584)）。
+  - **交给剪辑中心**：`lookup` 一次读出全部资产的分析进度；`analysis` 答一个视频的分析，JSON 只有状态、身份与计数，窗口向量与卡片放在封口的只读 memfd 里（[`unixmsg.WriteSealedFile`](../../internal/unixmsg/memfd_linux.go)），所以应答大小与视频长短无关。格式与读取上限以 [`GrantAnalysis`](../../internal/photos/montagewindows.go) 的注释和 `ReadWindows` 为准。只答当前身份的结果：读取期间窗口被重做，只答 `windowsState: queued`；描述被重试或输入变化，`descriptionsState` 改答 `queued`，不给描述。剪辑中心先按 `lookup` 判断四个阶段，读 `analysis` 时再核对一次，有一个不是 `done` 就继续等分析（`waiting(analysis)`），不拿缺了卡片或描述的结果去规划（[`analysisKey`](../../internal/videocut/app/steps.go)，[#584](https://github.com/zhongwater123/A-NAS/issues/584)）。
   - **换模型**：只重排仍被未撤销的授权引用的对象；授权撤销后在 7 天内再次授权的，由入队时的身份判断重排。没有授权引用满 7 天的分析由每小时的维护删除。
   - 窗口完成后排 `montage-cards/v1`，再按卡片逐张排 `montage-quality/v1`。Catalog 第 19 步建 `video_cards`、`video_card_quality` 与 `montage_card_results`，第 23 步给 `video_cards` 加每张关键帧的节拍（`beats`），都记录回滚步骤。之前切的卡片没有节拍，切卡身份变了会重切；读到没有节拍的卡片时一张关键帧一个节拍。完成身份包含上游分析身份，也记录零卡片和零画质的成功结果。授权的 `analysis` 返回两项身份，`analyze(retry=true)` 重排失败的任务。
   - **卡片与画质的调度**：每轮先于 AI Worker 的门控做，不问 AI Worker。先用只读查询确认有到期的任务，再删掉已没有授权引用、也没人在做的卡片与画质任务，然后领一个；再次授权并请求分析时补排缺的任务。门控挂断或服务停止时任务退回原位、不耗尝试次数，本轮结束，按原因卸载模型。计算 Worker 或 FFmpeg Worker 连不上时任务等 1 分钟、不耗尝试次数，本轮接着做照片的 AI 工作；每次都结束本轮的话，Worker 不在期间照片的工作会一直等。计算 Worker 执行中失败或超时、读 Catalog 或原始文件出错记 `io`，最多试 3 次；请求被拒绝记 `invalid_result`，原始文件不存在记 `missing_original`，都不再重试。
-  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。门控挂断时（[成员在等的后台工作](#门控与三类工作)）中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
+  - 切卡片与量画质使用 `anas-videocut-compute.socket` 上的计算 Worker，无需加载相册模型。门控挂断时（[成员在等的后台工作](#门控与三类工作)）中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_videocut/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
 - **卡片描述**（`describe_frames`，[`describe.py`](../../ai/anas_ai/describe.py)）：
   - 输入一张卡片的 3–20 张关键帧（每张一个描述符）、每张离卡片开头的秒数（`offsets`）、分组布局（`groups`，从 1 数的节拍，相邻相像的关键帧同一个节拍）与卡片时长（`duration`）；越界答 `invalid_request`。
   - 提示词、体裁（旅行，`TRAVEL`）与 Schema 固定在 Worker 里，版本 `montage-card/v2`，随回答的 `template` 返回：第八版（提交 `19f2d6db`）的 `PROMPT`、`CAMERAS` 与 Schema 原样搬来，加一句不要转写画面里的证件号、票号、车牌等号码；v2（[#676](https://github.com/zhongwater123/A-NAS/issues/676)）按给定的节拍写，一个节拍的几张图写成一项，相邻节拍要写出不同。

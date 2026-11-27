@@ -8491,8 +8491,8 @@ return errors === 0;
 validate203.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validate22 = validate216;
-const schema102 = {"$ref":"openapi.json#/paths/~1api~1v1~1montage~1notices/get/responses/200/content/application~1json/schema"};
-const schema103 = {"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/MontageNotice"}}}};
+const schema102 = {"$ref":"openapi.json#/paths/~1api~1v1~1videocut~1notices/get/responses/200/content/application~1json/schema"};
+const schema103 = {"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"$ref":"#/components/schemas/VideoCutNotice"}}}};
 const schema104 = {"type":"object","additionalProperties":false,"required":["kind","jobId","projectId","project","at"],"properties":{"kind":{"type":"string","enum":["waiting_for_planning","planning","needs_input","saved","failed"]},"jobId":{"type":"string"},"projectId":{"type":"string"},"project":{"type":"string","description":"The project's name."},"reason":{"type":"string","description":"The job's waitReason; for failed, plan_failed is one the member plans again (replan)."},"detail":{"type":"string","description":"Why the job still waits for VNAS, for waiting_for_planning: VNAS is off, the planning grant ran out, or no round has taken it yet. For failed, the job's error."},"filmAssetId":{"type":"string","description":"The film saved, for saved."},"at":{"type":"string","format":"date-time"}}};
 
 function validate218(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -14454,7 +14454,7 @@ export const responseValidators: Record<string, { (data: unknown): boolean; erro
   "GET /api/v1/shares/{shareId}/messages 200": validate19,
   "GET /api/v1/family/hints 200": validate20,
   "GET /api/v1/todos/reminders 200": validate21,
-  "GET /api/v1/montage/notices 200": validate22,
+  "GET /api/v1/videocut/notices 200": validate22,
   "GET /api/v1/modules 200": validate23,
   "GET /api/v1/modules/scoring/me 200": validate24,
   "GET /api/v1/apps 200": validate25,

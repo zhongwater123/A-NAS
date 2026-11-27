@@ -23,7 +23,7 @@ import (
 )
 
 // The editing operations take frames of a video to look at, render pieces of
-// a film and join them with a song (docs/architecture/montage-center.md).
+// a film and join them with a song (docs/architecture/videocut-center.md).
 // Their requests are decoded strictly: a field the worker does not know, a
 // path or a filter, is refused. Every command is built here from bounded
 // numbers. They run as background work: FFmpeg at a lower priority than

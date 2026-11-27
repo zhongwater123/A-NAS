@@ -124,7 +124,7 @@ anas-vectors@<账号>.service（Qdrant，动态用户 a-nas-vec-<账号>）
 
 ### 剪辑中心的窗口集合
 
-剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
+剪辑中心请求过的视频，其窗口向量（`montage-windows/v1`，见[剪辑中心实施方案](videocut-center.md#剪辑分析)的“剪辑分析”）同步进相册实例的另一个集合（[`windowsync.go`](../../internal/photos/windowsync.go)）：
 - **名称**：`video_windows_v1_<分析身份的 SHA-256 前 8 位>_<随机 8 位>`；分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。payload 是 `object` 与 `libraries`，两者都建 keyword 索引；点的键是 `<object>#<窗口序号>`。不建 HNSW 图。
 - **集合的身份**：取最新写入的窗口的身份（`video_windows.created_at`，重算时覆盖写会刷新它），和图片按最新向量选模型一样。所以换模型后第一块写入，集合就换成新身份，不必等最后插入的那个视频重算。
 - **outbox**：Catalog migration 18 的 `window_outbox`，触发器建在 `video_windows` 的增删改，以及有窗口的对象的资产增删与图库、回收站变化上。不与 `vector_outbox` 共用：那张表的主键只有 `object_id`，同步只认 `images_*`。
@@ -274,7 +274,7 @@ Experimental NAS 结果（2026-10-28 至 11-06，候选 720–778 张）：
 | 所属服务 | 集合 | 内容 | 状态 |
 |---|---|---|---|
 | 相册（`a-nas-photos`） | `images_*` | 每个内容对象一个整图向量 | 同步；排序从索引读（2026-11-06） |
-| 相册（`a-nas-photos`） | `video_windows_v1_*` | 剪辑中心按项目请求的视频，每 2 秒一个窗口向量；向量在 Catalog，不建 HNSW | 同步（[剪辑中心方案](montage-center.md#窗口向量)）；二次编辑的文字搜镜头在别名 `video_windows_v1` 指向它（已写满）时读取（[#599](https://github.com/zhongwater123/A-NAS/issues/599)） |
+| 相册（`a-nas-photos`） | `video_windows_v1_*` | 剪辑中心按项目请求的视频，每 2 秒一个窗口向量；向量在 Catalog，不建 HNSW | 同步（[剪辑中心方案](videocut-center.md#窗口向量)）；二次编辑的文字搜镜头在别名 `video_windows_v1` 指向它（已写满）时读取（[#599](https://github.com/zhongwater123/A-NAS/issues/599)） |
 | 相册（`a-nas-photos`） | 视频分段 | 每个视频多个分段向量，按最佳片段打分 | 计划中（#207） |
 | 文件索引（另一个实例） | 文件分块 | 中文全文与语义融合，按文件归并 | 计划中（#208） |
 

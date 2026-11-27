@@ -6,7 +6,7 @@
 ## 问题
 
 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 要求把视频剪辑原型接进 A-NAS，成为正式应用“剪辑中心”。
-- 首版迁移多少功能、用原型的哪个提交，留给开发评估。评估结论见[实施方案](../architecture/montage-center.md)的“首版范围”。
+- 首版迁移多少功能、用原型的哪个提交，留给开发评估。评估结论见[实施方案](../architecture/videocut-center.md)的“首版范围”。
 - 首版配乐来源列为待议，要求提交方案时暴露这个待决项。
 
 写方案时，又有几项做法要用户定：
@@ -77,8 +77,8 @@
 - 其余各项没有记录理由。
 
 由此写定的内容：
-- [剪辑中心规格](../specs/montage-center.md)中的“已确认”；
-- [实施方案](../architecture/montage-center.md)；
+- [剪辑中心规格](../specs/videocut-center.md)中的“已确认”；
+- [实施方案](../architecture/videocut-center.md)；
 - ADR 0038。
 
 方案为了能实现和验收，另外补了一些默认做法，见[剪辑中心方案中补充的默认做法](2026-11-17-montage-center-default-rules.md)。

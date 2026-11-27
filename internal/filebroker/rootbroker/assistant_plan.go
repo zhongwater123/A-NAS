@@ -16,11 +16,11 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/filebroker/wire"
 )
 
-// A planning grant (docs/architecture/montage-center.md, 规划授权): while
+// A planning grant (docs/architecture/videocut-center.md, 规划授权): while
 // the member is signed in and does something the montage center may plan
 // for, the Product Service asks the broker, behind the member's session,
 // to let their VNAS plan in their absence. The broker records when, and how
-// many rounds; only root's planner reads it (ai/assistant/montage-planner.py) and
+// many rounds; only root's planner reads it (ai/assistant/videocut-planner.py) and
 // hands a round to the member's planning instance. Registering again replaces it.
 // ADR 0024 decision 10 keeps background services from driving a member's
 // assistant on their own: the grant is the member's, left while present.

@@ -1,7 +1,7 @@
 //go:build linux
 
 // Package storeservice runs a service of its own identity that keeps its
-// records in a store on the data volume, as the montage service does (ADR
+// records in a store on the data volume, as the VideoCut service does (ADR
 // 0038): it listens on its socket for the Product Service, confirms every
 // forwarded session with the Host Agent, serves the store while the data
 // volume is there and answers unavailable while it is not. The photo, share

@@ -155,7 +155,7 @@ jobs:
 
       # Ruff for `make ai-lint`, zizmor for `make ops-check`. NumPy, pinned by
       # the runtime's lock, lets the clustering tests run. NumPy and Pillow
-      # also exercise the montage Worker. The real-model tests need
+      # also exercise the VideoCut Worker. The real-model tests need
       # model files and stay skipped.
       - name: Install the AI tools and test dependencies
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
@@ -188,7 +188,7 @@ jobs:
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         env:
           ANAS_QDRANT_REQUIRED: "1"
-          ANAS_MONTAGE_PYTHON: python3
+          ANAS_VIDEOCUT_PYTHON: python3
           GH_TOKEN: ${{ github.token }}
         run: make check CHECK_FLAGS=
 
@@ -215,7 +215,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install the montage Worker test dependencies
+      - name: Install the VideoCut Worker test dependencies
         run: |
           sed -n '/^numpy==/,/[^\\]$/p; /^pillow==/,/[^\\]$/p' ai/requirements.txt |
             python3 -m pip install --require-hashes --only-binary=:all: -r /dev/stdin
@@ -236,7 +236,7 @@ jobs:
       - name: Run the Go tests with the race detector
         env:
           ANAS_QDRANT_REQUIRED: "1"
-          ANAS_MONTAGE_PYTHON: python3
+          ANAS_VIDEOCUT_PYTHON: python3
         run: make race-test
 
   system:

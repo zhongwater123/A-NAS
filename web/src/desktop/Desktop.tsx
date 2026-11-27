@@ -22,7 +22,6 @@ import { Companion } from "../companion/Companion";
 import { useDeviceTrouble } from "../companion/health";
 import { appProject } from "../docker/model";
 import { FeedbackChannel } from "../feedback/FeedbackChannel";
-import { montageEnabled } from "../montage/status";
 import { forgetPeople, loadPeople, rememberPerson } from "../people/people";
 import { noScoring, type ScoringAccess, scoringAccess } from "../scoring/status";
 import type { SettingsSection } from "../settings/SettingsPanel";
@@ -31,6 +30,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
+import { videoCutEnabled } from "../videocut/api/status";
 import { useWebSearch } from "../websearch/status";
 import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";
@@ -64,7 +64,9 @@ import { closedWindow, windowReducer } from "./windows";
 // 家庭中心's hint, 剪辑中心's notices and 待办's reminder load after the
 // desktop, so their code and styles stay out of the first load.
 const FamilyNotices = lazyCode(() => import("../family/FamilyNotices").then((module) => module.FamilyNotices));
-const MontageNotices = lazyCode(() => import("../montage/MontageNotices").then((module) => module.MontageNotices));
+const VideoCutNotices = lazyCode(() =>
+  import("../videocut/ui/VideoCutNotices").then((module) => module.VideoCutNotices),
+);
 const TodoNotices = lazyCode(() => import("../todos/TodoNotices").then((module) => module.TodoNotices));
 
 // An app's access read again that says the same keeps the old value.
@@ -192,7 +194,7 @@ export function Desktop({
   // when the page comes back into view: a member an administrator just chose
   // finds them, one taken out loses them, and a failed read is tried again.
   const scoring = useReadOnShow(scoringAccess, noScoring, session.user.id, sameScoring);
-  const montage = useReadOnShow(montageEnabled, false, session.user.id);
+  const videocut = useReadOnShow(videoCutEnabled, false, session.user.id);
   const workspace = useReadOnShow(workspaceAccess, null, session.user.id, sameWorkspace);
   const showInDocker = (appID: string) => open("docker", { project: appProject(appID) });
   // A toast of a scheduled task opens its run in VNAS, or the tasks.
@@ -211,7 +213,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
-      montage,
+      videocut,
       workspace,
       open,
       intents,
@@ -227,7 +229,7 @@ export function Desktop({
       openSettings,
       webSearchEnabled,
       scoring,
-      montage,
+      videocut,
       workspace,
       open,
       intents,
@@ -393,10 +395,10 @@ export function Desktop({
               <FamilyNotices onOpen={() => open("family")} />
             </Suspense>
           </ShellPart>
-          {montage && (
-            <ShellPart name="montage hints">
+          {videocut && (
+            <ShellPart name="videocut hints">
               <Suspense fallback={null}>
-                <MontageNotices onOpen={() => open("montage")} />
+                <VideoCutNotices onOpen={() => open("videocut")} />
               </Suspense>
             </ShellPart>
           )}
