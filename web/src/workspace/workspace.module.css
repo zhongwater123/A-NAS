@@ -625,6 +625,16 @@ details.ws-notice {
   white-space: pre-wrap;
   word-break: break-all;
 }
+/* A prompt is mostly prose: the interface's own font reads better than the
+   commands' monospace with Chinese text. */
+.ws-command.prompt pre {
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: inherit;
+  font-size: 12.5px;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
 .ws-form > .ws-notice {
   border: 0;
   border-radius: var(--radius-sm);

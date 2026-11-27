@@ -5,32 +5,19 @@ import { errorText } from "../api/errorMessages";
 import { copyText } from "../lib/clipboard";
 import { namesDeviceByAddress } from "../lib/deviceHost";
 import { Modal } from "../ui/modal";
+import { defaultAgentName, promptFor } from "./agentPrompt";
 import { useAgentTokens } from "./agentTokens";
 import { type AgentKind, type AgentToken, createAgentToken } from "./api";
 import { kindLabel } from "./words";
 import styles from "./workspace.module.css";
 
-// The MCP server's name in the member's agent.
-const serverName = "a-nas";
-// Codex reads the token from this environment variable.
-const codexVariable = "ANAS_WORKSPACE_TOKEN";
+type Created = { id: string; kind: AgentKind; prompt: string };
 
-// commandFor is what the member runs on their computer to connect the agent.
-export function commandFor(kind: AgentKind, endpoint: string, token: string): string {
-  if (kind === "codex") {
-    return (
-      `[Environment]::SetEnvironmentVariable("${codexVariable}", "${token}", "User")\n` +
-      `codex mcp add ${serverName} --url ${endpoint} --bearer-token-env-var ${codexVariable}`
-    );
-  }
-  return `claude mcp add --transport http --scope user ${serverName} ${endpoint} --header "Authorization: Bearer ${token}"`;
-}
-
-type Created = { id: string; kind: AgentKind; command: string };
-
-// ConnectAgent gives a member the command that connects their Claude Code or
-// Codex to the workspace, with a token made for that agent and shown only
-// here, then waits for the agent's first call.
+// ConnectAgent gives a member the prompt that has their Claude Code or Codex
+// connect itself to the workspace, with a token made for that agent and shown
+// only here, then waits for the agent's first call. Agents reach the device
+// only at an address (namesDeviceByAddress), so a desktop opened by name
+// makes no token.
 export function ConnectAgent({
   account,
   container,
@@ -40,7 +27,8 @@ export function ConnectAgent({
   container: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(defaultAgentName);
+  const byAddress = namesDeviceByAddress(location.hostname);
   const [kind, setKind] = useState<AgentKind>("claude-code");
   const [created, setCreated] = useState<Created>();
   const [error, setError] = useState("");
@@ -57,7 +45,7 @@ export function ConnectAgent({
     try {
       const result = await createAgentToken(trimmed, kind);
       const endpoint = `${location.protocol}//${location.host}/api/v1/workspace/mcp`;
-      setCreated({ id: result.agentToken.id, kind, command: commandFor(kind, endpoint, result.token) });
+      setCreated({ id: result.agentToken.id, kind, prompt: promptFor(kind, endpoint, result.token) });
     } catch (caught) {
       setError(errorText(caught, "workspace"));
     } finally {
@@ -67,7 +55,7 @@ export function ConnectAgent({
   return (
     <Modal title="连接 agent" container={container} wide busy={busy} onClose={onClose}>
       {created ? (
-        <Command account={account} created={created} onClose={onClose} />
+        <Prompt account={account} created={created} onClose={onClose} />
       ) : (
         <form className={styles.wsForm} aria-label="连接 agent" onSubmit={(event) => void submit(event)}>
           <label className={styles.wsField}>
@@ -98,6 +86,12 @@ export function ConnectAgent({
               ))}
             </div>
           </fieldset>
+          {!byAddress && (
+            <p className={`${styles.wsNotice} ${styles.warn}`}>
+              <TriangleAlert size={14} aria-hidden="true" />
+              agent 只能按 IP 地址连接 NAS：用 NAS 的 IP 地址打开桌面，再生成提示词。
+            </p>
+          )}
           {error && (
             <p className={styles.wsError} role="alert">
               {error}
@@ -107,8 +101,8 @@ export function ConnectAgent({
             <button type="button" className={styles.wsButton} onClick={onClose}>
               取消
             </button>
-            <button type="submit" className={`${styles.wsButton} ${styles.primary}`} disabled={busy}>
-              {busy ? "正在生成…" : "生成命令"}
+            <button type="submit" className={`${styles.wsButton} ${styles.primary}`} disabled={busy || !byAddress}>
+              {busy ? "正在生成…" : "生成提示词"}
             </button>
           </footer>
         </form>
@@ -117,38 +111,28 @@ export function ConnectAgent({
   );
 }
 
-function Command({ account, created, onClose }: { account: string; created: Created; onClose: () => void }) {
+function Prompt({ account, created, onClose }: { account: string; created: Created; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   // The agent's first call marks the token used.
   const used = (tokens?: AgentToken[]) => tokens?.some((token) => token.id === created.id && token.lastUsedAt) ?? false;
   const connected = used(useAgentTokens(account, (tokens) => (used(tokens) ? false : 2_000)).data);
-  const where = created.kind === "codex" ? "PowerShell" : "终端";
   return (
     <div className={styles.wsForm}>
-      <p className={styles.wsStep}>
-        在你电脑的{where}里运行这{created.kind === "codex" ? "两行" : "一行"}命令
-        {created.kind === "codex" && "，再在新开的终端里启动 Codex"}：
-      </p>
-      <div className={styles.wsCommand}>
-        <pre>{created.command}</pre>
+      <p className={styles.wsStep}>把这段话发给你电脑上的 {kindLabel[created.kind]}：</p>
+      <div className={`${styles.wsCommand} ${styles.prompt}`}>
+        <pre aria-label="提示词">{created.prompt}</pre>
         <button
           type="button"
           className={styles.wsButton}
           onClick={() => {
-            setCopied(copyText(created.command));
+            setCopied(copyText(created.prompt));
           }}
         >
           {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
           {copied ? "已复制" : "复制"}
         </button>
       </div>
-      <p className={styles.wsFaint}>命令里的令牌只显示这一次，只能用于共享工作区。</p>
-      {!namesDeviceByAddress(location.hostname) && (
-        <p className={`${styles.wsNotice} ${styles.warn}`}>
-          <TriangleAlert size={14} aria-hidden="true" />
-          agent 只能按 IP 地址连接：把命令里的 {location.hostname} 换成 NAS 的 IP 地址。
-        </p>
-      )}
+      <p className={styles.wsFaint}>里面的令牌只显示这一次，只能用于共享工作区。</p>
       <p className={`${styles.wsWaiting} ${connected ? styles.done : ""}`} role="status">
         {connected ? (
           <>
