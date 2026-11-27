@@ -313,7 +313,7 @@ export function Desktop({
         // The phone layout and whether a window covers the desktop, for the
         // styles of the shell and of what floats over it (feedback).
         data-phone={phone ? "" : undefined}
-        data-window-shown={windows.some((window) => window.open && !window.minimized) ? "" : undefined}
+        data-window-shown={visible.length ? "" : undefined}
         style={wallpaperBackground(wallpaper)}
         onPointerDownCapture={pressDesktop}
         onPointerCancelCapture={() => {
