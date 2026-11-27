@@ -19,7 +19,7 @@
 - **权限**：NAS 上的 root。
 - **测试者同意**：测试者视频的关键帧会发到外部接口。开始前告诉测试者并征得同意，测试结束后按“回滚”关掉，并请接口方删除记录（#648）。
 - **版本**：设备上装的版本包含加入开关的提交。看日志确认：没有这个提交时，第 4 步之后日志里不会出现 `cards are described`。
-- **接口**：接口地址（完整的 `https://.../v1/chat/completions`，必须是 https：关键帧与密钥不明文过网，`http://` 只认本机）、模型名与密钥由接口方提供，不写进仓库、issue 或聊天记录。接口要接受 JSON Schema 的 `response_format`、`repetition_penalty` 与 base64 图片，并在流式回答末尾给出 `usage`（vLLM 都支持）。
+- **接口**：接口地址（完整的 `https://.../v1/chat/completions`，必须是 https：关键帧与密钥不明文过网，`http://` 只认本机）、模型名与密钥由接口方提供，不写进仓库、issue 或聊天记录。接口要接受 JSON Schema 的 `response_format`、`repetition_penalty` 与 base64 图片，并在流式回答末尾给出 `usage`（vLLM 都支持）。接口的上下文不小于 8192 个 token（vLLM 的 `--max-model-len`），向接口方确认：AI Worker 按本机的 8192 决定一张卡片带几帧，接口放不下时回“超长”的 400，那张卡片就记为失败、不再重试，第 1 步只带一张图的探测测不出来。
 - **描述的身份**：相册只收“读文字的模型”写的描述，所以外部接口写的描述记在本机读文字模型的名下。关掉开关后，这些描述不会自动重写；内测数据可以丢弃，不处理。
 - **服务影响**：第 4 步停掉 AI Worker，正在做的相册 AI 工作中断，下一次请求时自动重启并接着做。
 - **停止条件**：
@@ -44,11 +44,11 @@
                                                   {"type": "text", "text": "图里是什么颜色？"}]}]}))' > /tmp/describe-probe.json
    curl -sS -w '\nHTTP %{http_code}\n' --connect-timeout 10 --max-time 60 \
      -H @<(printf 'Authorization: Bearer %s\n' "$KEY") -H 'Content-Type: application/json' \
-     --data-binary @/tmp/describe-probe.json "$URL" | tail -n 6
+     --data-binary @/tmp/describe-probe.json "$URL"
    unset KEY; rm /tmp/describe-probe.json
    ```
    - 密钥经 `printf`（shell 内建命令）写进只有 curl 读的管道，不出现在任何进程的命令行里，别的账号用 `ps` 看不到。
-   - 预期：最后一行 `HTTP 200`；前面是 `data: {...}` 的流，拼起来是 `{"color": ...}` 这样的 JSON，倒数几行里有 `"usage"` 与 `prompt_tokens`，最后是 `data: [DONE]`。
+   - 预期：最后一行 `HTTP 200`；前面是几十行 `data: {...}` 的流，各行 `content` 拼起来是 `{"color": ...}` 这样的 JSON，倒数几行里有 `"usage"` 与 `prompt_tokens`，最后是 `data: [DONE]`。
    - 完成标准：如上。连不上、60 秒内没有回答（curl 报超时）、`401`，或回答 `4xx` 说不支持图片、`response_format`、`chat_template_kwargs`、`repetition_penalty` 时停下：AI Worker 遇到这些会一直等接口修好，卡片不会有描述。
 2. **root：写接口地址、模型名与密钥**，只有 root 能读：
    ```bash
