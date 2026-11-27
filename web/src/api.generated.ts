@@ -1095,6 +1095,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network/phone-hotspot/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save settings for the next time the phone hotspot starts */
+        put: operations["savePhoneHotspotSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web-search/query": {
         parameters: {
             query?: never;
@@ -2352,7 +2369,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions */
+        /** A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there */
         get: operations["getWorkspacePage"];
         put?: never;
         post?: never;
@@ -2433,7 +2450,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without */
+        /** The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab's last, its closing included, changes nothing. No tab name or seq is 400 invalid_request */
         put: operations["setWorkspaceViewing"];
         post?: never;
         delete?: never;
@@ -2442,19 +2459,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/workspace/viewing/{pageId}": {
+    "/api/v1/workspace/viewing/{tab}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description The tab's name as it reported itself */
+                tab: string;
             };
             cookie?: never;
         };
         get?: never;
         put?: never;
         post?: never;
-        /** The caller's desktop no longer shows this page; what it said of another page stays */
+        /** This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request */
         delete: operations["clearWorkspaceViewing"];
         options?: never;
         head?: never;
@@ -6617,12 +6635,23 @@ export interface components {
             /** @enum {string} */
             state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
             /** @enum {string} */
-            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed";
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed" | "invalid_settings";
+            settings?: components["schemas"]["PhoneHotspotSettings"];
+            /** @description The saved settings could not be read. An administrator can replace them by saving new settings. */
+            settingsInvalid?: boolean;
+            /** @description Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected. */
+            devices?: {
+                mac: string;
+                ip?: string;
+                name?: string;
+            }[];
             /** @description Present when the hotspot is on. The response is not cacheable. */
             connection?: {
                 ssid: string;
                 password: string;
                 url: string;
+                /** @description Whether this running hotspot advertises a WebOS portal */
+                portal?: boolean;
             };
         };
         PhoneHotspotRequest: {
@@ -8792,6 +8821,20 @@ export interface components {
             /** Format: int64 */
             capacityBytes?: number;
         };
+        PhoneHotspotSettings: {
+            /** @description Empty selects the device's default hotspot name */
+            ssid: string;
+            passwordConfigured: boolean;
+            portal: boolean;
+        };
+        PhoneHotspotSettingsChange: {
+            /** @description At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name. */
+            ssid?: string;
+            /** @description Omit to retain the saved password. Empty restores a fresh random password on each start. */
+            password?: string;
+            /** @description Advertise the WebOS entry via the mobile system's network sign-in prompt */
+            portal?: boolean;
+        };
         /** @description Set on a device that runs the A-NAS image (ADR 0034 decision 2). */
         SystemUpdateImage: {
             /** @description The base image the device runs, by its release's sequence on main. */
@@ -8840,6 +8883,31 @@ export interface components {
             /** Format: date-time */
             savedAt: string;
         };
+        WorkspaceViewer: {
+            member: components["schemas"]["WorkspacePerson"];
+            /** @description What the member's tab used last shows. */
+            version: number;
+            /**
+             * Format: date-time
+             * @description When the first of the member's tabs began to show the page.
+             */
+            since: string;
+        };
+        /** @description What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page. */
+        WorkspaceAgentWork: {
+            member: components["schemas"]["WorkspacePerson"];
+            via: components["schemas"]["WorkspaceVia"];
+            /** @enum {string} */
+            action: "read" | "download";
+            version: number;
+            /** Format: date-time */
+            at: string;
+        };
+        /** @description Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only. */
+        WorkspacePresence: {
+            viewers: components["schemas"]["WorkspaceViewer"][];
+            agents: components["schemas"]["WorkspaceAgentWork"][];
+        };
         WorkspacePageSummary: {
             id: string;
             title: string;
@@ -8847,6 +8915,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
             latest: components["schemas"]["WorkspaceVersion"];
+            presence: components["schemas"]["WorkspacePresence"];
         };
         WorkspacePageList: {
             items: components["schemas"]["WorkspacePageSummary"][];
@@ -8860,6 +8929,7 @@ export interface components {
             latest: components["schemas"]["WorkspaceVersion"];
             /** @description Newest first */
             versions: components["schemas"]["WorkspaceVersion"][];
+            presence: components["schemas"]["WorkspacePresence"];
         };
         WorkspacePageChanged: {
             error: components["schemas"]["ErrorDetail"];
@@ -8868,6 +8938,15 @@ export interface components {
         WorkspaceViewing: {
             pageId: string;
             version: number;
+            /** @description A name the tab made for itself when it opened, random. */
+            tab: string;
+            /** @description Whether the tab has the focus: the tab focused last is the one the member uses. */
+            focused: boolean;
+            /**
+             * Format: int64
+             * @description The tab's count of its reports, its closing included: requests can arrive out of order, and one older than the tab's last changes nothing.
+             */
+            seq: number;
         };
         WorkspaceRect: {
             x: number;
@@ -9748,6 +9827,8 @@ export type AgentTokenList = components['schemas']['AgentTokenList'];
 export type AgentTokenRequest = components['schemas']['AgentTokenRequest'];
 export type AgentTokenCreated = components['schemas']['AgentTokenCreated'];
 export type MissingDisk = components['schemas']['MissingDisk'];
+export type PhoneHotspotSettings = components['schemas']['PhoneHotspotSettings'];
+export type PhoneHotspotSettingsChange = components['schemas']['PhoneHotspotSettingsChange'];
 export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
@@ -9756,6 +9837,9 @@ export type WorkspaceAccess = components['schemas']['WorkspaceAccess'];
 export type WorkspacePerson = components['schemas']['WorkspacePerson'];
 export type WorkspaceVia = components['schemas']['WorkspaceVia'];
 export type WorkspaceVersion = components['schemas']['WorkspaceVersion'];
+export type WorkspaceViewer = components['schemas']['WorkspaceViewer'];
+export type WorkspaceAgentWork = components['schemas']['WorkspaceAgentWork'];
+export type WorkspacePresence = components['schemas']['WorkspacePresence'];
 export type WorkspacePageSummary = components['schemas']['WorkspacePageSummary'];
 export type WorkspacePageList = components['schemas']['WorkspacePageList'];
 export type WorkspacePage = components['schemas']['WorkspacePage'];
@@ -12060,6 +12144,37 @@ export interface operations {
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    savePhoneHotspotSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotSettingsChange"];
+            };
+        };
+        responses: {
+            /** @description Saved settings without the password */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotSettings"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -14689,18 +14804,23 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
         };
     };
     clearWorkspaceViewing: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The tab's count of its reports, as in WorkspaceViewing */
+                seq: number;
+            };
             header: {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
             path: {
-                pageId: components["parameters"]["WorkspacePageID"];
+                /** @description The tab's name as it reported itself */
+                tab: string;
             };
             cookie?: never;
         };
@@ -14713,6 +14833,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
         };
     };

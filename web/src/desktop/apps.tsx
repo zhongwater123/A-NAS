@@ -372,7 +372,7 @@ const definitions = {
     title: "共享工作区",
     icon: FileCode2,
     tone: "workspace",
-    bounds: { x: 160, y: 40, width: 1180, height: 760 },
+    bounds: { x: 200, y: 60, width: 900, height: 620 },
     launcher: {
       id: "workspace",
       keywords: "共享 工作区 页面 HTML PRD 文档 原型 agent Claude Code Codex workspace",

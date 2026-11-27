@@ -68,7 +68,7 @@
 规则、流程与格式化写在仓库里，`.claude/`、`.codex/` 只做适配；改其中一个工具的配置，另一个同步改。
 
 - 本文件是唯一的项目指令文件。不要新建 `CLAUDE.md` 或 `CLAUDE.local.md`：工作目录或其上级目录中有其中任何一个，Claude Code 就不再读本文件；确需时其中只写一行 `@AGENTS.md`。
-- 技能在 `.agents/skills/`：[check-in-wsl](.agents/skills/check-in-wsl/SKILL.md)（Windows 上的门禁）、[system-test](.agents/skills/system-test/SKILL.md)、[fake-preview](.agents/skills/fake-preview/SKILL.md)。Claude Code 读 `.claude/skills/` 中的副本：改后运行 `make skills`。
+- 技能在 `.agents/skills/`：[check-on-shared-server](.agents/skills/check-on-shared-server/SKILL.md)（完整门禁默认在共享开发服务器上跑）、[check-in-wsl](.agents/skills/check-in-wsl/SKILL.md)（服务器连不上时的 Windows 门禁）、[system-test](.agents/skills/system-test/SKILL.md)、[fake-preview](.agents/skills/fake-preview/SKILL.md)。Claude Code 读 `.claude/skills/` 中的副本：改后运行 `make skills`。
 - 编辑后的格式化：`.claude/settings.json` 与 `.codex/hooks.json` 都调用 `scripts/format-changed.sh`。
 - Codex 只在信任本项目后才加载本文件、局部 AGENTS.md 与项目钩子。密钥：Claude Code 由 `.claude/settings.json` 拦截，Codex 靠自己的沙箱与审批。个人设置写进被 Git 忽略的 `.claude/settings.local.json` 或 `~/.codex/config.toml`。
 

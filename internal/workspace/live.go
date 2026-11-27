@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"cmp"
+	"slices"
 	"sync"
 	"time"
 )
@@ -8,19 +10,92 @@ import (
 // SelectionLife is how long a member's selection stays what their agent sees.
 const SelectionLife = 30 * time.Minute
 
-// ViewingLife is how long a page stays what a member's desktop shows unless
-// the desktop says so again: it does every minute while the page is open, so
-// a tab closed without a word is forgotten soon.
+// ViewingLife is how long a tab stays open in what the service knows unless
+// it says so again: it does every minute while it can be seen, so a tab
+// closed without a word, or left in the background, is forgotten soon.
 const ViewingLife = 3 * time.Minute
 
-// Viewing is the page and version a member's desktop shows.
+// AgentLife is how long what an agent last read or downloaded of a page shows
+// as its work there, unless it saves the page first.
+const AgentLife = 10 * time.Minute
+
+// MaxTabs bounds the tabs kept for one account; the one quiet the longest
+// goes first.
+const MaxTabs = 32
+
+// Viewing is the page and version one of a member's browser tabs shows.
 type Viewing struct {
 	PageID  string
 	Version int
-	// Since is when the desktop began to show this version; Seen is when it
-	// last said it still does.
+	Member  Person
+	// Since is when the tab began to show the page, whatever version it
+	// shows now; Seen is when it last said it still does; Used is when it
+	// last said so while it had the focus, zero when it never did.
 	Since time.Time
 	Seen  time.Time
+	Used  time.Time
+}
+
+// TabReport is what one of a member's browser tabs says about itself.
+type TabReport struct {
+	// Tab is the name the tab made for itself.
+	Tab     string
+	PageID  string
+	Version int
+	// Focused says the tab had the focus, which makes it the one the member
+	// used last.
+	Focused bool
+	// Seq counts the tab's reports, its closing included: requests can
+	// arrive out of order, and one older than what the tab last said changes
+	// nothing (Codex review of #674).
+	Seq int64
+}
+
+// tabState is a tab as the service knows it. A closed tab is kept until
+// ViewingLife after it closed, so that a report sent before it closed and
+// delivered after cannot open it again.
+type tabState struct {
+	Viewing
+	seq    int64
+	closed bool
+}
+
+// Viewer is a member with a page open, in one tab or more.
+type Viewer struct {
+	Member Person `json:"member"`
+	// Version is what the tab the member used last shows; Since is when the
+	// first of their tabs began to show the page.
+	Version int       `json:"version"`
+	Since   time.Time `json:"since"`
+}
+
+// AgentAction is what a member's agent last did with a page.
+type AgentAction string
+
+const (
+	AgentRead     AgentAction = "read"
+	AgentDownload AgentAction = "download"
+)
+
+// AgentWork is what one of a member's agents last read or downloaded of a
+// page. An agent reads a page before it changes it, so this is how members
+// see whose agent is at work on a page before anything is saved.
+type AgentWork struct {
+	Member  Person      `json:"member"`
+	Via     Via         `json:"via"`
+	Action  AgentAction `json:"action"`
+	Version int         `json:"version"`
+	At      time.Time   `json:"at"`
+	pageID  string
+}
+
+// Presence is who has a page open now and whose agents are at work on it,
+// for every member who may use the workspace to see.
+type Presence struct {
+	// Viewers come in the order they opened the page.
+	Viewers []Viewer `json:"viewers"`
+	// Agents come newest first.
+	Agents []AgentWork `json:"agents"`
 }
 
 // Rect is an element's box in the page's viewport, in CSS pixels.
@@ -55,53 +130,210 @@ type Selection struct {
 	PickedAt time.Time
 }
 
-// live is what members are looking at now.
+// live is what members are looking at now and what their agents are doing.
 type live struct {
-	mu         sync.Mutex
-	viewing    map[string]Viewing
+	mu sync.Mutex
+	// tabs holds each account's tabs by the name each tab gave itself.
+	tabs       map[string]map[string]tabState
 	selections map[string]Selection
+	// agents holds what each agent token last read or downloaded.
+	agents map[string]AgentWork
 }
 
-// SetViewing records the page and version accountID's desktop shows.
-func (s *Store) SetViewing(accountID, pageID string, version int) {
+// SetViewing records that one of actor's tabs shows a page's version. A
+// newer version on the same page keeps when the tab opened the page and was
+// last used: a tab in the background whose page an agent just saved does not
+// become the one the member used last (Codex review of #674).
+func (s *Store) SetViewing(actor Actor, report TabReport) {
 	s.live.mu.Lock()
 	defer s.live.mu.Unlock()
-	if s.live.viewing == nil {
-		s.live.viewing = map[string]Viewing{}
-	}
 	now := s.now()
-	viewing := s.live.viewing[accountID]
-	if viewing.PageID != pageID || viewing.Version != version || now.Sub(viewing.Seen) >= ViewingLife {
-		viewing = Viewing{PageID: pageID, Version: version, Since: now}
+	tabs := s.live.tabsOf(actor.AccountID, now)
+	state, ok := tabs[report.Tab]
+	if ok && report.Seq <= state.seq {
+		return
 	}
-	viewing.Seen = now
-	s.live.viewing[accountID] = viewing
+	if !ok || state.PageID != report.PageID {
+		state = tabState{PageID: report.PageID, Since: now}
+	}
+	state.seq, state.closed = report.Seq, false
+	state.Version = report.Version
+	state.Member = Person{ID: actor.AccountID, Name: actor.Name}
+	state.Seen = now
+	if report.Focused {
+		state.Used = now
+	}
+	tabs[report.Tab] = state
+	keepAtMost(tabs, MaxTabs)
 }
 
-// ClearViewing forgets that accountID's desktop shows pageID; what it says
-// of another page stays.
-func (s *Store) ClearViewing(accountID, pageID string) {
+// ClearViewing records that one of accountID's tabs closed or went to the
+// background; the others stay. seq is the tab's count of its reports, as in
+// TabReport.
+func (s *Store) ClearViewing(accountID, tab string, seq int64) {
 	s.live.mu.Lock()
 	defer s.live.mu.Unlock()
-	if s.live.viewing[accountID].PageID == pageID {
-		delete(s.live.viewing, accountID)
+	now := s.now()
+	tabs := s.live.tabsOf(accountID, now)
+	state, ok := tabs[tab]
+	if ok && seq <= state.seq {
+		return
+	}
+	state.seq, state.closed, state.Seen = seq, true, now
+	tabs[tab] = state
+	keepAtMost(tabs, MaxTabs)
+}
+
+// tabsOf returns accountID's tabs, without those quiet for ViewingLife.
+func (l *live) tabsOf(accountID string, now time.Time) map[string]tabState {
+	if l.tabs == nil {
+		l.tabs = map[string]map[string]tabState{}
+	}
+	tabs := l.tabs[accountID]
+	if tabs == nil {
+		tabs = map[string]tabState{}
+		l.tabs[accountID] = tabs
+	}
+	for name, state := range tabs {
+		if now.Sub(state.Seen) >= ViewingLife {
+			delete(tabs, name)
+		}
+	}
+	return tabs
+}
+
+// keepAtMost drops the tabs quiet the longest until at most limit are left.
+func keepAtMost(tabs map[string]tabState, limit int) {
+	for len(tabs) > limit {
+		quietest := ""
+		for name, other := range tabs {
+			if quietest == "" || other.Seen.Before(tabs[quietest].Seen) {
+				quietest = name
+			}
+		}
+		delete(tabs, quietest)
 	}
 }
 
-// Viewing returns what accountID's desktop last said it shows, while it said
-// so within ViewingLife.
+// Viewing returns what the tab accountID used last shows, among those that
+// said so within ViewingLife. Picking an element on a page counts as using
+// that page's tab, so "this" is what the member picked even when another
+// tab had the focus later without being used.
 func (s *Store) Viewing(accountID string) (Viewing, bool) {
 	s.live.mu.Lock()
 	defer s.live.mu.Unlock()
-	viewing, ok := s.live.viewing[accountID]
-	if !ok {
-		return Viewing{}, false
+	now := s.now()
+	selection, picked := s.live.selections[accountID]
+	picked = picked && now.Sub(selection.PickedAt) < SelectionLife
+	var best Viewing
+	var bestAt time.Time
+	found := false
+	for name, state := range s.live.tabs[accountID] {
+		if now.Sub(state.Seen) >= ViewingLife {
+			delete(s.live.tabs[accountID], name)
+			continue
+		}
+		if state.closed {
+			continue
+		}
+		viewing := state.Viewing
+		at := lastUse(viewing)
+		if picked && viewing.PageID == selection.PageID && selection.PickedAt.After(at) {
+			at = selection.PickedAt
+		}
+		if !found || at.After(bestAt) || at.Equal(bestAt) && viewing.Seen.After(best.Seen) {
+			best, bestAt, found = viewing, at, true
+		}
 	}
-	if s.now().Sub(viewing.Seen) >= ViewingLife {
-		delete(s.live.viewing, accountID)
-		return Viewing{}, false
+	return best, found
+}
+
+// AgentWorking records what caller's agent read or downloaded of a page; the
+// desktop's own calls are not an agent's.
+func (s *Store) AgentWorking(caller Caller, pageID string, version int, action AgentAction) {
+	if !caller.Agent() {
+		return
 	}
-	return viewing, true
+	s.live.mu.Lock()
+	defer s.live.mu.Unlock()
+	if s.live.agents == nil {
+		s.live.agents = map[string]AgentWork{}
+	}
+	s.live.agents[caller.Via.TokenID] = AgentWork{
+		Member: Person{ID: caller.Actor.AccountID, Name: caller.Actor.Name},
+		Via:    Via{Kind: caller.Via.Kind, Name: caller.Via.Name},
+		Action: action, Version: version, At: s.now(), pageID: pageID,
+	}
+}
+
+// Presence returns, by page, who has each page open and whose agents are at
+// work on it. Pages nobody has open are left out.
+func (s *Store) Presence() map[string]Presence {
+	s.live.mu.Lock()
+	defer s.live.mu.Unlock()
+	now := s.now()
+	pages := map[string]Presence{}
+	at := func(pageID string) Presence {
+		presence, ok := pages[pageID]
+		if !ok {
+			presence = Presence{Viewers: []Viewer{}, Agents: []AgentWork{}}
+		}
+		return presence
+	}
+	for account, tabs := range s.live.tabs {
+		// The member's tab used last on each page gives the version.
+		used := map[string]Viewing{}
+		since := map[string]time.Time{}
+		for name, state := range tabs {
+			if now.Sub(state.Seen) >= ViewingLife {
+				delete(tabs, name)
+				continue
+			}
+			if state.closed {
+				continue
+			}
+			viewing := state.Viewing
+			if last, ok := used[viewing.PageID]; !ok || lastUse(viewing).After(lastUse(last)) {
+				used[viewing.PageID] = viewing
+			}
+			if first, ok := since[viewing.PageID]; !ok || viewing.Since.Before(first) {
+				since[viewing.PageID] = viewing.Since
+			}
+		}
+		if len(tabs) == 0 {
+			delete(s.live.tabs, account)
+		}
+		for pageID, viewing := range used {
+			presence := at(pageID)
+			presence.Viewers = append(presence.Viewers, Viewer{Member: viewing.Member, Version: viewing.Version, Since: since[pageID]})
+			pages[pageID] = presence
+		}
+	}
+	for token, work := range s.live.agents {
+		if now.Sub(work.At) >= AgentLife {
+			delete(s.live.agents, token)
+			continue
+		}
+		presence := at(work.pageID)
+		presence.Agents = append(presence.Agents, work)
+		pages[work.pageID] = presence
+	}
+	for _, presence := range pages {
+		slices.SortFunc(presence.Viewers, func(a, b Viewer) int {
+			return cmp.Or(a.Since.Compare(b.Since), cmp.Compare(a.Member.ID, b.Member.ID))
+		})
+		slices.SortFunc(presence.Agents, func(a, b AgentWork) int {
+			return cmp.Or(b.At.Compare(a.At), cmp.Compare(a.Member.ID, b.Member.ID), cmp.Compare(a.Via.Name, b.Via.Name))
+		})
+	}
+	return pages
+}
+
+func lastUse(viewing Viewing) time.Time {
+	if viewing.Used.IsZero() {
+		return viewing.Since
+	}
+	return viewing.Used
 }
 
 // SetSelection records the element accountID picked; it replaces the one
@@ -139,24 +371,49 @@ func (s *Store) Selection(accountID string) (Selection, bool) {
 	return selection, true
 }
 
+// saved ends what an agent's token was doing with a page once it saved it:
+// the new version says the rest.
+func (l *live) saved(tokenID, pageID string) {
+	if tokenID == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.agents[tokenID].pageID == pageID {
+		delete(l.agents, tokenID)
+	}
+}
+
 func (l *live) forgetAccount(accountID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.viewing, accountID)
+	delete(l.tabs, accountID)
 	delete(l.selections, accountID)
+	for token, work := range l.agents {
+		if work.Member.ID == accountID {
+			delete(l.agents, token)
+		}
+	}
 }
 
 func (l *live) forgetPage(pageID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for account, viewing := range l.viewing {
-		if viewing.PageID == pageID {
-			delete(l.viewing, account)
+	for _, tabs := range l.tabs {
+		for name, state := range tabs {
+			if state.PageID == pageID {
+				delete(tabs, name)
+			}
 		}
 	}
 	for account, selection := range l.selections {
 		if selection.PageID == pageID {
 			delete(l.selections, account)
+		}
+	}
+	for token, work := range l.agents {
+		if work.pageID == pageID {
+			delete(l.agents, token)
 		}
 	}
 }

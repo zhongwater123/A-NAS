@@ -44,17 +44,18 @@ schemas:
   WorkspacePageSummary:
     type: object
     additionalProperties: false
-    required: [id, title, createdBy, createdAt, latest]
+    required: [id, title, createdBy, createdAt, latest, presence]
     properties:
       id: { type: string }
       title: { type: string }
       createdBy: { $ref: "#/schemas/WorkspacePerson" }
       createdAt: { type: string, format: date-time }
       latest: { $ref: "#/schemas/WorkspaceVersion" }
+      presence: { $ref: "#/schemas/WorkspacePresence" }
   WorkspacePage:
     type: object
     additionalProperties: false
-    required: [id, title, createdBy, createdAt, latest, versions]
+    required: [id, title, createdBy, createdAt, latest, versions, presence]
     properties:
       id: { type: string }
       title: { type: string }
@@ -62,6 +63,7 @@ schemas:
       createdAt: { type: string, format: date-time }
       latest: { $ref: "#/schemas/WorkspaceVersion" }
       versions: { type: array, items: { $ref: "#/schemas/WorkspaceVersion" }, description: Newest first }
+      presence: { $ref: "#/schemas/WorkspacePresence" }
   WorkspacePageList:
     type: object
     additionalProperties: false
@@ -78,10 +80,40 @@ schemas:
   WorkspaceViewing:
     type: object
     additionalProperties: false
-    required: [pageId, version]
+    required: [pageId, version, tab, focused, seq]
     properties:
       pageId: { type: string }
       version: { type: integer, minimum: 1 }
+      tab: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "A name the tab made for itself when it opened, random." }
+      focused: { type: boolean, description: "Whether the tab has the focus: the tab focused last is the one the member uses." }
+      seq: { type: integer, format: int64, minimum: 1, description: "The tab's count of its reports, its closing included: requests can arrive out of order, and one older than the tab's last changes nothing." }
+  WorkspaceViewer:
+    type: object
+    additionalProperties: false
+    required: [member, version, since]
+    properties:
+      member: { $ref: "#/schemas/WorkspacePerson" }
+      version: { type: integer, minimum: 1, description: "What the member's tab used last shows." }
+      since: { type: string, format: date-time, description: "When the first of the member's tabs began to show the page." }
+  WorkspaceAgentWork:
+    type: object
+    additionalProperties: false
+    required: [member, via, action, version, at]
+    description: "What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page."
+    properties:
+      member: { $ref: "#/schemas/WorkspacePerson" }
+      via: { $ref: "#/schemas/WorkspaceVia" }
+      action: { type: string, enum: [read, download] }
+      version: { type: integer, minimum: 1 }
+      at: { type: string, format: date-time }
+  WorkspacePresence:
+    type: object
+    additionalProperties: false
+    required: [viewers, agents]
+    description: "Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only."
+    properties:
+      viewers: { type: array, items: { $ref: "#/schemas/WorkspaceViewer" } }
+      agents: { type: array, items: { $ref: "#/schemas/WorkspaceAgentWork" } }
   WorkspaceRect:
     type: object
     additionalProperties: false

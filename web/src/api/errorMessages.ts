@@ -1,5 +1,6 @@
 import { accountErrors } from "../auth/accountRules";
 import { nameErrors } from "../lib/fileNames";
+import { passwordRuleText, ssidRuleText } from "../settings/network/rules";
 import { APIError } from "./client";
 
 // Only known product copy reaches the interface. Server/browser messages
@@ -24,6 +25,10 @@ const messages: Record<string, string> = {
   request_failed: "请求失败，请稍后重试",
 };
 const domains = {
+  phoneHotspot: {
+    invalid_ssid: ssidRuleText,
+    invalid_password: passwordRuleText,
+  },
   imageSearch: {
     unsupported_media_type: "无法读取这张图片，换一张试试",
     too_large: "图片太大，换一张小一些的试试",

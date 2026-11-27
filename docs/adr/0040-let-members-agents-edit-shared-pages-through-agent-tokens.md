@@ -8,7 +8,7 @@
 
 1. **内置独立服务。** 照家庭中心与剪辑中心（[ADR 0029](0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[ADR 0038](0038-keep-montage-media-in-the-photo-library.md)）接线：单元 `anas-workspace.service`，系统账号 `a-nas-workspace`，固定 UID 31004，数据卷上的子卷 `workspace`，库 `workspace.db`。它持有页面、版本、可使用的成员、一次性传输地址与自己的审计记录。它没有网络，只看得到自己的子卷。
 2. **页面在无来源的沙箱里运行。**
-   - 页面经 `/api/v1/workspace/pages/{id}/versions/{n}/view` 返回，响应头是 `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`。桌面用 `<iframe sandbox="allow-scripts">` 打开它，不给 `allow-same-origin`。
+   - 页面经 `/api/v1/workspace/pages/{id}/versions/{n}/view` 返回，响应头是 `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`。页面在浏览器自己的标签页里显示：共享工作区窗口打开与桌面同源、带桌面 CSP 的 `/workspace/{id}`，它用 `<iframe sandbox="allow-scripts">` 打开页面，不给 `allow-same-origin`。
    - 页面因此是不透明来源：读不到 Cookie 与 `localStorage`，访问不了桌面，发出的请求被 CSP 拦下；即使拦不住，跨站请求也不带 `SameSite=Strict` 的会话 Cookie。直接打开页面地址时，响应头里的 `sandbox` 同样生效。
    - 服务在返回页面时给源码里写出的每个元素加上 `data-anas-at`（它在源码中的字节位置），并插入一个公开的辅助脚本。辅助脚本只经 `postMessage` 与桌面通信，报告成员选中的元素、截图和被拦下的资源。
    - 导出与一次性下载以附件返回，带 `X-Content-Type-Options: nosniff` 与 `sandbox` 策略，不会在桌面的来源里运行。
@@ -29,7 +29,7 @@
 
 - 多一个系统账号、单元、子卷与会话查询套接字；Host Agent 多两个只读查询（按令牌解析账号、按令牌 ID 确认有效），只开在这个套接字上。
 - 成员的 agent 有了一种比会话活得久的凭据，在局域网上明文传输。截获它的人能读写共享工作区，碰不到 NAS 的其他功能；产品服务被攻破时能为任何账号签发令牌，与它今天能签发会话相同（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
-- 页面不能用 `localStorage`、Cookie 与外网资源；依赖它们的页面会部分失效，窗口如实说明。
+- 页面不能用 `localStorage`、Cookie 与外网资源；依赖它们的页面会部分失效，页面的标签页如实说明。
 - MCP 只能按 IP 或 `localhost` 访问；按主机名打开桌面的成员，连接命令要换成 IP。
 - 退回没有 `agent_tokens` 的版本时，表被删除，成员要重新连接 agent。
 - 开着的页面每 3 秒查一次新版本，产品里没有新增推送通道。

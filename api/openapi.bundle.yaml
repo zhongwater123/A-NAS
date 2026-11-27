@@ -1898,6 +1898,36 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/network/phone-hotspot/settings:
+    put:
+      operationId: savePhoneHotspotSettings
+      x-anas-posture: admin
+      summary: Save settings for the next time the phone hotspot starts
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneHotspotSettingsChange'
+      responses:
+        '200':
+          description: Saved settings without the password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotSettings'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
@@ -4075,7 +4105,7 @@ paths:
       - $ref: '#/components/parameters/WorkspacePageID'
     get:
       operationId: getWorkspacePage
-      summary: A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions
+      summary: A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there
       responses:
         '200':
           description: The page
@@ -4226,7 +4256,7 @@ paths:
   /api/v1/workspace/viewing:
     put:
       operationId: setWorkspaceViewing
-      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without
+      summary: 'The page and version one of the caller''s tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab''s last, its closing included, changes nothing. No tab name or seq is 400 invalid_request'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -4238,21 +4268,38 @@ paths:
       responses:
         '204':
           description: Recorded
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
-  /api/v1/workspace/viewing/{pageId}:
+  /api/v1/workspace/viewing/{tab}:
     parameters:
-      - $ref: '#/components/parameters/WorkspacePageID'
+      - name: tab
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The tab's name as it reported itself
     delete:
       operationId: clearWorkspaceViewing
-      summary: The caller's desktop no longer shows this page; what it said of another page stays
+      summary: This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
+        - name: seq
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          description: The tab's count of its reports, as in WorkspaceViewing
       responses:
         '204':
           description: Forgotten
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
   /api/v1/workspace/selection:
@@ -12720,6 +12767,26 @@ components:
             - isolation_failed
             - cleanup_failed
             - service_failed
+            - invalid_settings
+        settings:
+          $ref: '#/components/schemas/PhoneHotspotSettings'
+        settingsInvalid:
+          type: boolean
+          description: The saved settings could not be read. An administrator can replace them by saving new settings.
+        devices:
+          description: Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected.
+          type: array
+          items:
+            type: object
+            required:
+              - mac
+            properties:
+              mac:
+                type: string
+              ip:
+                type: string
+              name:
+                type: string
         connection:
           description: Present when the hotspot is on. The response is not cacheable.
           type: object
@@ -12734,6 +12801,9 @@ components:
               type: string
             url:
               type: string
+            portal:
+              type: boolean
+              description: Whether this running hotspot advertises a WebOS portal
     PhoneHotspotRequest:
       type: object
       additionalProperties: false
@@ -18146,6 +18216,34 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PhoneHotspotSettings:
+      type: object
+      required:
+        - ssid
+        - passwordConfigured
+        - portal
+      properties:
+        ssid:
+          type: string
+          description: Empty selects the device's default hotspot name
+        passwordConfigured:
+          type: boolean
+        portal:
+          type: boolean
+    PhoneHotspotSettingsChange:
+      type: object
+      additionalProperties: false
+      properties:
+        ssid:
+          type: string
+          description: At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name.
+        password:
+          type: string
+          description: Omit to retain the saved password. Empty restores a fresh random password on each start.
+          pattern: ^(?:[ -~]{8,63})?$
+        portal:
+          type: boolean
+          description: Advertise the WebOS entry via the mobile system's network sign-in prompt
     SystemUpdateImage:
       type: object
       additionalProperties: false
@@ -18267,6 +18365,66 @@ components:
         savedAt:
           type: string
           format: date-time
+    WorkspaceViewer:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - version
+        - since
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        version:
+          type: integer
+          minimum: 1
+          description: What the member's tab used last shows.
+        since:
+          type: string
+          format: date-time
+          description: When the first of the member's tabs began to show the page.
+    WorkspaceAgentWork:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - via
+        - action
+        - version
+        - at
+      description: What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page.
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        via:
+          $ref: '#/components/schemas/WorkspaceVia'
+        action:
+          type: string
+          enum:
+            - read
+            - download
+        version:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+    WorkspacePresence:
+      type: object
+      additionalProperties: false
+      required:
+        - viewers
+        - agents
+      description: Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only.
+      properties:
+        viewers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceViewer'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceAgentWork'
     WorkspacePageSummary:
       type: object
       additionalProperties: false
@@ -18276,6 +18434,7 @@ components:
         - createdBy
         - createdAt
         - latest
+        - presence
       properties:
         id:
           type: string
@@ -18288,6 +18447,8 @@ components:
           format: date-time
         latest:
           $ref: '#/components/schemas/WorkspaceVersion'
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageList:
       type: object
       additionalProperties: false
@@ -18308,6 +18469,7 @@ components:
         - createdAt
         - latest
         - versions
+        - presence
       properties:
         id:
           type: string
@@ -18325,6 +18487,8 @@ components:
           items:
             $ref: '#/components/schemas/WorkspaceVersion'
           description: Newest first
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageChanged:
       type: object
       additionalProperties: false
@@ -18342,12 +18506,27 @@ components:
       required:
         - pageId
         - version
+        - tab
+        - focused
+        - seq
       properties:
         pageId:
           type: string
         version:
           type: integer
           minimum: 1
+        tab:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,64}$
+          description: A name the tab made for itself when it opened, random.
+        focused:
+          type: boolean
+          description: 'Whether the tab has the focus: the tab focused last is the one the member uses.'
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 'The tab''s count of its reports, its closing included: requests can arrive out of order, and one older than the tab''s last changes nothing.'
     WorkspaceRect:
       type: object
       additionalProperties: false

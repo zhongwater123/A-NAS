@@ -31,7 +31,7 @@
   parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
   get:
     operationId: getWorkspacePage
-    summary: A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions
+    summary: A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there
     responses:
       "200": { description: The page, content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspacePage" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
@@ -108,21 +108,25 @@
 /api/v1/workspace/viewing:
   put:
     operationId: setWorkspaceViewing
-    summary: "The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only; the desktop says it again every minute and it lapses after 3 minutes without"
+    summary: "The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab's last, its closing included, changes nothing. No tab name or seq is 400 invalid_request"
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspaceViewing" } } } }
     responses:
       "204": { description: Recorded }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
-/api/v1/workspace/viewing/{pageId}:
-  parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
+/api/v1/workspace/viewing/{tab}:
+  parameters: [{ name: tab, in: path, required: true, schema: { type: string }, description: The tab's name as it reported itself }]
   delete:
     operationId: clearWorkspaceViewing
-    summary: The caller's desktop no longer shows this page; what it said of another page stays
-    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    summary: "This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request"
+    parameters:
+      - { $ref: "../components/common.yaml#/parameters/CSRFToken" }
+      - { name: seq, in: query, required: true, schema: { type: integer, format: int64, minimum: 1 }, description: "The tab's count of its reports, as in WorkspaceViewing" }
     responses:
       "204": { description: Forgotten }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/workspace/selection:
   put:

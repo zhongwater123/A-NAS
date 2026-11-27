@@ -56,18 +56,48 @@ func TestHandlerServesEmbeddedDesktopAndImmutableAssets(t *testing.T) {
 // anew, and frame-src must allow nothing but the desktop
 // (docs/architecture/shared-workspace.md, 隔离浏览).
 func TestFramesOnlyLoadTheDesktopsOwnPages(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	newHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
-	policy := recorder.Header().Get("Content-Security-Policy")
-	for directive := range strings.SplitSeq(policy, ";") {
-		if name, value, _ := strings.Cut(strings.TrimSpace(directive), " "); name == "frame-src" || name == "child-src" {
-			if value != "'self'" {
-				t.Fatalf("%s %s lets frames load more than the desktop", name, value)
-			}
-			return
+	handler := newHandler(t)
+	// The desktop, and the tab that shows one shared page on its own.
+	for _, path := range []string{"/", "/workspace/page_a"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if frameSource(recorder.Header().Get("Content-Security-Policy")) != "'self'" {
+			t.Errorf("%s Content-Security-Policy = %q, want frame-src 'self'", path, recorder.Header().Get("Content-Security-Policy"))
 		}
 	}
-	t.Fatalf("Content-Security-Policy = %q has no frame-src", policy)
+}
+
+// frameSource is what a policy lets frames load: frame-src, or child-src
+// where it has none.
+func frameSource(policy string) string {
+	for _, want := range []string{"frame-src", "child-src"} {
+		for directive := range strings.SplitSeq(policy, ";") {
+			if name, value, _ := strings.Cut(strings.TrimSpace(directive), " "); name == want {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+// A shared page opens in a browser tab of its own: /workspace/{page} is the
+// tab's page, as uncached and as framed as the desktop; nothing else under
+// /workspace/ is.
+func TestHandlerServesASharedPagesTab(t *testing.T) {
+	handler := newHandler(t)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/workspace/page_a", nil))
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" ||
+		recorder.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(recorder.Body.String(), "<title>共享工作区") {
+		t.Fatalf("tab = %d %v %s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	for _, path := range []string{"/workspace/", "/workspace/page_a/more"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Errorf("%s = %d, want 404", path, recorder.Code)
+		}
+	}
 }
 
 // Installed apps are served from other ports of the device's address, which

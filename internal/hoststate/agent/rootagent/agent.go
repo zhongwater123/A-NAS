@@ -176,6 +176,10 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handlePhoneHotspot(w, r)
 		return
 	}
+	if r.URL.Path == wire.PhoneHotspotSettingsPath {
+		h.handlePhoneHotspotSettings(w, r)
+		return
+	}
 	if r.URL.Path == wire.AssistantKeyPath {
 		h.handleAssistantKey(w, r)
 		return
