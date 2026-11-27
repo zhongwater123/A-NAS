@@ -4475,28 +4475,66 @@ paths:
           description: VideoCut is on
         '404':
           $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/projects:
+  /api/v1/videocut/catalog:
     get:
-      operationId: listVideoCutProjects
-      summary: The caller's VideoCut projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404
-      parameters:
-        - $ref: '#/components/parameters/VideoCutCursor'
+      operationId: getVideoCutCatalog
+      summary: The three songs VideoCut has, the aspects and styles a film can take, and what a new project starts with (M4)
       responses:
         '200':
-          description: A page of the caller's projects
+          description: The catalog
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VideoCutProjectPage'
-        '400':
+                $ref: '#/components/schemas/VideoCutCatalog'
+        '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/songs/{songId}/audio:
+    get:
+      operationId: getVideoCutCatalogSongAudio
+      summary: One of the catalog's songs, to listen to before choosing it (试听), with Range support
+      parameters:
+        - $ref: '#/components/parameters/VideoCutSongID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial audio content
+          content:
+            audio/*:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the song.
+  /api/v1/videocut/projects:
+    get:
+      operationId: listVideoCutProjects
+      summary: The caller's projects, newest first, and last the sample every member has (M1-1)
+      responses:
+        '200':
+          description: The projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProjectList'
         '404':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
     post:
       operationId: createVideoCutProject
-      summary: Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike
+      description: 'Make a project of the files the browser has (M2-2): their list only, no video (docs/specs/venus.md#本机文件). It is importing while a file of the list is not read yet, and pending once all are, with the catalog''s defaults as its settings. The same requestKey again returns the same project (200); the key of another request is a conflict. The same file twice in the list counts once. More than 200 files is too_many_files (422), a file over 4 GB file_too_large (422).'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -4508,16 +4546,16 @@ paths:
               additionalProperties: false
               required:
                 - requestKey
-                - assetIds
+                - files
               properties:
                 requestKey:
                   $ref: '#/components/schemas/VideoCutRequestKey'
-                name:
-                  type: string
-                  maxLength: 64
-                  description: Empty names the project by its videos' dates.
-                assetIds:
-                  $ref: '#/components/schemas/VideoCutAssetIDs'
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    $ref: '#/components/schemas/VideoCutLocalFile'
       responses:
         '200':
           description: The project the same requestKey made before
@@ -4533,7 +4571,7 @@ paths:
                 $ref: '#/components/schemas/VideoCutProject'
         '400':
           $ref: '#/components/responses/ProductError'
-        '401':
+        '404':
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
@@ -4544,7 +4582,7 @@ paths:
   /api/v1/videocut/projects/{projectId}:
     get:
       operationId: getVideoCutProject
-      summary: One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found
+      summary: 'One project: its state, progress, settings and list of files. Another member''s project is not_found; so is an importing one the browser stopped reporting for (docs/specs/venus.md#网页报到)'
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
       responses:
@@ -4558,9 +4596,136 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: deleteVideoCutProject
+      summary: 'Delete the project, stopping its work first: its film, timeline, candidates, anchors and imported song go with it; the videos uploaded stay in the photo library (ADR 0041). The sample is sample_read_only (403)'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/files:
+    post:
+      operationId: addVideoCutProjectFiles
+      description: 'Add files to the list, or what the browser has read of files already in it, told by name, size and modification time: 继续选择 on the start page, and each file as it is read. Only while importing or pending (project_state, 409); past 200 files is too_many_files (422).'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    $ref: '#/components/schemas/VideoCutLocalFile'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/files/{fileId}:
+    delete:
+      operationId: deleteVideoCutProjectFile
+      summary: Take a file out of the list, while importing or pending (project_state, 409)
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/VideoCutFileID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/selection:
     patch:
-      operationId: updateVideoCutProject
-      summary: Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with
+      operationId: updateVideoCutSelection
+      summary: 勾选 and 星标 (M3-3), saved as they change, while importing or pending (project_state, 409). A sixth star is too_many_stars (422), and changes nothing
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required:
+                      - fileId
+                    minProperties: 2
+                    properties:
+                      fileId:
+                        type: string
+                        minLength: 1
+                      selected:
+                        type: boolean
+                      starred:
+                        type: boolean
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/settings:
+    patch:
+      operationId: updateVideoCutSettings
+      summary: The aspect, the style, or one of the catalog's songs (M4), saved as they change, while importing or pending (project_state, 409). An id the catalog does not have is validation_failed (400)
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4573,20 +4738,16 @@ paths:
               additionalProperties: false
               minProperties: 1
               properties:
-                name:
+                aspect:
                   type: string
                   minLength: 1
-                  maxLength: 64
-                ask:
+                style:
                   type: string
-                  maxLength: 200
-                chronological:
-                  type: boolean
-                songStart:
-                  type: number
-                  minimum: 0
-                  maximum: 480
-                  description: 'Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music''s end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt.'
+                  minLength: 1
+                builtinSong:
+                  type: string
+                  minLength: 1
+                  description: A song of the catalog; songs of the music library and imported ones have their own operations.
       responses:
         '200':
           description: The project
@@ -4596,240 +4757,16 @@ paths:
                 $ref: '#/components/schemas/VideoCutProject'
         '400':
           $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '422':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-    delete:
-      operationId: deleteVideoCutProject
-      summary: Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library
-      parameters:
-        - $ref: '#/components/parameters/VideoCutProjectID'
-        - $ref: '#/components/parameters/CSRFToken'
-      responses:
-        '204':
-          description: Deleted
-        '404':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/projects/{projectId}/assets:
-    post:
-      operationId: addVideoCutProjectAssets
-      summary: Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after videocut.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew
-      parameters:
-        - $ref: '#/components/parameters/VideoCutProjectID'
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - requestKey
-                - assetIds
-              properties:
-                requestKey:
-                  $ref: '#/components/schemas/VideoCutRequestKey'
-                assetIds:
-                  $ref: '#/components/schemas/VideoCutAssetIDs'
-      responses:
-        '200':
-          description: The project
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutProject'
-        '400':
-          $ref: '#/components/responses/ProductError'
-        '401':
+        '403':
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
-        '422':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/projects/{projectId}/generate:
-    post:
-      operationId: generateVideoCutFilm
-      summary: 'Start a job that makes a new version of the project''s film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller''s VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutProjectID'
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - requestKey
-              properties:
-                requestKey:
-                  $ref: '#/components/schemas/VideoCutRequestKey'
-      responses:
-        '202':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '400':
-          $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}:
-    get:
-      operationId: getVideoCutJob
-      summary: 'One of the caller''s jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member''s job is not_found'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '404':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}/cancel:
-    post:
-      operationId: cancelVideoCutJob
-      summary: 'Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-        - $ref: '#/components/parameters/CSRFToken'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}/drop-assets:
-    post:
-      operationId: dropVideoCutJobAssets
-      summary: 'Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - assetIds
-              properties:
-                assetIds:
-                  $ref: '#/components/schemas/VideoCutAssetIDs'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '400':
-          $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}/retry-analysis:
-    post:
-      operationId: retryVideoCutJobAnalysis
-      summary: 'Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-        - $ref: '#/components/parameters/CSRFToken'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}/retry:
-    post:
-      operationId: retryVideoCutJob
-      summary: Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-        - $ref: '#/components/parameters/CSRFToken'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/jobs/{jobId}/replan:
-    post:
-      operationId: replanVideoCutJob
-      summary: 'Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project''s latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutJobID'
-        - $ref: '#/components/parameters/CSRFToken'
-      responses:
-        '200':
-          description: The job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/notices:
-    get:
-      operationId: listVideoCutNotices
-      summary: 'The desktop''s notices of the caller''s jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day'
-      responses:
-        '200':
-          description: The notices, newest first
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutNotices'
   /api/v1/videocut/projects/{projectId}/song:
     put:
       operationId: putVideoCutSong
-      summary: 'Choose the project''s song from the caller''s music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to VideoCut, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member''s track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again'
+      description: Choose a track of the caller's music library as the project's song, while importing or pending. The Product Service opens the track through the File Broker as the caller and streams it to VideoCut, which keeps a copy and analyses it in the background. Another member's track answers not_found, as a missing one; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length (422).
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - $ref: '#/components/parameters/CSRFToken'
@@ -4850,16 +4787,18 @@ paths:
                   description: A track of GET /api/v1/music/tracks.
       responses:
         '200':
-          description: The song, being analysed or as analysed before
+          description: The project with the song
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VideoCutSong'
+                $ref: '#/components/schemas/VideoCutProject'
         '400':
           $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
           $ref: '#/components/responses/ProductError'
         '413':
           $ref: '#/components/responses/ProductError'
@@ -4868,37 +4807,72 @@ paths:
         '503':
           $ref: '#/components/responses/ProductError'
     get:
-      operationId: getVideoCutSong
-      summary: 'The project''s song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404)'
+      operationId: getVideoCutSongStructure
+      summary: The film's parts and slots as the project's song makes them, before the timeline is made (M5-1, M6-3, M6-4). A song still being analysed is song_not_ready (409)
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
       responses:
         '200':
-          description: The song
+          description: The song's structure
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VideoCutSong'
+                $ref: '#/components/schemas/VideoCutSongStructure'
         '404':
           $ref: '#/components/responses/ProductError'
-        '503':
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/song/import:
+    post:
+      operationId: importVideoCutSong
+      summary: Import a song file from the browser as the project's song (M4-1 导入), while importing or pending. Limits as for a track of the music library; a file with no audio is not_audio (422)
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: name
+          in: query
+          required: true
+          description: The file's name, for the song's title.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: The project with the song
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '422':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/song/audio:
     get:
       operationId: getVideoCutSongAudio
-      description: 'VideoCut''s copy of the project''s song, to listen to: with Range support when browsers play its format, otherwise (the song''s transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start.'
+      summary: The project's song, to listen to and for the film page's preview, with Range support
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
         - name: Range
           in: header
           schema:
             type: string
-        - name: start
-          in: query
-          description: Seconds to start a decoded song from; ignored for other songs.
-          schema:
-            type: number
-            minimum: 0
       responses:
         '200':
           description: Audio content
@@ -4914,68 +4888,66 @@ paths:
               schema:
                 type: string
                 format: binary
-        '400':
-          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '416':
           description: The range is outside the song.
+  /api/v1/videocut/projects/{projectId}/heartbeat:
+    post:
+      operationId: reportVideoCutProject
+      description: '报到: the page that has an importing or uploading project open says so every 30 seconds (docs/specs/venus.md#网页报到). An importing project two minutes without it is dropped; an uploading one two minutes without it or an upload becomes upload_interrupted. Other states take it and change nothing.'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Noted
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/generate:
+    post:
+      operationId: generateVideoCutFilm
+      description: '开始生成 (M4-5): take a snapshot of the settings and start uploading the selected files; the project is uploading. Only while pending (project_state, 409), with a file selected (nothing_selected, 422) and a song that is not unusable (song_unusable, 422); a song still being analysed does not wait. The same requestKey again returns the project (200).'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/VideoCutRequestKey'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/hero:
-    get:
-      operationId: getVideoCutHero
-      description: 'The device''s background film for the 剪辑中心 home page, as the 第八版 prototype''s hero: a file the device keeps under the VideoCut store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member''s own videos.'
-      parameters:
-        - name: Range
-          in: header
-          schema:
-            type: string
-      responses:
-        '200':
-          description: The film
-          content:
-            video/mp4:
-              schema:
-                type: string
-                format: binary
-        '206':
-          description: Part of the film
-          content:
-            video/mp4:
-              schema:
-                type: string
-                format: binary
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '416':
-          description: The range is outside the film.
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/hero/poster:
-    get:
-      operationId: getVideoCutHeroPoster
-      description: The background film's poster (hero/hero.jpg); 404 without one.
-      responses:
-        '200':
-          description: The poster
-          content:
-            image/jpeg:
-              schema:
-                type: string
-                format: binary
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/versions/{versionId}/confirm:
+  /api/v1/videocut/projects/{projectId}/resume:
     post:
-      operationId: confirmVideoCutVersion
-      summary: 'Choose this version as the project''s film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later'
+      operationId: resumeVideoCutUpload
+      summary: Go on uploading an upload_interrupted project once its files are chosen again; it is uploading again. Other states are project_state (409)
       parameters:
-        - $ref: '#/components/parameters/VideoCutVersionID'
+        - $ref: '#/components/parameters/VideoCutProjectID'
         - $ref: '#/components/parameters/CSRFToken'
       responses:
         '200':
@@ -4984,14 +4956,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VideoCutProject'
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/versions/{versionId}/recut:
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/retry:
     post:
-      operationId: recutVideoCutVersion
-      summary: 'Plan this version again from a sentence (#596): the member''s VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version''s. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none'
+      operationId: retryVideoCutProject
+      summary: Go back to the step a failed project failed at. Other states are project_state (409); a fourth retry is too_many_retries (409)
       parameters:
-        - $ref: '#/components/parameters/VideoCutVersionID'
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/assets:
+    get:
+      operationId: listVideoCutProjectAssets
+      summary: 'The project''s videos in the photo library and how their analysis stands: 添加素材 · 已导入素材 (M7-4) lists the analysed ones'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+      responses:
+        '200':
+          description: The videos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProjectAssets'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: addVideoCutProjectAsset
+      description: Give the project a video the browser uploaded to the caller's photo library, and start its analysis. With fileId it is that file of the list, while uploading (project_state, 409); without, a video added on the film page (M7-4), while ready or exported, which the page puts in a slot with a place edit once analysed. The same requestKey again changes nothing more. A video the caller cannot see is assets_unavailable (422).
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
         required: true
@@ -5002,97 +5016,27 @@ paths:
               additionalProperties: false
               required:
                 - requestKey
-                - change
+                - assetId
               properties:
                 requestKey:
                   $ref: '#/components/schemas/VideoCutRequestKey'
-                change:
+                assetId:
                   type: string
                   minLength: 1
-                  maxLength: 200
-                  description: 'What to change, as a member''s ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask''s page does for the ask.'
+                  maxLength: 64
+                fileId:
+                  type: string
+                  minLength: 1
       responses:
-        '202':
-          description: The recut job
+        '200':
+          description: The video
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/VideoCutJob'
+                $ref: '#/components/schemas/VideoCutProjectAsset'
         '400':
           $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/versions/{versionId}/outline:
-    get:
-      operationId: getVideoCutVersionOutline
-      summary: 'The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409)'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutVersionID'
-      responses:
-        '200':
-          description: The version's outline
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutVersionOutline'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/versions/{versionId}/draft:
-    get:
-      operationId: getVideoCutVersionDraft
-      summary: 'The caller''s draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version''s videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos'' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member''s version is not_found'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutVersionID'
-      responses:
-        '200':
-          description: The draft
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutDraft'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/drafts/{draftId}/ops:
-    post:
-      operationId: editVideoCutDraft
-      summary: 'One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, a shot whose picture the plan described with nothing to search for (empty, or longer than a search) stays as it was and the message says how many did, and with no unlocked shot to search for the shuffle is edit_refused (422). Deleting a shot between two that could each take its slots reads their videos'' analysis (photos_unavailable, 503; edit_refused, 422, while their windows are made again; analysis_changed, 409, once made with another model) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutDraftID'
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - baseRevision
-                - op
-              properties:
-                baseRevision:
-                  type: integer
-                  minimum: 0
-                op:
-                  $ref: '#/components/schemas/VideoCutDraftOp'
-      responses:
-        '200':
-          description: The draft after the step, with what it did
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutDraft'
-        '400':
+        '403':
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
@@ -5102,178 +5046,45 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/drafts/{draftId}/save:
-    post:
-      operationId: saveVideoCutDraft
-      summary: 'Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job, and a requestKey used for another draft or another kind of job is a conflict (409). A revision that was saved already answers 202 with the job that saved it, done and with its version, whatever the requestKey: no new job, and nothing is filled or rendered again. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutDraftID'
-        - $ref: '#/components/parameters/CSRFToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required:
-                - requestKey
-              properties:
-                requestKey:
-                  $ref: '#/components/schemas/VideoCutRequestKey'
-      responses:
-        '202':
-          description: The edit job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutJob'
-        '400':
-          $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/drafts/{draftId}/song:
+  /api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy:
     get:
-      operationId: getVideoCutDraftSong
-      description: 'The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project''s song is now, as the project''s song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft''s songStart.'
+      operationId: getVideoCutProxy
+      summary: The video's proxy, for the film page's preview, which plays the shots' proxies one after another, with Range support
       parameters:
-        - $ref: '#/components/parameters/VideoCutDraftID'
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/VideoCutAssetID'
         - name: Range
           in: header
           schema:
             type: string
-        - name: start
-          in: query
-          description: Seconds to start a decoded song from; ignored for other songs.
-          schema:
-            type: number
-            minimum: 0
       responses:
         '200':
-          description: Audio content
+          description: The proxy
           content:
-            audio/*:
+            video/mp4:
               schema:
                 type: string
                 format: binary
         '206':
-          description: Partial audio content
+          description: Part of the proxy
           content:
-            audio/*:
+            video/mp4:
               schema:
                 type: string
                 format: binary
-        '400':
-          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '416':
-          description: The range is outside the song.
-        '422':
-          $ref: '#/components/responses/ProductError'
+          description: The range is outside the proxy.
         '503':
           $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/drafts/{draftId}/candidates:
-    get:
-      operationId: listVideoCutDraftCandidates
-      summary: 'The beats that could lead a shot: the rest of its card, the plan''s spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle''s does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutDraftID'
-        - name: shot
-          in: query
-          required: true
-          description: The shot's number from 1.
-          schema:
-            type: integer
-            minimum: 1
-        - name: q
-          in: query
-          description: Words to search the project's videos for.
-          schema:
-            type: string
-            maxLength: 200
-        - name: size
-          in: query
-          description: Only this shot size (景别).
-          schema:
-            type: string
-            maxLength: 64
-        - name: scene
-          in: query
-          description: Only this scene; 其他 for the scenes not listed.
-          schema:
-            type: string
-            maxLength: 64
-        - name: landscape
-          in: query
-          description: Only 16:9 videos.
-          schema:
-            type: boolean
-      responses:
-        '200':
-          description: The candidates
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VideoCutCandidates'
-        '400':
-          $ref: '#/components/responses/ProductError'
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-        '503':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/versions/{versionId}/shots:
-    get:
-      operationId: getVideoCutVersionShots
-      summary: 'The version''s shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutVersionID'
-      responses:
-        '200':
-          description: The shot list
-          content:
-            text/csv:
-              schema:
-                type: string
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/drafts/{draftId}/shots:
-    get:
-      operationId: getVideoCutDraftShots
-      summary: 'The draft''s shot list, as the version''s: a row a shot, the slots it covers, and for a shot that took a deleted shot''s slots, which'
-      parameters:
-        - $ref: '#/components/parameters/VideoCutDraftID'
-      responses:
-        '200':
-          description: The shot list
-          content:
-            text/csv:
-              schema:
-                type: string
-        '404':
-          $ref: '#/components/responses/ProductError'
-        '409':
-          $ref: '#/components/responses/ProductError'
-  /api/v1/videocut/projects/{projectId}/frames/{assetId}:
+  /api/v1/videocut/projects/{projectId}/assets/{assetId}/frame:
     get:
       operationId: getVideoCutFrame
-      summary: 'A frame of one of the project''s videos, a JPEG 320 on its longer side, for the thumbnails of an edit''s shots and candidates. It is not kept: the video''s content does not change, so the browser keeps it. A video that is not the project''s is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where VideoCut has no media worker'
+      summary: A frame of one of the project's videos, a JPEG 320 on its longer side, for shot cards and candidates; the browser keeps it
       parameters:
         - $ref: '#/components/parameters/VideoCutProjectID'
-        - name: assetId
-          in: path
-          required: true
-          schema:
-            type: string
-            minLength: 1
+        - $ref: '#/components/parameters/VideoCutAssetID'
         - name: t
           in: query
           required: true
@@ -5294,10 +5105,251 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/timeline:
+    get:
+      operationId: getVideoCutTimeline
+      summary: 'The film as it is: its parts, one shot a slot, its revision and whether one step can be undone. A project whose film is not made yet is project_state (409)'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+      responses:
+        '200':
+          description: The timeline
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutTimeline'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/timeline/edits:
+    post:
+      operationId: editVideoCutTimeline
+      description: 'One edit, made on baseRevision, at once (docs/specs/venus.md#镜头操作). A timeline that moved on since, as when another tab changed it, answers timeline_conflict (409) and changes nothing: read it again. A project that is not ready or exported is project_state (409): exporting reads only. An edit the rules do not allow answers edit_refused (422) with the reason to show, such as no candidate left to delete with.'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - baseRevision
+                - edit
+              properties:
+                baseRevision:
+                  type: integer
+                  minimum: 1
+                edit:
+                  $ref: '#/components/schemas/VideoCutEdit'
+      responses:
+        '200':
+          description: The timeline after the edit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutTimeline'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/timeline/undo:
+    post:
+      operationId: undoVideoCutTimeline
+      summary: Undo the last edit (M6-5), made on baseRevision; its anchors go with it. Nothing to undo is nothing_to_undo (409); conflicts and states as for an edit
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - baseRevision
+              properties:
+                baseRevision:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: The timeline after undoing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutTimeline'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/slots/{slot}/candidates:
+    get:
+      operationId: listVideoCutCandidates
+      summary: 'The slot''s candidates, at most six (M7-1): none already in the film, of another orientation, or of the same video as a shot beside it'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/VideoCutSlot'
+      responses:
+        '200':
+          description: The candidates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutCandidates'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/assistant:
+    get:
+      operationId: getVideoCutAssistant
+      summary: Whether the assistant can search the caller's videos now (M8)
+      responses:
+        '200':
+          description: What works
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutAssistantStatus'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/assistant:
+    post:
+      operationId: askVideoCutAssistant
+      description: 'One sentence to the assistant (M8): a search of the project''s videos, answered with groups of beats to put in a slot, or a question, answered in words. With slot it is about that shot, as from the box under 这一镜 (M8-2, M8-3). Nothing changes until the page makes an edit. Searching that does not work now is search_unavailable (503).'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                slot:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: The reply
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutAssistantReply'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/export:
+    post:
+      operationId: exportVideoCutFilm
+      description: '导出 (M9-1): render the timeline as it is at 1080p; the project is exporting and reads only until it is exported, or ready again with exportFailure. The new file takes the place of the last one. Only while ready or exported (project_state, 409); the same requestKey again returns the project (200).'
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - requestKey
+              properties:
+                requestKey:
+                  $ref: '#/components/schemas/VideoCutRequestKey'
+      responses:
+        '200':
+          description: The project
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutProject'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/videocut/projects/{projectId}/film:
+    get:
+      operationId: getVideoCutFilm
+      summary: The exported film, to download, with Range support. Before the first export it is not_found
+      parameters:
+        - $ref: '#/components/parameters/VideoCutProjectID'
+        - name: Range
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The film
+          headers:
+            Content-Disposition:
+              description: attachment, named by the project.
+              schema:
+                type: string
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Part of the film
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '416':
+          description: The range is outside the film.
+  /api/v1/videocut/notices:
+    get:
+      operationId: listVideoCutNotices
+      summary: 'The desktop''s notices of the caller''s jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day'
+      responses:
+        '200':
+          description: The notices, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VideoCutNotices'
   /api/v1/modules:
     get:
       operationId: listModules
@@ -10409,13 +10461,13 @@ components:
       schema:
         type: string
         pattern: ^([1-9][0-9]*|latest)$
-    VideoCutCursor:
-      name: cursor
-      in: query
-      required: false
-      description: The `next` of the previous page.
+    VideoCutSongID:
+      name: songId
+      in: path
+      required: true
       schema:
         type: string
+        minLength: 1
     VideoCutProjectID:
       name: projectId
       in: path
@@ -10423,27 +10475,29 @@ components:
       schema:
         type: string
         minLength: 1
-    VideoCutJobID:
-      name: jobId
+    VideoCutFileID:
+      name: fileId
       in: path
       required: true
       schema:
         type: string
         minLength: 1
-    VideoCutVersionID:
-      name: versionId
+    VideoCutAssetID:
+      name: assetId
       in: path
       required: true
       schema:
         type: string
         minLength: 1
-    VideoCutDraftID:
-      name: draftId
+    VideoCutSlot:
+      name: slot
       in: path
       required: true
+      description: The music slot, from 1 to the film's last.
       schema:
-        type: string
-        minLength: 1
+        type: integer
+        minimum: 1
+        maximum: 10000
   responses:
     ProductError:
       description: Product operation error.
@@ -18456,39 +18510,223 @@ components:
         version:
           type: integer
           minimum: 1
+    VideoCutCatalogSong:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - title
+        - duration
+      properties:
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        duration:
+          type: number
+          minimum: 0
+    VideoCutCatalogItem:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - label
+      properties:
+        id:
+          type: string
+          minLength: 1
+        label:
+          type: string
+    VideoCutCatalog:
+      type: object
+      additionalProperties: false
+      required:
+        - songs
+        - aspects
+        - styles
+        - defaults
+      properties:
+        songs:
+          type: array
+          maxItems: 3
+          description: The three songs VideoCut has (M4-1).
+          items:
+            $ref: '#/components/schemas/VideoCutCatalogSong'
+        aspects:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/VideoCutCatalogItem'
+        styles:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/VideoCutCatalogItem'
+        defaults:
+          type: object
+          additionalProperties: false
+          required:
+            - song
+            - aspect
+            - style
+          description: What a new project starts with.
+          properties:
+            song:
+              type: string
+              description: A builtin song's id.
+            aspect:
+              type: string
+            style:
+              type: string
+    VideoCutProjectState:
+      type: string
+      enum:
+        - importing
+        - pending
+        - uploading
+        - upload_interrupted
+        - queued
+        - generating
+        - ready
+        - exporting
+        - exported
+        - failed
+      description: 导入中, 待生成, 上传中, 上传中断, 排队中, 生成中, 已完成, 导出中, 已导出, 失败 (docs/specs/venus.md#作品状态机). importing until every file of the list was read in the browser; pending once all were, until generating is asked for.
+    VideoCutProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - files
+        - uploaded
+        - analysed
+        - skipped
+        - percent
+        - slow
+      description: The three bars of 生成中 (M5-1).
+      properties:
+        files:
+          type: integer
+          minimum: 0
+          maximum: 200
+          description: Files chosen to make the film from.
+        uploaded:
+          type: integer
+          minimum: 0
+          maximum: 200
+        analysed:
+          type: integer
+          minimum: 0
+          maximum: 200
+          description: Analysed or skipped; analysis starts as each file is uploaded.
+        skipped:
+          type: integer
+          minimum: 0
+          maximum: 200
+          description: 'Files analysis could not read and left out: ''N 段无法分析，已跳过'' once the film is made.'
+        percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: How far the film's making is, once uploading and analysis are done.
+        remainingSeconds:
+          type: integer
+          minimum: 0
+          description: The estimate, renewed every 30 seconds and never growing; absent while there is none.
+        slow:
+          type: boolean
+          description: 'Past the estimate by half: 比预计慢，仍在处理.'
+    VideoCutFailureReason:
+      type: string
+      enum:
+        - network
+        - corrupt_file
+        - busy
+        - too_few_assets
+      description: '网络中断, 文件损坏, 服务繁忙, 素材不足: the only four the page names.'
+    VideoCutFailure:
+      type: object
+      additionalProperties: false
+      required:
+        - step
+        - reason
+        - retries
+      properties:
+        step:
+          type: string
+          enum:
+            - upload
+            - analysis
+            - generate
+          description: The step that failed, which a retry goes back to.
+        reason:
+          $ref: '#/components/schemas/VideoCutFailureReason'
+        retries:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Retries made; at 3 the page says to contact us and offers none.
+    VideoCutFilm:
+      type: object
+      additionalProperties: false
+      required:
+        - duration
+      properties:
+        duration:
+          type: number
+          minimum: 0
+          description: Seconds.
+        exportedAt:
+          type: string
+          format: date-time
+          description: When the file to download was made; absent before the first export.
+        size:
+          type: integer
+          minimum: 0
+          description: Bytes of that file.
     VideoCutProjectSummary:
       type: object
       additionalProperties: false
       required:
         - id
         - name
-        - assetCount
+        - sample
+        - state
         - createdAt
+        - updatedAt
+        - fileCount
+        - progress
       properties:
         id:
           type: string
           minLength: 1
         name:
           type: string
-        assetCount:
-          type: integer
-          minimum: 0
+        sample:
+          type: boolean
+          description: '示例作品: one for every member, read only, and last in the list.'
+        state:
+          $ref: '#/components/schemas/VideoCutProjectState'
         createdAt:
           type: string
           format: date-time
-        previewAssetIds:
-          type: array
-          maxItems: 6
-          description: Up to six of its videos, spread over the order they were added, for thumbnails.
-          items:
-            type: string
-        chosenVersionId:
+        updatedAt:
           type: string
-          description: 'The version the member chose as the project''s film (#596): the one shown when the project opens.'
-        chosenFilmAssetId:
+          format: date-time
+        fileCount:
+          type: integer
+          minimum: 0
+          maximum: 200
+        progress:
+          $ref: '#/components/schemas/VideoCutProgress'
+        failure:
+          $ref: '#/components/schemas/VideoCutFailure'
+        film:
+          $ref: '#/components/schemas/VideoCutFilm'
+        coverAssetId:
           type: string
-          description: The chosen version's film; the list and the home page show it first.
-    VideoCutProjectPage:
+          description: The video whose frame is the card's cover, once one is uploaded; before that the page shows the first frame it read.
+    VideoCutProjectList:
       type: object
       additionalProperties: false
       required:
@@ -18496,282 +18734,615 @@ components:
       properties:
         items:
           type: array
+          description: The caller's projects, newest first, then the sample.
+          maxItems: 1000
           items:
             $ref: '#/components/schemas/VideoCutProjectSummary'
-        next:
-          type: string
     VideoCutRequestKey:
       type: string
       minLength: 1
       maxLength: 128
       pattern: ^[!-~]+$
       description: 'Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict.'
-    VideoCutAssetIDs:
-      type: array
-      minItems: 1
-      maxItems: 500
-      items:
-        type: string
-        minLength: 1
-        maxLength: 64
-        pattern: ^[!-~]+$
-    VideoCutProjectAsset:
-      type: object
-      additionalProperties: false
-      required:
-        - assetId
-        - status
-        - addedAt
-      properties:
-        assetId:
-          type: string
-        status:
-          type: string
-          enum:
-            - available
-            - trashed
-            - missing
-            - unknown
-          description: 'unknown: the photo library did not answer this time.'
-        duration:
-          type: number
-          minimum: 0
-        takenAt:
-          type: string
-          format: date-time
-        addedAt:
-          type: string
-          format: date-time
-    VideoCutVersion:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - number
-        - jobId
-        - plan
-        - filmAssetId
-        - createdAt
-        - editable
-        - kind
-      properties:
-        id:
-          type: string
-          minLength: 1
-        number:
-          type: integer
-          minimum: 1
-          description: Counts from 1 within the project; the film is named "<project> v<number>.mp4".
-        jobId:
-          type: string
-          description: The job that made it.
-        plan:
-          type: integer
-          minimum: 1
-          description: 'Which of the job''s 方案 it is: a job makes two films to choose from, 方案一 and 方案二.'
-        filmAssetId:
-          type: string
-          description: The film in the caller's photo library; play and download it there.
-        createdAt:
-          type: string
-          format: date-time
-        gone:
-          type: boolean
-          description: The member deleted the film from the photo library.
-        editable:
-          type: boolean
-          description: Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played.
-        kind:
-          type: string
-          enum:
-            - plan
-            - edit
-            - recut
-          description: 'plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.'
-        sourceVersionId:
-          type: string
-          description: The version an edit or a recut came from.
-        sourceNumber:
-          type: integer
-          minimum: 1
-          description: That version's number, while it is recorded.
-        draftRevision:
-          type: integer
-          minimum: 0
-          description: 'An edit: the draft''s revision it was rendered from.'
-        change:
-          type: string
-          description: 'A recut: the member''s sentence, 按“<change>”重剪自第 N 版.'
-    VideoCutJobStep:
+    VideoCutLocalFile:
       type: object
       additionalProperties: false
       required:
         - name
-        - state
+        - size
+        - modifiedAt
+        - read
+      description: 'A file as the browser has it. name, size and modifiedAt together tell it: the same three are the same file, once in the list, and a file chosen again after a reload is matched to its entry by them. The rest is what the browser read from it; the file itself stays in the browser until uploaded.'
       properties:
         name:
           type: string
-          description: 'The shared steps, then each 方案''s: the first 方案''s plain, the second''s with -2. An edit''s are source, fill, render and save.'
-          enum:
-            - analysis
-            - catalog
-            - song
-            - pick
-            - shots
-            - fill
-            - render
-            - save
-            - pick-2
-            - shots-2
-            - fill-2
-            - render-2
-            - save-2
-            - source
-        state:
-          type: string
-          enum:
-            - pending
-            - running
-            - done
-            - queued
-            - waiting
-            - needs_input
-            - failed
-            - cancelled
-          description: A step that stopped with the job shows the job's state.
-        startedAt:
+          minLength: 1
+          maxLength: 255
+        size:
+          type: integer
+          minimum: 1
+          maximum: 4294967296
+          description: Bytes; 4 GB at most.
+        modifiedAt:
           type: string
           format: date-time
-        finishedAt:
+        read:
+          type: boolean
+          description: Whether the browser has read it; the rest is there once it has.
+        duration:
+          type: number
+          minimum: 0
+          description: Seconds.
+        width:
+          type: integer
+          minimum: 1
+          description: As shown, after rotation.
+        height:
+          type: integer
+          minimum: 1
+        takenAt:
           type: string
           format: date-time
-    VideoCutJob:
+          description: When it was shot; the modification time where the file does not say.
+    VideoCutExportFailure:
+      type: object
+      additionalProperties: false
+      required:
+        - reason
+        - retries
+        - at
+      properties:
+        reason:
+          $ref: '#/components/schemas/VideoCutFailureReason'
+        retries:
+          type: integer
+          minimum: 0
+          maximum: 3
+        at:
+          type: string
+          format: date-time
+          description: 'When it failed: the page tells it once, for the failure it has not told yet.'
+    VideoCutSongSource:
+      type: string
+      enum:
+        - builtin
+        - library
+        - imported
+      description: One of the three songs VideoCut has, a track of the member's music library, or a song imported to this project.
+    VideoCutProjectSong:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - id
+        - title
+        - status
+      properties:
+        source:
+          $ref: '#/components/schemas/VideoCutSongSource'
+        id:
+          type: string
+          minLength: 1
+        title:
+          type: string
+        duration:
+          type: number
+          minimum: 0
+          description: Seconds of the whole song.
+        status:
+          type: string
+          enum:
+            - analysing
+            - ready
+            - unusable
+          description: 'unusable: no beats in it. The page says to choose another and chooses the one before again.'
+    VideoCutSettings:
+      type: object
+      additionalProperties: false
+      required:
+        - aspect
+        - style
+      properties:
+        song:
+          $ref: '#/components/schemas/VideoCutProjectSong'
+        aspect:
+          type: string
+          description: An aspect's id from the catalog.
+        style:
+          type: string
+          description: A style's id from the catalog.
+        filmDuration:
+          type: number
+          minimum: 0
+          description: '长度 (M4-3), read only: the song''s verse and chorus, once its analysis is done.'
+    VideoCutProjectFile:
       type: object
       additionalProperties: false
       required:
         - id
-        - projectId
-        - kind
-        - state
-        - steps
-        - createdAt
+        - name
+        - size
+        - modifiedAt
+        - read
+        - selected
+        - starred
+        - upload
+        - analysis
       properties:
         id:
           type: string
           minLength: 1
-        projectId:
+        name:
           type: string
-          minLength: 1
-        kind:
+        size:
+          type: integer
+          minimum: 1
+        modifiedAt:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+        duration:
+          type: number
+          minimum: 0
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        takenAt:
+          type: string
+          format: date-time
+        selected:
+          type: boolean
+          description: '勾选: chosen to be uploaded and made a film of. New files are.'
+        starred:
+          type: boolean
+          description: '星标: the film puts it in. Five at most.'
+        upload:
           type: string
           enum:
-            - generate
-            - edit
-            - recut
-          description: generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
-        state:
-          type: string
-          enum:
-            - queued
-            - running
-            - waiting
-            - needs_input
+            - none
             - done
-            - failed
-            - cancelled
-        step:
+          description: done once its video is in the photo library and the project has it.
+        assetId:
           type: string
-          description: The step the job is at or stopped at.
-        waitReason:
+          description: The photo library's video, once uploaded.
+        analysis:
           type: string
           enum:
-            - analysis
-            - asset_trashed
-            - vnas
-            - asset_missing
-            - analysis_failed
-            - no_usable_footage
-            - music_invalid
-            - vnas_unknown
-            - plan_invalid
-            - plan_error
-            - storage_full
-            - photos_unavailable
-            - video_too_long
-            - model_unavailable
-            - plan_failed
-          description: 'Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for.'
-        error:
-          type: string
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutJobStep'
-        missingAssetIds:
-          type: array
-          description: The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.
-          items:
-            type: string
-        version:
-          $ref: '#/components/schemas/VideoCutVersion'
-          description: The first 方案's film.
-        versions:
-          type: array
-          description: Every 方案's film the job saved, in order.
-          items:
-            $ref: '#/components/schemas/VideoCutVersion'
-        createdAt:
-          type: string
-          format: date-time
-        finishedAt:
-          type: string
-          format: date-time
+            - none
+            - running
+            - done
+            - skipped
     VideoCutProject:
       type: object
       additionalProperties: false
       required:
         - id
         - name
-        - assetCount
+        - sample
+        - state
         - createdAt
-        - ask
-        - chronological
-        - assets
-        - versions
+        - updatedAt
+        - fileCount
+        - progress
+        - settings
+        - files
       properties:
         id:
           type: string
           minLength: 1
         name:
           type: string
-        assetCount:
-          type: integer
-          minimum: 0
+        sample:
+          type: boolean
+        state:
+          $ref: '#/components/schemas/VideoCutProjectState'
         createdAt:
           type: string
           format: date-time
-        ask:
+        updatedAt:
           type: string
-        chronological:
-          type: boolean
-        assets:
+          format: date-time
+        fileCount:
+          type: integer
+          minimum: 0
+          maximum: 200
+        progress:
+          $ref: '#/components/schemas/VideoCutProgress'
+        failure:
+          $ref: '#/components/schemas/VideoCutFailure'
+        exportFailure:
+          $ref: '#/components/schemas/VideoCutExportFailure'
+          description: The last export's failure; the state is ready again.
+        film:
+          $ref: '#/components/schemas/VideoCutFilm'
+        coverAssetId:
+          type: string
+        settings:
+          $ref: '#/components/schemas/VideoCutSettings'
+          description: From uploading on, the snapshot taken when generating was asked for.
+        files:
           type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/VideoCutProjectFile'
+    VideoCutSlotSpan:
+      type: object
+      additionalProperties: false
+      required:
+        - slot
+        - start
+        - end
+      properties:
+        slot:
+          type: integer
+          minimum: 1
+          description: From 1 over the whole film.
+        start:
+          type: number
+          minimum: 0
+          description: Seconds into the film.
+        end:
+          type: number
+          minimum: 0
+    VideoCutPart:
+      type: object
+      additionalProperties: false
+      required:
+        - index
+        - label
+        - start
+        - end
+        - slots
+      properties:
+        index:
+          type: integer
+          minimum: 1
+        label:
+          type: string
+          description: '前奏, 主歌, 副歌, 尾奏: the song''s section.'
+        start:
+          type: number
+          minimum: 0
+          description: Seconds into the film.
+        end:
+          type: number
+          minimum: 0
+        slots:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/VideoCutSlotSpan'
+    VideoCutSongStructure:
+      type: object
+      additionalProperties: false
+      required:
+        - song
+        - from
+        - to
+        - parts
+      description: 'The film''s parts and slots as the song makes them, known before the timeline is: the tracks of 生成中 draw them.'
+      properties:
+        song:
+          $ref: '#/components/schemas/VideoCutProjectSong'
+        from:
+          type: number
+          minimum: 0
+          description: Seconds into the song the film starts at.
+        to:
+          type: number
+          minimum: 0
+        parts:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/VideoCutPart'
+    VideoCutProjectAsset:
+      type: object
+      additionalProperties: false
+      required:
+        - assetId
+        - analysis
+        - addedAt
+      properties:
+        assetId:
+          type: string
+        fileId:
+          type: string
+          description: The file of the list it was uploaded from; absent for one added on the film page.
+        analysis:
+          type: string
+          enum:
+            - running
+            - done
+            - skipped
+        duration:
+          type: number
+          minimum: 0
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        takenAt:
+          type: string
+          format: date-time
+        addedAt:
+          type: string
+          format: date-time
+    VideoCutProjectAssets:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          maxItems: 1000
           items:
             $ref: '#/components/schemas/VideoCutProjectAsset'
-        versions:
+    VideoCutShot:
+      type: object
+      additionalProperties: false
+      required:
+        - slot
+        - part
+        - start
+        - end
+        - beat
+        - assetId
+        - from
+        - to
+        - speed
+        - anchor
+        - fitted
+      properties:
+        slot:
+          type: integer
+          minimum: 1
+        part:
+          type: integer
+          minimum: 1
+        start:
+          type: number
+          minimum: 0
+          description: Seconds into the film; the slot's.
+        end:
+          type: number
+          minimum: 0
+        beat:
+          type: string
+          description: The beat in the slot.
+        assetId:
+          type: string
+          description: The video it comes from.
+        from:
+          type: number
+          minimum: 0
+          description: Seconds into the video it plays from.
+        to:
+          type: number
+          minimum: 0
+        speed:
+          type: number
+          minimum: 0.5
+          maximum: 1
+          description: Below 1 where the beat is slowed to fill the slot.
+        anchor:
+          type: boolean
+          description: '锚点: changed by the member, so automatic changes leave it.'
+        fitted:
+          type: boolean
+          description: 'Its video''s orientation is not the film''s: shown in the middle on a blurred fill.'
+        takenAt:
+          type: string
+          format: date-time
+    VideoCutTimeline:
+      type: object
+      additionalProperties: false
+      required:
+        - revision
+        - duration
+        - parts
+        - shots
+        - canUndo
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: Every edit names the revision it was made on.
+        duration:
+          type: number
+          minimum: 0
+        parts:
           type: array
-          description: The films saved, newest first.
+          minItems: 1
           items:
-            $ref: '#/components/schemas/VideoCutVersion'
-        job:
-          $ref: '#/components/schemas/VideoCutJob'
-          description: The project's latest job, for the page to pick up where it was after a reload.
-        chosenVersionId:
+            $ref: '#/components/schemas/VideoCutPart'
+        shots:
+          type: array
+          minItems: 1
+          description: One a slot, in order.
+          items:
+            $ref: '#/components/schemas/VideoCutShot'
+        canUndo:
+          type: boolean
+          description: One step back, in this opening of the project only.
+        changedSlots:
+          type: array
+          description: 'The slots the last edit or undo changed: the preview plays again from the first.'
+          items:
+            type: integer
+            minimum: 1
+    VideoCutEdit:
+      description: One edit of the timeline, by music slot (docs/specs/venus.md#镜头操作).
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+            - slot
+            - beat
+          description: Replace the slot's beat with a candidate or a search result (M7-1, M8-2, M8-3).
+          properties:
+            kind:
+              const: replace
+            slot:
+              type: integer
+              minimum: 1
+            beat:
+              type: string
+              minLength: 1
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+            - slot
+          description: 'Delete the shot: its slot takes the next candidate (M7-3).'
+          properties:
+            kind:
+              const: remove
+            slot:
+              type: integer
+              minimum: 1
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+            - slot
+            - from
+          description: Play the same video from another time (M7-2).
+          properties:
+            kind:
+              const: set_in_point
+            slot:
+              type: integer
+              minimum: 1
+            from:
+              type: number
+              minimum: 0
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+            - from
+            - to
+          description: Move a part's shots to another part's place (M6-3); the slots stay.
+          properties:
+            kind:
+              const: reorder_parts
+            from:
+              type: integer
+              minimum: 1
+            to:
+              type: integer
+              minimum: 1
+        - type: object
+          additionalProperties: false
+          required:
+            - kind
+            - slot
+            - assetId
+          description: Put one of the project's analysed videos in the slot (M7-4).
+          properties:
+            kind:
+              const: place
+            slot:
+              type: integer
+              minimum: 1
+            assetId:
+              type: string
+              minLength: 1
+    VideoCutCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - beat
+        - assetId
+        - from
+        - to
+        - duration
+        - fitted
+      properties:
+        beat:
           type: string
-          description: The version the member chose as the project's film; the other versions stay and can be chosen instead.
-        chosenFilmAssetId:
+        assetId:
           type: string
-          description: The chosen version's film.
+        from:
+          type: number
+          minimum: 0
+          description: The part of its video it would play.
+        to:
+          type: number
+          minimum: 0
+        duration:
+          type: number
+          minimum: 0
+        fitted:
+          type: boolean
+        takenAt:
+          type: string
+          format: date-time
+    VideoCutCandidates:
+      type: object
+      additionalProperties: false
+      required:
+        - slot
+        - items
+      properties:
+        slot:
+          type: integer
+          minimum: 1
+        items:
+          type: array
+          maxItems: 6
+          description: Best first; the beat a replace took out comes first.
+          items:
+            $ref: '#/components/schemas/VideoCutCandidate'
+    VideoCutAssistantStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - search
+      properties:
+        search:
+          type: boolean
+          description: Whether searching the member's videos works now; the page turns its box off while it does not.
+    VideoCutAssistantReply:
+      type: object
+      additionalProperties: false
+      required:
+        - text
+        - groups
+      properties:
+        text:
+          type: string
+          description: What the assistant says back.
+        groups:
+          type: array
+          description: Beats it found, by what they answer; empty for a reply in words only.
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - title
+              - items
+            properties:
+              title:
+                type: string
+              slot:
+                type: integer
+                minimum: 1
+                description: The slot they are for, where the member asked about one.
+              items:
+                type: array
+                maxItems: 12
+                items:
+                  $ref: '#/components/schemas/VideoCutCandidate'
     VideoCutNotice:
       type: object
       additionalProperties: false
@@ -18819,554 +19390,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VideoCutNotice'
-    VideoCutSongSection:
-      type: object
-      additionalProperties: false
-      required:
-        - start
-        - end
-        - label
-      properties:
-        start:
-          type: number
-          minimum: 0
-        end:
-          type: number
-          minimum: 0
-        label:
-          type: string
-          enum:
-            - start
-            - end
-            - intro
-            - outro
-            - break
-            - bridge
-            - inst
-            - solo
-            - verse
-            - chorus
-          description: allin1's label.
-    VideoCutSongPart:
-      type: object
-      additionalProperties: false
-      required:
-        - start
-        - end
-        - level
-        - label
-        - slots
-      properties:
-        start:
-          type: number
-          minimum: 0
-          description: Seconds from the excerpt's start.
-        end:
-          type: number
-          minimum: 0
-        level:
-          type: string
-          enum:
-            - 安静
-            - 中等
-            - 高潮
-          description: 'The part''s level in the film: quiet, middle or climax.'
-        label:
-          type: string
-        allin1:
-          type: string
-          description: 'allin1''s own label when the part was relabelled: a chorus quieter than the section after it is the build to it.'
-        slots:
-          type: array
-          items:
-            type: array
-            minItems: 2
-            maxItems: 2
-            items:
-              type: number
-              minimum: 0
-          description: The shots' slots, cut on the bar lines, in seconds from the excerpt's start.
-    VideoCutSongSelection:
-      type: object
-      additionalProperties: false
-      required:
-        - tempo
-        - bar
-        - excerpt
-        - seconds
-        - parts
-        - chorus
-      properties:
-        tempo:
-          type: number
-        bar:
-          type: number
-          minimum: 0
-        excerpt:
-          type: array
-          minItems: 2
-          maxItems: 2
-          items:
-            type: number
-            minimum: 0
-          description: Its start and end in the song, in seconds. The film starts there and lasts as long.
-        seconds:
-          type: number
-          minimum: 0
-        parts:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutSongPart'
-        chorus:
-          type: boolean
-          description: 'false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen.'
-    VideoCutSong:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - title
-        - duration
-        - transcode
-        - state
-      properties:
-        id:
-          type: string
-          minLength: 1
-        trackId:
-          type: string
-          description: 'The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title.'
-        title:
-          type: string
-        duration:
-          type: number
-          minimum: 0
-        transcode:
-          type: boolean
-          description: 'Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range.'
-        state:
-          type: string
-          enum:
-            - analyzing
-            - ready
-            - unusable
-        reason:
-          type: string
-          enum:
-            - undecodable
-            - few_bars
-            - no_excerpt
-            - long_slot
-            - analysis_failed
-          description: 'Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.'
-        waiting:
-          type: string
-          enum:
-            - analyzer_unavailable
-            - compute_unavailable
-            - media_unavailable
-          description: What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
-        tempo:
-          type: number
-        beats:
-          type: array
-          items:
-            type: number
-            minimum: 0
-        downbeats:
-          type: array
-          items:
-            type: number
-            minimum: 0
-        sections:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutSongSection'
-        defaultStart:
-          type: number
-          minimum: 0
-          description: 'Where the eighth version''s rule starts the excerpt: around the first chorus.'
-        selection:
-          $ref: '#/components/schemas/VideoCutSongSelection'
-    VideoCutFilmPlan:
-      type: object
-      additionalProperties: false
-      required:
-        - design
-        - opening
-        - ending
-      description: The first step of the plan a version was cut by.
-      properties:
-        design:
-          type: string
-        opening:
-          type: string
-        ending:
-          type: string
-    VideoCutFilmPart:
-      type: object
-      additionalProperties: false
-      required:
-        - number
-        - name
-        - summary
-        - level
-        - label
-        - start
-        - end
-      description: A part of the music and of the plan.
-      properties:
-        number:
-          type: integer
-          minimum: 1
-        name:
-          type: string
-        summary:
-          type: string
-        level:
-          type: string
-          description: 'The music part''s strength, from the song''s analysis: 安静, 中等 or 高潮.'
-        label:
-          type: string
-          description: The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫.
-        start:
-          type: number
-          minimum: 0
-        end:
-          type: number
-          minimum: 0
-    VideoCutDraftShot:
-      type: object
-      additionalProperties: false
-      required:
-        - number
-        - beat
-        - assetId
-        - part
-        - picture
-        - slots
-        - start
-        - end
-        - from
-        - to
-        - query
-        - shotSize
-        - what
-        - locked
-        - changed
-        - extended
-        - portrait
-      properties:
-        number:
-          type: integer
-          minimum: 1
-        beat:
-          type: string
-          description: 'card/n: the beat that leads the shot.'
-        assetId:
-          type: string
-          description: The video it comes from.
-        part:
-          type: integer
-          minimum: 1
-        picture:
-          type: integer
-          minimum: 1
-        slots:
-          type: array
-          minItems: 1
-          description: The music's slots it covers, from 1; more than one where it took a deleted shot's.
-          items:
-            type: integer
-            minimum: 1
-        start:
-          type: number
-          minimum: 0
-          description: Seconds into the film.
-        end:
-          type: number
-          minimum: 0
-        from:
-          type: number
-          minimum: 0
-          description: 'Seconds into its video the rough preview plays from: where the version had it, or the beat''s piece.'
-        to:
-          type: number
-          minimum: 0
-        query:
-          type: string
-          description: 'What the plan asked of its picture: 规划要.'
-        shotSize:
-          type: string
-        what:
-          type: string
-        locked:
-          type: boolean
-        changed:
-          type: boolean
-          description: '已换: not a beat the version had in these slots.'
-        extended:
-          type: boolean
-          description: '延长: it took a deleted shot''s slots.'
-        portrait:
-          type: boolean
-          description: '竖: its video is narrower than 16:9 and is shown on a blurred background.'
-    VideoCutFilmCounts:
-      type: object
-      additionalProperties: false
-      required:
-        - shots
-        - videos
-        - portrait
-      description: A film's shots, the videos they come from, and how many of those are 竖.
-      properties:
-        shots:
-          type: integer
-          minimum: 0
-        videos:
-          type: integer
-          minimum: 0
-        portrait:
-          type: integer
-          minimum: 0
-    VideoCutVersionOutline:
-      type: object
-      additionalProperties: false
-      required:
-        - versionId
-        - projectId
-        - versionNumber
-        - seconds
-        - plan
-        - parts
-        - shots
-        - counts
-        - unmet
-      description: 'A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here.'
-      properties:
-        versionId:
-          type: string
-        projectId:
-          type: string
-        versionNumber:
-          type: integer
-          minimum: 1
-        seconds:
-          type: number
-          minimum: 0
-          description: How long the film is.
-        plan:
-          $ref: '#/components/schemas/VideoCutFilmPlan'
-        parts:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutFilmPart'
-        shots:
-          type: array
-          description: The film's shots, none of them changed, extended or locked.
-          items:
-            $ref: '#/components/schemas/VideoCutDraftShot'
-        counts:
-          $ref: '#/components/schemas/VideoCutFilmCounts'
-        unmet:
-          type: array
-          description: What the plan found the videos do not have, as the planner wrote it.
-          items:
-            type: string
-    VideoCutDraft:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - versionId
-        - projectId
-        - versionNumber
-        - revision
-        - canUndo
-        - songStart
-        - songTranscode
-        - seconds
-        - plan
-        - parts
-        - shots
-        - counts
-        - updatedAt
-      properties:
-        id:
-          type: string
-          minLength: 1
-        versionId:
-          type: string
-        projectId:
-          type: string
-        versionNumber:
-          type: integer
-          minimum: 1
-        revision:
-          type: integer
-          minimum: 0
-          description: A step is made on this revision (baseRevision).
-        canUndo:
-          type: boolean
-        songStart:
-          type: number
-          minimum: 0
-          description: Where the version's excerpt starts in its song, in seconds.
-        songTranscode:
-          type: boolean
-          description: 'The draft''s song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does.'
-        seconds:
-          type: number
-          minimum: 0
-          description: How long the film is.
-        plan:
-          $ref: '#/components/schemas/VideoCutFilmPlan'
-        parts:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutFilmPart'
-        shots:
-          type: array
-          items:
-            $ref: '#/components/schemas/VideoCutDraftShot'
-        counts:
-          $ref: '#/components/schemas/VideoCutFilmCounts'
-        message:
-          type: string
-          description: 'What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上.'
-        updatedAt:
-          type: string
-          format: date-time
-    VideoCutDraftOp:
-      type: object
-      additionalProperties: false
-      required:
-        - type
-      description: One step of an edit (ADR 0039, decision 2; docs/architecture/videocut-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred.
-      properties:
-        type:
-          type: string
-          enum:
-            - replace
-            - move
-            - delete
-            - lock
-            - unlock
-            - shuffle
-            - revert
-            - reset
-            - undo
-        shot:
-          type: integer
-          minimum: 1
-          description: 'The shot''s number, from 1: replace, move, delete, lock, unlock, revert.'
-        to:
-          type: integer
-          minimum: 1
-          description: 'move: the shot whose place it takes.'
-        beat:
-          type: string
-          minLength: 1
-          maxLength: 140
-          description: 'replace: the beat, card/n, as a candidate names it.'
-        seed:
-          type: integer
-          minimum: 0
-          description: 'shuffle: the same seed on the same draft picks the same beats.'
-    VideoCutCandidate:
-      type: object
-      additionalProperties: false
-      required:
-        - beat
-        - assetId
-        - from
-        - to
-        - shotSize
-        - what
-        - scene
-        - portrait
-        - fits
-      properties:
-        beat:
-          type: string
-        assetId:
-          type: string
-        from:
-          type: number
-          minimum: 0
-          description: The part of its video a try plays, in seconds.
-        to:
-          type: number
-          minimum: 0
-        shotSize:
-          type: string
-        what:
-          type: string
-        scene:
-          type: string
-        portrait:
-          type: boolean
-        fits:
-          type: boolean
-          description: Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen.
-        usedBy:
-          type: integer
-          minimum: 1
-          description: '已用在第 N 镜: the shot that has it; it cannot be chosen.'
-        score:
-          type: number
-          description: How alike the search found it; only to order by.
-        takenAt:
-          type: string
-          format: date-time
-    VideoCutCandidates:
-      type: object
-      additionalProperties: false
-      required:
-        - shot
-        - query
-        - sameCard
-        - planned
-        - results
-        - scenes
-      properties:
-        shot:
-          type: integer
-          minimum: 1
-        query:
-          type: string
-          description: The picture's description, which the search box starts with.
-        sameCard:
-          type: array
-          description: The other beats of the shot's card.
-          items:
-            $ref: '#/components/schemas/VideoCutCandidate'
-        planned:
-          type: array
-          description: The plan's spare beats for its picture.
-          items:
-            $ref: '#/components/schemas/VideoCutCandidate'
-        results:
-          type: array
-          description: With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape.
-          items:
-            $ref: '#/components/schemas/VideoCutCandidate'
-        scenes:
-          type: array
-          maxItems: 9
-          description: 'The scenes the cards were described in, most cards first: eight, and the rest as 其他.'
-          items:
-            type: object
-            additionalProperties: false
-            required:
-              - scene
-              - cards
-            properties:
-              scene:
-                type: string
-              cards:
-                type: integer
-                minimum: 1
     ScoringDimensionID:
       type: string
       pattern: ^(overall|composition|light_color|quality|emotion|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$

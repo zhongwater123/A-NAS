@@ -124,6 +124,26 @@
           }
         ]
       }
+    },
+    {
+      // 剪辑中心's pages and components (#690): they get what they show from app/, which alone calls an api/ folder.
+      // As for lib/ above, every relative path into an api/ folder, videocut's or the site-wide src/api/, is held to
+      // types.
+      "files": ["src/videocut/screens/**", "src/videocut/ui/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "regex": "^(\\.\\.?/)+(videocut/)?api(/.*)?$",
+                "allowTypeImports": true,
+                "message": "videocut/screens/ and videocut/ui/ call no api/ folder: use a hook of videocut/app/."
+              }
+            ]
+          }
+        ]
+      }
     }
   ],
   "ignorePatterns": ["src/assistant/hermes/**", "src/companion/dsh-pet/**", "src/*.generated.ts"]

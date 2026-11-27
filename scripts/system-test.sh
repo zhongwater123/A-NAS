@@ -1081,9 +1081,12 @@ systemctl restart anas-api
 for _ in $(seq 1 50); do curl -fsS "$api/healthz" >/dev/null 2>&1 && break; sleep 0.2; done
 check "with its switch on the desktop is told VideoCut is there" \
   test "$(status_of -b /tmp/alice.jar "$api/api/v1/videocut")" = 204
-check "a member lists her VideoCut projects through the VideoCut service" \
-  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -c .)" = '{"items":[]}'
-check "without a session VideoCut answers 401" test "$(status_of "$api/api/v1/videocut/projects")" = 401
+check "a member reads her VideoCut notices through the VideoCut service" \
+  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/notices" | jq -c .)" = '{"items":[]}'
+check "without a session VideoCut answers 401" test "$(status_of "$api/api/v1/videocut/notices")" = 401
+# Venus's operations answer 501 until VideoCut serves them (#694).
+check "Venus's projects are not served yet" \
+  test "$(curl -s -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -r .error.code)" = not_implemented
 cat > /usr/local/lib/anas-videocut-probe.py <<'PY'
 import socket, sys
 leaks = []
@@ -1178,7 +1181,7 @@ check "the data volume remounts read-only" mount -o remount,ro "$data"
 systemctl start anas-videocut
 videocut_unavailable() {
   for _ in $(seq 1 50); do
-    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/videocut/projects" | jq -r .error.code)" == videocut_unavailable ]] && return 0
+    [[ "$(curl -s -b /tmp/alice.jar "$api/api/v1/videocut/notices" | jq -r .error.code)" == videocut_unavailable ]] && return 0
     sleep 0.2
   done
   return 1
@@ -1221,7 +1224,7 @@ check "and reports nothing wrong" \
   bash -c "curl -fsS --unix-socket /run/a-nas/host-agent.sock http://host-agent/v1/state | jq -e '.reconcileFailed != true' >/dev/null"
 check "sharing recovers on the writable volume" shares_ready
 check "VideoCut recovers on the writable volume" \
-  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/videocut/projects') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
+  bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/alice.jar '$api/api/v1/videocut/notices') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 check "the shared workspace recovers on the writable volume" \
   bash -c "for _ in \$(seq 1 50); do [[ \$(curl -s -o /dev/null -w '%{http_code}' -b /tmp/owner.jar '$api/api/v1/workspace/pages') == 200 ]] && exit 0; sleep 0.2; done; exit 1"
 
@@ -1572,40 +1575,13 @@ check "the compute worker answers the next connection after it is killed" \
 check "systemd replaced the compute worker" \
   test "$(systemctl show -p MainPID --value anas-videocut-compute.service)" != "$compute_pid"
 
-# --- VideoCut projects (ADR 0038): a project holds the videos its member
-# handed over, through a grant; another member cannot see it, and deleting
-# it leaves the videos in the photo library.
+# --- A video of hers, for VideoCut's songs and planning below. VideoCut's
+# projects and their photo-library grants (ADR 0038) are checked again once
+# Venus serves projects (#694): until then its routes answer 501.
 ffmpeg -hide_banner -loglevel error -y -f lavfi -i testsrc2=size=320x240:rate=25:duration=2 -c:v libx264 -pix_fmt yuv420p /tmp/clip.mp4
 clip=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -F file=@/tmp/clip.mp4 \
   "$api/api/v1/photos/libraries/$alice_library/uploads" | jq -r .id || true)
-project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-  -d "{\"requestKey\":\"system-test\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
-check "a member makes a VideoCut project of her video" test -n "$clip" -a -n "$project" -a "$project" != null
-# The grant socket lists the grants not revoked; a revoked one is gone.
-project_grant_listed() {
-  local grants
-  grants=$(setpriv --reuid=a-nas-videocut --regid=a-nas-videocut --clear-groups python3 /usr/local/lib/photo-grants.py) || return 2
-  grep -qF "'projectId': '$project'" <<<"$grants"
-}
-check "the photo library holds the project's grant" project_grant_listed
-check "another member's project is not found" \
-  test "$(status_of -b /tmp/owner.jar "$api/api/v1/videocut/projects/$project")" = 404
-check "deleting the project answers 204" \
-  test "$(status_of -X DELETE -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" "$api/api/v1/videocut/projects/$project")" = 204
-check "the video stays in the photo library" \
-  test "$(status_of -b /tmp/alice.jar "$api/api/v1/photos/assets/$clip")" = 200
-# The VideoCut service revokes it right after answering the deletion.
-project_grant_revoked() {
-  local _ listed
-  for _ in $(seq 1 50); do
-    listed=0
-    project_grant_listed || listed=$?
-    [[ $listed == 1 ]] && return 0
-    sleep 0.2
-  done
-  return 1
-}
-check "and the project's grant is revoked" project_grant_revoked
+check "a member uploads a video" test -n "$clip" -a "$clip" != null
 
 # --- Family center (ADR 0029): its own identity and store; it asks the photo
 # service about a channel's photos with the reader's session.
@@ -2436,8 +2412,9 @@ check "the FFmpeg worker decodes the song to FLAC from a start position" bash -c
   "curl -s --max-time 60 -b /tmp/alice.jar '$api/api/v1/music/tracks/$(jq -r .id <<<"${song:-null}" 2>/dev/null)/stream?start=1' | head -c 4 | grep -aq fLaC"
 # --- VideoCut songs (#559): a member chooses a song for a project from her
 # music library; the Product Service opens it through the File Broker as her
-# and the VideoCut service keeps a copy of its own. allin1 is not installed
-# here, so the analysis waits for it.
+# and streams it to the VideoCut service. Until Venus serves projects (#694)
+# VideoCut answers 501, so only what the Product Service answers itself is
+# checked: the copy, its analysis and its deletion come back with Venus.
 for who in alice owner; do
   ffmpeg -hide_banner -loglevel error -y -f lavfi -i sine=frequency=330:duration=40 -c:a libmp3lame \
     -metadata title="Song of $who" "/tmp/$who-song.mp3"
@@ -2456,8 +2433,7 @@ track_of() { # JAR CSRF TITLE -> the track's ID once the library is scanned
 }
 alice_track=$(track_of /tmp/alice.jar "$alice_csrf" "Song of alice" || true)
 owner_track=$(track_of /tmp/owner.jar "$owner_csrf" "Song of owner" || true)
-song_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \
-  -d "{\"requestKey\":\"system-test-song\",\"assetIds\":[\"$clip\"]}" "$api/api/v1/videocut/projects" | jq -r .id || true)
+song_project=project:system-test
 put_song() { # JAR CSRF TRACK -> status
   status_of -X PUT -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d "{\"trackId\":\"$3\"}" \
     "$api/api/v1/videocut/projects/$song_project/song"
@@ -2467,16 +2443,8 @@ put_song() { # JAR CSRF TRACK -> status
 check "the owner plays his own song by its track ID" \
   test "$(status_of --max-time 60 -b /tmp/owner.jar "$api/api/v1/music/tracks/$owner_track/stream")" = 200
 check "another member's song cannot be copied into her project" test "$(put_song /tmp/alice.jar "$alice_csrf" "$owner_track")" = 404
-check "a member copies her own song into VideoCut" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 200
-check "the copy is the VideoCut service's alone, named by its content" \
-  bash -c "test \"\$(stat -c '%a %U' $data/videocut/songs/*/audio)\" = '600 a-nas-videocut' && cmp -s /tmp/alice-song.mp3 $data/videocut/songs/*/audio"
-check "the song waits for allin1, which is not installed" \
-  test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/projects/$song_project/song" | jq -r .state)" = analyzing
-check "she listens to the copy with Range" \
-  test "$(status_of -b /tmp/alice.jar -H 'Range: bytes=0-2' "$api/api/v1/videocut/projects/$song_project/song/audio")" = 206
+check "her own song reaches VideoCut, which does not take it yet" test "$(put_song /tmp/alice.jar "$alice_csrf" "$alice_track")" = 501
 check "the VideoCut account cannot read her space" denied a-nas-videocut ls "$data/spaces/private/alice"
-check "deleting the project removes the copy no project uses" \
-  bash -c "[[ \$(curl -s -o /dev/null -w '%{http_code}' -X DELETE -b /tmp/alice.jar -H 'X-CSRF-Token: $alice_csrf' '$api/api/v1/videocut/projects/$song_project') == 204 ]] && ! compgen -G '$data/videocut/songs/*/audio' >/dev/null"
 
 # A probe in the FFmpeg worker's own unit, in place of the worker.
 cat > /usr/local/lib/anas-ffmpeg-probe.py <<'PY'

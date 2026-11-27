@@ -900,11 +900,12 @@ func TestNoticesTellWaitingFromPlanning(t *testing.T) {
 // through the proxy, which drops whatever a browser sent under that name.
 func TestAPlanningGrantIsNotedOnlyOnTheProductServicesWord(t *testing.T) {
 	env := newPlanEnv(t)
-	job := env.generate(t, "generate:1")
 	api := serviceproxy.Local(protocol.New(env.store, nil))
+	// Generating answers 501 until Venus's generating is served (#694),
+	// having noted the grant.
 	replan := func(said string, browser bool) {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodPost, protocol.PathPrefix+"/jobs/"+job.ID+"/replan", nil)
+		request := httptest.NewRequest(http.MethodPost, protocol.PathPrefix+"/projects/project:1/generate", nil)
 		ctx := accounts.WithUser(request.Context(), accounts.User{ID: "user:alice", Username: "alice"})
 		if browser {
 			request.Header.Set(protocol.AssistantHeader, said)
@@ -913,9 +914,8 @@ func TestAPlanningGrantIsNotedOnlyOnTheProductServicesWord(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 		api.ServeHTTP(recorder, request.WithContext(ctx))
-		// The job is queued, which planning again does not apply to.
-		if recorder.Code != http.StatusConflict {
-			t.Fatalf("replan answered %d %s", recorder.Code, recorder.Body)
+		if recorder.Code != http.StatusNotImplemented {
+			t.Fatalf("generate answered %d %s", recorder.Code, recorder.Body)
 		}
 	}
 	noted := func() int {

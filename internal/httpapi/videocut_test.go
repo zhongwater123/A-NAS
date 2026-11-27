@@ -3,7 +3,6 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
@@ -30,6 +28,19 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/videocut/protocol"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
+
+// songMedia stands in for the media worker as VideoCut uses it:
+// every file is two minutes of audio.
+type songMedia struct{}
+
+func (songMedia) Probe(context.Context, *os.File) (ffmpegworker.Probe, error) {
+	return ffmpegworker.Probe{Format: ffmpegworker.ProbeFormat{Name: "mp3", Duration: 120},
+		Streams: []ffmpegworker.ProbeStream{{Type: "audio", Codec: "mp3"}}}, nil
+}
+
+func (songMedia) Audio(_ context.Context, _ *os.File, request ffmpegworker.AudioRequest) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(make([]byte, 4*request.Channels*16))), nil
+}
 
 // shortVideos reads every file as a short video.
 type shortVideos struct{}
@@ -48,14 +59,6 @@ func (shortVideos) Frame(context.Context, *os.File, float64, int) ([]byte, error
 }
 func (shortVideos) Stream(context.Context, *os.File, ffmpegworker.StreamRequest) (io.ReadCloser, error) {
 	return nil, ffmpegworker.ErrUnreadable
-}
-
-func shortVideo(seed byte) []byte {
-	b := make([]byte, 600)
-	binary.BigEndian.PutUint32(b, 24)
-	copy(b[4:], "ftypisom")
-	b[len(b)-1] = seed
-	return b
 }
 
 // TestVideoCutCenterKeepsToTheContract drives 剪辑中心 through the Product
@@ -110,140 +113,32 @@ func TestVideoCutCenterKeepsToTheContract(t *testing.T) {
 	if served != 0 {
 		t.Fatal("VideoCut was asked whether it is on")
 	}
-	response := owner.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusOK)
-	if body := strings.TrimSpace(response.Body.String()); body != `{"items":[]}` {
-		t.Fatalf("projects = %s", body)
-	}
 	anonymous := &contractClient{t: t, handler: handler}
 	anonymous.do(http.MethodGet, "/api/v1/videocut", "", nil, http.StatusUnauthorized)
 	anonymous.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusUnauthorized)
 
-	// The owner's two videos, in the private library.
-	var me struct {
-		User struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-		} `json:"user"`
-	}
-	decode(t, owner.do(http.MethodGet, "/api/v1/session", "", nil, http.StatusOK).Body, &me)
-	principal := photos.Principal{UserID: me.User.ID, Username: me.User.Username}
-	libraries, err := photoService.Libraries(t.Context(), principal)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var videos []string
-	for _, lib := range libraries {
-		if lib.OwnerUserID != principal.UserID {
-			continue
-		}
-		for seed := range byte(2) {
-			asset, err := photoService.Import(t.Context(), principal, photos.ImportRequest{LibraryID: lib.ID, Name: "clip.mp4", Content: bytes.NewReader(shortVideo(seed))})
-			if err != nil {
-				t.Fatal(err)
-			}
-			videos = append(videos, asset.ID)
-		}
-	}
-
-	var project domain.ProjectDetail
-	decode(t, owner.do(http.MethodPost, "/api/v1/videocut/projects",
-		`{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusCreated).Body, &project)
-	owner.do(http.MethodPost, "/api/v1/videocut/projects", `{"requestKey":"k1","name":"海边","assetIds":["`+videos[0]+`"]}`, nil, http.StatusOK)
-	bob.do(http.MethodPost, "/api/v1/videocut/projects", `{"requestKey":"k1","assetIds":["`+videos[0]+`"]}`, nil, http.StatusUnprocessableEntity)
-	path := "/api/v1/videocut/projects/" + project.ID
-	bob.do(http.MethodGet, path, "", nil, http.StatusNotFound)
-	owner.do(http.MethodPost, path+"/assets", `{"requestKey":"k3","assetIds":["`+videos[1]+`"]}`, nil, http.StatusOK)
-	owner.do(http.MethodPatch, path, `{"name":"海边一日","chronological":false}`, nil, http.StatusOK)
-	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &project)
-	if project.Name != "海边一日" || project.Chronological || project.AssetCount != 2 || project.Assets[1].Status != app.AssetAvailable {
-		t.Fatalf("project = %+v", project)
-	}
-	var page domain.ProjectPage
-	decode(t, owner.do(http.MethodGet, "/api/v1/videocut/projects", "", nil, http.StatusOK).Body, &page)
-	if len(page.Items) != 1 || page.Items[0].AssetCount != 2 {
-		t.Fatalf("projects = %+v", page)
-	}
-
-	if response := owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusNotFound); !strings.Contains(response.Body.String(), `"no_song"`) {
-		t.Fatalf("generate without a song: %s", response.Body.String())
-	}
-	if _, err := videoCutStore.PutSong(t.Context(), principal.UserID, project.ID, domain.SongSource{TrackID: "track:1", Title: "test", ContentType: "audio/mpeg"}, bytes.NewReader(silentMP3("test", 4600))); err != nil {
-		t.Fatal(err)
-	}
-
-	// A film: 202 and the job to poll; one job at a time.
-	var job domain.Job
-	decode(t, owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted).Body, &job)
-	if job.State != app.JobQueued || len(job.Steps) != 3+5*app.DefaultPlans {
-		t.Fatalf("job = %+v", job)
-	}
-	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g1"}`, nil, http.StatusAccepted)
-	owner.do(http.MethodPost, path+"/generate", `{"requestKey":"g2"}`, nil, http.StatusConflict)
-	bob.do(http.MethodPost, path+"/generate", `{"requestKey":"g3"}`, nil, http.StatusNotFound)
-	jobPath := "/api/v1/videocut/jobs/" + job.ID
-	// The requests that may lead to planning registered a grant behind the
-	// member's session first. While the broker cannot register one they
-	// answer assistant_unavailable, and VideoCut is not asked.
-	if grants.registered == 0 {
-		t.Fatal("generating registered no planning grant")
-	}
+	// Venus's operations answer 501 until VideoCut serves them (#694); the
+	// Web answers them from its MSW stand-ins meanwhile. The requests that may
+	// lead to planning still register a grant behind the member's session
+	// first: while the broker cannot register one they answer
+	// assistant_unavailable, and VideoCut is not asked.
 	grants.err = errors.New("the File Broker is restarting")
 	before := served
-	for route, body := range map[string]string{
-		path + "/generate": `{"requestKey":"g4"}`, jobPath + "/replan": "", jobPath + "/retry-analysis": "",
-		jobPath + "/drop-assets":                    `{"assetIds":["` + videos[1] + `"]}`,
-		"/api/v1/videocut/versions/version:x/recut": `{"requestKey":"r1","change":"结尾留长一点"}`,
-	} {
-		response := owner.do(http.MethodPost, route, body, nil, http.StatusServiceUnavailable)
+	for _, route := range []string{"/api/v1/videocut/projects/project:x/generate", "/api/v1/videocut/projects/project:x/retry"} {
+		response := owner.do(http.MethodPost, route, `{"requestKey":"g1"}`, nil, http.StatusServiceUnavailable)
 		if !strings.Contains(response.Body.String(), `"assistant_unavailable"`) {
 			t.Fatalf("%s without a planning grant: %s", route, response.Body.String())
 		}
 	}
-	if served != before {
+	if served != before || grants.registered != 0 {
 		t.Fatal("a request whose planning grant was not registered reached VideoCut")
 	}
-	grants.err = nil
-	owner.do(http.MethodPost, jobPath+"/replan", "", nil, http.StatusConflict)
-	bob.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
-	owner.do(http.MethodGet, jobPath, "", nil, http.StatusOK)
-	var withJob domain.ProjectDetail
-	decode(t, owner.do(http.MethodGet, path, "", nil, http.StatusOK).Body, &withJob)
-	if withJob.Job == nil || withJob.Job.ID != job.ID {
-		t.Fatalf("the project's job = %+v", withJob.Job)
-	}
-	owner.do(http.MethodPost, jobPath+"/retry", "", nil, http.StatusConflict)
-	owner.do(http.MethodPost, jobPath+"/drop-assets", `{"assetIds":["`+videos[1]+`"]}`, nil, http.StatusConflict)
 	var notices struct {
 		Items []domain.Notice `json:"items"`
 	}
-	decode(t, owner.do(http.MethodGet, "/api/v1/videocut/notices", "", nil, http.StatusOK).Body, &notices)
+	decode(t, bob.do(http.MethodGet, "/api/v1/videocut/notices", "", nil, http.StatusOK).Body, &notices)
 	if len(notices.Items) != 0 {
-		t.Fatalf("notices of a queued job = %+v", notices)
-	}
-	bob.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusNotFound)
-	decode(t, owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusOK).Body, &job)
-	if job.State != app.JobCancelled {
-		t.Fatalf("cancelled job = %+v", job)
-	}
-	owner.do(http.MethodPost, jobPath+"/cancel", "", nil, http.StatusConflict)
-
-	bob.do(http.MethodDelete, path, "", nil, http.StatusNotFound)
-	owner.do(http.MethodDelete, path, "", nil, http.StatusNoContent)
-	owner.do(http.MethodGet, jobPath, "", nil, http.StatusNotFound)
-	owner.do(http.MethodGet, path, "", nil, http.StatusNotFound)
-	// The videos stay in the photo library.
-	if found, err := photoService.Lookup(t.Context(), principal, videos); err != nil || len(found) != 2 {
-		t.Fatalf("the videos after deleting the project = %+v, %v", found, err)
-	}
-	// The grant is revoked right after the answer.
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		grants, err := photoService.Grants(t.Context(), "", 10)
-		if err == nil && len(grants) == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("grants after deleting the project = %+v, %v", grants, err)
-		}
+		t.Fatalf("notices = %+v", notices)
 	}
 
 	// Switched off, the API is not there at all.

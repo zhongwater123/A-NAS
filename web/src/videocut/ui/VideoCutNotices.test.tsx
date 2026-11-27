@@ -61,7 +61,7 @@ describe("VideoCut's notices on the desktop", () => {
     expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
   });
 
-  it("says a job failed, with what was written for the member, and plans a failed planning again", async () => {
+  it("says a job failed, with what was written for the member, and offers nothing to do about it", async () => {
     const failed = {
       kind: "failed",
       jobId: "job:3",
@@ -75,28 +75,11 @@ describe("VideoCut's notices on the desktop", () => {
       "「古镇」没有剪成：规划试了 3 轮都没有完成：out of time",
       "「古镇」没有剪成",
     ]);
-    const replanned: string[] = [];
-    server.use(
-      http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [failed] })),
-      http.post("/api/v1/videocut/jobs/{jobId}/replan", ({ params, response }) => {
-        replanned.push(params.jobId);
-        return response(200).json({
-          id: params.jobId,
-          projectId: "p3",
-          kind: "generate",
-          state: "queued",
-          steps: [],
-          createdAt: failed.at,
-        });
-      }),
-    );
-    const opened = vi.fn();
-    render(<VideoCutNotices onOpen={opened} />);
+    server.use(http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [failed] })));
+    render(<VideoCutNotices onOpen={vi.fn()} />);
     expect(await screen.findByText("「古镇」没有剪成：规划试了 3 轮都没有完成：out of time")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "重新规划" }));
-    await waitFor(() => expect(replanned).toEqual(["job:3"]));
-    expect(opened).not.toHaveBeenCalled();
-    expect(screen.queryByRole("status", { name: "剪辑中心提醒" })).toBeNull();
+    // Planning again went with the first version's jobs (#694).
+    expect(screen.queryByRole("button", { name: "重新规划" })).toBeNull();
   });
 
   it("tells again when the reason a job waits changes", async () => {

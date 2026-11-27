@@ -70,7 +70,7 @@ func request(socket, token string) (int, string, error) {
 	client := http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}, Timeout: 5 * time.Second}
-	request, _ := http.NewRequest(http.MethodGet, "http://videocut/api/v1/videocut/projects", nil)
+	request, _ := http.NewRequest(http.MethodGet, "http://videocut/api/v1/videocut/notices", nil)
 	if token != "" {
 		request.Header.Set(serviceproxy.SessionHeader, token)
 	}
@@ -126,7 +126,7 @@ func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 		}
 	}
 	if body := waitFor(http.StatusOK); body != `{"items":[]}` {
-		t.Fatalf("projects = %s", body)
+		t.Fatalf("notices = %s", body)
 	}
 	if info, err := os.Stat(socket); err != nil || info.Mode().Perm() != 0o660 {
 		t.Fatalf("socket mode = %v, %v", info.Mode(), err)

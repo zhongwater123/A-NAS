@@ -1,157 +1,342 @@
+# 剪辑中心 as Venus (docs/specs/venus.md, ADR 0041): a project has one film on
+# one timeline. Its states, what the server keeps in each and the edit rules
+# are the spec's; the descriptions here say only what a field carries.
 parameters:
   VideoCutProjectID: { name: projectId, in: path, required: true, schema: { type: string, minLength: 1 } }
-  VideoCutJobID: { name: jobId, in: path, required: true, schema: { type: string, minLength: 1 } }
-  VideoCutCursor: { name: cursor, in: query, required: false, description: The `next` of the previous page., schema: { type: string } }
-  VideoCutVersionID: { name: versionId, in: path, required: true, schema: { type: string, minLength: 1 } }
-  VideoCutDraftID: { name: draftId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  VideoCutFileID: { name: fileId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  VideoCutAssetID: { name: assetId, in: path, required: true, schema: { type: string, minLength: 1 } }
+  VideoCutSlot: { name: slot, in: path, required: true, description: "The music slot, from 1 to the film's last.", schema: { type: integer, minimum: 1, maximum: 10000 } }
+  VideoCutSongID: { name: songId, in: path, required: true, schema: { type: string, minLength: 1 } }
 schemas:
   VideoCutRequestKey: { type: string, minLength: 1, maxLength: 128, pattern: "^[!-~]+$", description: "Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict." }
-  VideoCutAssetIDs: { type: array, minItems: 1, maxItems: 500, items: { type: string, minLength: 1, maxLength: 64, pattern: "^[!-~]+$" } }
-  VideoCutProjectSummary:
+  VideoCutProjectState:
+    type: string
+    enum: [importing, pending, uploading, upload_interrupted, queued, generating, ready, exporting, exported, failed]
+    description: >-
+      导入中, 待生成, 上传中, 上传中断, 排队中, 生成中, 已完成, 导出中, 已导出, 失败 (docs/specs/venus.md#作品状态机).
+      importing until every file of the list was read in the browser; pending once all were, until generating is asked for.
+  VideoCutFailureReason:
+    type: string
+    enum: [network, corrupt_file, busy, too_few_assets]
+    description: "网络中断, 文件损坏, 服务繁忙, 素材不足: the only four the page names."
+  VideoCutFailure:
     type: object
     additionalProperties: false
-    required: [id, name, assetCount, createdAt]
+    required: [step, reason, retries]
+    properties:
+      step: { type: string, enum: [upload, analysis, generate], description: "The step that failed, which a retry goes back to." }
+      reason: { $ref: "#/schemas/VideoCutFailureReason" }
+      retries: { type: integer, minimum: 0, maximum: 3, description: "Retries made; at 3 the page says to contact us and offers none." }
+  VideoCutExportFailure:
+    type: object
+    additionalProperties: false
+    required: [reason, retries, at]
+    properties:
+      reason: { $ref: "#/schemas/VideoCutFailureReason" }
+      retries: { type: integer, minimum: 0, maximum: 3 }
+      at: { type: string, format: date-time, description: "When it failed: the page tells it once, for the failure it has not told yet." }
+  VideoCutProgress:
+    type: object
+    additionalProperties: false
+    required: [files, uploaded, analysed, skipped, percent, slow]
+    description: "The three bars of 生成中 (M5-1)."
+    properties:
+      files: { type: integer, minimum: 0, maximum: 200, description: "Files chosen to make the film from." }
+      uploaded: { type: integer, minimum: 0, maximum: 200 }
+      analysed: { type: integer, minimum: 0, maximum: 200, description: "Analysed or skipped; analysis starts as each file is uploaded." }
+      skipped: { type: integer, minimum: 0, maximum: 200, description: "Files analysis could not read and left out: 'N 段无法分析，已跳过' once the film is made." }
+      percent: { type: integer, minimum: 0, maximum: 100, description: "How far the film's making is, once uploading and analysis are done." }
+      remainingSeconds: { type: integer, minimum: 0, description: "The estimate, renewed every 30 seconds and never growing; absent while there is none." }
+      slow: { type: boolean, description: "Past the estimate by half: 比预计慢，仍在处理." }
+  VideoCutLocalFile:
+    type: object
+    additionalProperties: false
+    required: [name, size, modifiedAt, read]
+    description: >-
+      A file as the browser has it. name, size and modifiedAt together tell it: the same three are the same file,
+      once in the list, and a file chosen again after a reload is matched to its entry by them. The rest is what the
+      browser read from it; the file itself stays in the browser until uploaded.
+    properties:
+      name: { type: string, minLength: 1, maxLength: 255 }
+      size: { type: integer, minimum: 1, maximum: 4294967296, description: "Bytes; 4 GB at most." }
+      modifiedAt: { type: string, format: date-time }
+      read: { type: boolean, description: "Whether the browser has read it; the rest is there once it has." }
+      duration: { type: number, minimum: 0, description: Seconds. }
+      width: { type: integer, minimum: 1, description: "As shown, after rotation." }
+      height: { type: integer, minimum: 1 }
+      takenAt: { type: string, format: date-time, description: "When it was shot; the modification time where the file does not say." }
+  VideoCutProjectFile:
+    type: object
+    additionalProperties: false
+    required: [id, name, size, modifiedAt, read, selected, starred, upload, analysis]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }
-      assetCount: { type: integer, minimum: 0 }
+      size: { type: integer, minimum: 1 }
+      modifiedAt: { type: string, format: date-time }
+      read: { type: boolean }
+      duration: { type: number, minimum: 0 }
+      width: { type: integer, minimum: 1 }
+      height: { type: integer, minimum: 1 }
+      takenAt: { type: string, format: date-time }
+      selected: { type: boolean, description: "勾选: chosen to be uploaded and made a film of. New files are." }
+      starred: { type: boolean, description: "星标: the film puts it in. Five at most." }
+      upload: { type: string, enum: [none, done], description: "done once its video is in the photo library and the project has it." }
+      assetId: { type: string, description: "The photo library's video, once uploaded." }
+      analysis: { type: string, enum: [none, running, done, skipped] }
+  VideoCutSongSource: { type: string, enum: [builtin, library, imported], description: "One of the three songs VideoCut has, a track of the member's music library, or a song imported to this project." }
+  VideoCutSongRef:
+    type: object
+    additionalProperties: false
+    required: [source, id]
+    properties:
+      source: { $ref: "#/schemas/VideoCutSongSource" }
+      id: { type: string, minLength: 1, description: "A builtin song's id from the catalog, the track's id, or the imported song's id." }
+  VideoCutProjectSong:
+    type: object
+    additionalProperties: false
+    required: [source, id, title, status]
+    properties:
+      source: { $ref: "#/schemas/VideoCutSongSource" }
+      id: { type: string, minLength: 1 }
+      title: { type: string }
+      duration: { type: number, minimum: 0, description: "Seconds of the whole song." }
+      status: { type: string, enum: [analysing, ready, unusable], description: "unusable: no beats in it. The page says to choose another and chooses the one before again." }
+  VideoCutSettings:
+    type: object
+    additionalProperties: false
+    required: [aspect, style]
+    properties:
+      song: { $ref: "#/schemas/VideoCutProjectSong" }
+      aspect: { type: string, description: "An aspect's id from the catalog." }
+      style: { type: string, description: "A style's id from the catalog." }
+      filmDuration: { type: number, minimum: 0, description: "长度 (M4-3), read only: the song's verse and chorus, once its analysis is done." }
+  VideoCutFilm:
+    type: object
+    additionalProperties: false
+    required: [duration]
+    properties:
+      duration: { type: number, minimum: 0, description: Seconds. }
+      exportedAt: { type: string, format: date-time, description: "When the file to download was made; absent before the first export." }
+      size: { type: integer, minimum: 0, description: "Bytes of that file." }
+  VideoCutProjectSummary:
+    type: object
+    additionalProperties: false
+    required: [id, name, sample, state, createdAt, updatedAt, fileCount, progress]
+    properties:
+      id: { type: string, minLength: 1 }
+      name: { type: string }
+      sample: { type: boolean, description: "示例作品: one for every member, read only, and last in the list." }
+      state: { $ref: "#/schemas/VideoCutProjectState" }
       createdAt: { type: string, format: date-time }
-      previewAssetIds: { type: array, maxItems: 6, description: "Up to six of its videos, spread over the order they were added, for thumbnails.", items: { type: string } }
-      chosenVersionId: { type: string, description: "The version the member chose as the project's film (#596): the one shown when the project opens." }
-      chosenFilmAssetId: { type: string, description: "The chosen version's film; the list and the home page show it first." }
-  VideoCutProjectPage:
+      updatedAt: { type: string, format: date-time }
+      fileCount: { type: integer, minimum: 0, maximum: 200 }
+      progress: { $ref: "#/schemas/VideoCutProgress" }
+      failure: { $ref: "#/schemas/VideoCutFailure" }
+      film: { $ref: "#/schemas/VideoCutFilm" }
+      coverAssetId: { type: string, description: "The video whose frame is the card's cover, once one is uploaded; before that the page shows the first frame it read." }
+  VideoCutProjectList:
     type: object
     additionalProperties: false
     required: [items]
     properties:
-      items: { type: array, items: { $ref: "#/schemas/VideoCutProjectSummary" } }
-      next: { type: string }
-  VideoCutProjectAsset:
-    type: object
-    additionalProperties: false
-    required: [assetId, status, addedAt]
-    properties:
-      assetId: { type: string }
-      status: { type: string, enum: [available, trashed, missing, unknown], description: "unknown: the photo library did not answer this time." }
-      duration: { type: number, minimum: 0 }
-      takenAt: { type: string, format: date-time }
-      addedAt: { type: string, format: date-time }
+      items: { type: array, description: "The caller's projects, newest first, then the sample.", maxItems: 1000, items: { $ref: "#/schemas/VideoCutProjectSummary" } }
   VideoCutProject:
     type: object
     additionalProperties: false
-    required: [id, name, assetCount, createdAt, ask, chronological, assets, versions]
+    required: [id, name, sample, state, createdAt, updatedAt, fileCount, progress, settings, files]
     properties:
       id: { type: string, minLength: 1 }
       name: { type: string }
-      assetCount: { type: integer, minimum: 0 }
+      sample: { type: boolean }
+      state: { $ref: "#/schemas/VideoCutProjectState" }
       createdAt: { type: string, format: date-time }
-      ask: { type: string }
-      chronological: { type: boolean }
-      assets: { type: array, items: { $ref: "#/schemas/VideoCutProjectAsset" } }
-      versions: { type: array, description: "The films saved, newest first.", items: { $ref: "#/schemas/VideoCutVersion" } }
-      job: { $ref: "#/schemas/VideoCutJob", description: "The project's latest job, for the page to pick up where it was after a reload." }
-      chosenVersionId: { type: string, description: "The version the member chose as the project's film; the other versions stay and can be chosen instead." }
-      chosenFilmAssetId: { type: string, description: "The chosen version's film." }
-  VideoCutSongSection:
+      updatedAt: { type: string, format: date-time }
+      fileCount: { type: integer, minimum: 0, maximum: 200 }
+      progress: { $ref: "#/schemas/VideoCutProgress" }
+      failure: { $ref: "#/schemas/VideoCutFailure" }
+      exportFailure: { $ref: "#/schemas/VideoCutExportFailure", description: "The last export's failure; the state is ready again." }
+      film: { $ref: "#/schemas/VideoCutFilm" }
+      coverAssetId: { type: string }
+      settings: { $ref: "#/schemas/VideoCutSettings", description: "From uploading on, the snapshot taken when generating was asked for." }
+      files: { type: array, maxItems: 200, items: { $ref: "#/schemas/VideoCutProjectFile" } }
+  VideoCutCatalogItem:
     type: object
     additionalProperties: false
-    required: [start, end, label]
-    properties:
-      start: { type: number, minimum: 0 }
-      end: { type: number, minimum: 0 }
-      label: { type: string, enum: [start, end, intro, outro, break, bridge, inst, solo, verse, chorus], description: "allin1's label." }
-  VideoCutSongPart:
-    type: object
-    additionalProperties: false
-    required: [start, end, level, label, slots]
-    properties:
-      start: { type: number, minimum: 0, description: Seconds from the excerpt's start. }
-      end: { type: number, minimum: 0 }
-      level: { type: string, enum: [安静, 中等, 高潮], description: "The part's level in the film: quiet, middle or climax." }
-      label: { type: string }
-      allin1: { type: string, description: "allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it." }
-      slots: { type: array, items: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 } }, description: "The shots' slots, cut on the bar lines, in seconds from the excerpt's start." }
-  VideoCutSongSelection:
-    type: object
-    additionalProperties: false
-    required: [tempo, bar, excerpt, seconds, parts, chorus]
-    properties:
-      tempo: { type: number }
-      bar: { type: number, minimum: 0 }
-      excerpt: { type: array, minItems: 2, maxItems: 2, items: { type: number, minimum: 0 }, description: "Its start and end in the song, in seconds. The film starts there and lasts as long." }
-      seconds: { type: number, minimum: 0 }
-      parts: { type: array, items: { $ref: "#/schemas/VideoCutSongPart" } }
-      chorus: { type: boolean, description: "false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen." }
-  VideoCutSong:
-    type: object
-    additionalProperties: false
-    required: [id, title, duration, transcode, state]
+    required: [id, label]
     properties:
       id: { type: string, minLength: 1 }
-      trackId: { type: string, description: "The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title." }
+      label: { type: string }
+  VideoCutCatalogSong:
+    type: object
+    additionalProperties: false
+    required: [id, title, duration]
+    properties:
+      id: { type: string, minLength: 1 }
       title: { type: string }
       duration: { type: number, minimum: 0 }
-      transcode: { type: boolean, description: "Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range." }
-      state: { type: string, enum: [analyzing, ready, unusable] }
-      reason: { type: string, enum: [undecodable, few_bars, no_excerpt, long_slot, analysis_failed], description: "Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from." }
-      waiting: { type: string, enum: [analyzer_unavailable, compute_unavailable, media_unavailable], description: "What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times." }
-      tempo: { type: number }
-      beats: { type: array, items: { type: number, minimum: 0 } }
-      downbeats: { type: array, items: { type: number, minimum: 0 } }
-      sections: { type: array, items: { $ref: "#/schemas/VideoCutSongSection" } }
-      defaultStart: { type: number, minimum: 0, description: "Where the eighth version's rule starts the excerpt: around the first chorus." }
-      selection: { $ref: "#/schemas/VideoCutSongSelection" }
-  VideoCutVersion:
+  VideoCutCatalog:
     type: object
     additionalProperties: false
-    required: [id, number, jobId, plan, filmAssetId, createdAt, editable, kind]
+    required: [songs, aspects, styles, defaults]
     properties:
-      id: { type: string, minLength: 1 }
-      number: { type: integer, minimum: 1, description: "Counts from 1 within the project; the film is named \"<project> v<number>.mp4\"." }
-      jobId: { type: string, description: "The job that made it." }
-      plan: { type: integer, minimum: 1, description: "Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二." }
-      filmAssetId: { type: string, description: "The film in the caller's photo library; play and download it there." }
-      createdAt: { type: string, format: date-time }
-      gone: { type: boolean, description: "The member deleted the film from the photo library." }
-      editable: { type: boolean, description: "Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played." }
-      kind: { type: string, enum: [plan, edit, recut], description: "plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again." }
-      sourceVersionId: { type: string, description: "The version an edit or a recut came from." }
-      sourceNumber: { type: integer, minimum: 1, description: "That version's number, while it is recorded." }
-      draftRevision: { type: integer, minimum: 0, description: "An edit: the draft's revision it was rendered from." }
-      change: { type: string, description: "A recut: the member's sentence, 按“<change>”重剪自第 N 版." }
-  VideoCutJobStep:
+      songs: { type: array, maxItems: 3, description: "The three songs VideoCut has (M4-1).", items: { $ref: "#/schemas/VideoCutCatalogSong" } }
+      aspects: { type: array, minItems: 1, items: { $ref: "#/schemas/VideoCutCatalogItem" } }
+      styles: { type: array, minItems: 1, items: { $ref: "#/schemas/VideoCutCatalogItem" } }
+      defaults:
+        type: object
+        additionalProperties: false
+        required: [song, aspect, style]
+        description: "What a new project starts with."
+        properties:
+          song: { type: string, description: "A builtin song's id." }
+          aspect: { type: string }
+          style: { type: string }
+  VideoCutSlotSpan:
     type: object
     additionalProperties: false
-    required: [name, state]
+    required: [slot, start, end]
     properties:
-      name:
-        type: string
-        description: "The shared steps, then each 方案's: the first 方案's plain, the second's with -2. An edit's are source, fill, render and save."
-        enum: [analysis, catalog, song, pick, shots, fill, render, save, pick-2, shots-2, fill-2, render-2, save-2, source]
-      state: { type: string, enum: [pending, running, done, queued, waiting, needs_input, failed, cancelled], description: "A step that stopped with the job shows the job's state." }
-      startedAt: { type: string, format: date-time }
-      finishedAt: { type: string, format: date-time }
-  VideoCutJob:
+      slot: { type: integer, minimum: 1, description: "From 1 over the whole film." }
+      start: { type: number, minimum: 0, description: "Seconds into the film." }
+      end: { type: number, minimum: 0 }
+  VideoCutPart:
     type: object
     additionalProperties: false
-    required: [id, projectId, kind, state, steps, createdAt]
+    required: [index, label, start, end, slots]
     properties:
-      id: { type: string, minLength: 1 }
-      projectId: { type: string, minLength: 1 }
-      kind: { type: string, enum: [generate, edit, recut], description: "generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence." }
-      state: { type: string, enum: [queued, running, waiting, needs_input, done, failed, cancelled] }
-      step: { type: string, description: The step the job is at or stopped at. }
-      waitReason:
-        type: string
-        enum: [analysis, asset_trashed, vnas, asset_missing, analysis_failed, no_usable_footage, music_invalid, vnas_unknown, plan_invalid, plan_error, storage_full, photos_unavailable, video_too_long, model_unavailable, plan_failed]
-        description: "Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for."
-      error: { type: string }
-      steps: { type: array, items: { $ref: "#/schemas/VideoCutJobStep" } }
-      missingAssetIds: { type: array, description: "The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them.", items: { type: string } }
-      version: { $ref: "#/schemas/VideoCutVersion", description: "The first 方案's film." }
-      versions: { type: array, description: "Every 方案's film the job saved, in order.", items: { $ref: "#/schemas/VideoCutVersion" } }
-      createdAt: { type: string, format: date-time }
-      finishedAt: { type: string, format: date-time }
+      index: { type: integer, minimum: 1 }
+      label: { type: string, description: "前奏, 主歌, 副歌, 尾奏: the song's section." }
+      start: { type: number, minimum: 0, description: "Seconds into the film." }
+      end: { type: number, minimum: 0 }
+      slots: { type: array, minItems: 1, items: { $ref: "#/schemas/VideoCutSlotSpan" } }
+  VideoCutSongStructure:
+    type: object
+    additionalProperties: false
+    required: [song, from, to, parts]
+    description: "The film's parts and slots as the song makes them, known before the timeline is: the tracks of 生成中 draw them."
+    properties:
+      song: { $ref: "#/schemas/VideoCutProjectSong" }
+      from: { type: number, minimum: 0, description: "Seconds into the song the film starts at." }
+      to: { type: number, minimum: 0 }
+      parts: { type: array, minItems: 1, items: { $ref: "#/schemas/VideoCutPart" } }
+  VideoCutShot:
+    type: object
+    additionalProperties: false
+    required: [slot, part, start, end, beat, assetId, from, to, speed, anchor, fitted]
+    properties:
+      slot: { type: integer, minimum: 1 }
+      part: { type: integer, minimum: 1 }
+      start: { type: number, minimum: 0, description: "Seconds into the film; the slot's." }
+      end: { type: number, minimum: 0 }
+      beat: { type: string, description: "The beat in the slot." }
+      assetId: { type: string, description: "The video it comes from." }
+      from: { type: number, minimum: 0, description: "Seconds into the video it plays from." }
+      to: { type: number, minimum: 0 }
+      speed: { type: number, minimum: 0.5, maximum: 1, description: "Below 1 where the beat is slowed to fill the slot." }
+      anchor: { type: boolean, description: "锚点: changed by the member, so automatic changes leave it." }
+      fitted: { type: boolean, description: "Its video's orientation is not the film's: shown in the middle on a blurred fill." }
+      takenAt: { type: string, format: date-time }
+  VideoCutTimeline:
+    type: object
+    additionalProperties: false
+    required: [revision, duration, parts, shots, canUndo]
+    properties:
+      revision: { type: integer, minimum: 1, description: "Every edit names the revision it was made on." }
+      duration: { type: number, minimum: 0 }
+      parts: { type: array, minItems: 1, items: { $ref: "#/schemas/VideoCutPart" } }
+      shots: { type: array, minItems: 1, description: "One a slot, in order.", items: { $ref: "#/schemas/VideoCutShot" } }
+      canUndo: { type: boolean, description: "One step back, in this opening of the project only." }
+      changedSlots: { type: array, description: "The slots the last edit or undo changed: the preview plays again from the first.", items: { type: integer, minimum: 1 } }
+  VideoCutCandidate:
+    type: object
+    additionalProperties: false
+    required: [beat, assetId, from, to, duration, fitted]
+    properties:
+      beat: { type: string }
+      assetId: { type: string }
+      from: { type: number, minimum: 0, description: "The part of its video it would play." }
+      to: { type: number, minimum: 0 }
+      duration: { type: number, minimum: 0 }
+      fitted: { type: boolean }
+      takenAt: { type: string, format: date-time }
+  VideoCutCandidates:
+    type: object
+    additionalProperties: false
+    required: [slot, items]
+    properties:
+      slot: { type: integer, minimum: 1 }
+      items: { type: array, maxItems: 6, description: "Best first; the beat a replace took out comes first.", items: { $ref: "#/schemas/VideoCutCandidate" } }
+  VideoCutEdit:
+    description: "One edit of the timeline, by music slot (docs/specs/venus.md#镜头操作)."
+    oneOf:
+      - type: object
+        additionalProperties: false
+        required: [kind, slot, beat]
+        description: "Replace the slot's beat with a candidate or a search result (M7-1, M8-2, M8-3)."
+        properties: { kind: { const: replace }, slot: { type: integer, minimum: 1 }, beat: { type: string, minLength: 1 } }
+      - type: object
+        additionalProperties: false
+        required: [kind, slot]
+        description: "Delete the shot: its slot takes the next candidate (M7-3)."
+        properties: { kind: { const: remove }, slot: { type: integer, minimum: 1 } }
+      - type: object
+        additionalProperties: false
+        required: [kind, slot, from]
+        description: "Play the same video from another time (M7-2)."
+        properties: { kind: { const: set_in_point }, slot: { type: integer, minimum: 1 }, from: { type: number, minimum: 0 } }
+      - type: object
+        additionalProperties: false
+        required: [kind, from, to]
+        description: "Move a part's shots to another part's place (M6-3); the slots stay."
+        properties: { kind: { const: reorder_parts }, from: { type: integer, minimum: 1 }, to: { type: integer, minimum: 1 } }
+      - type: object
+        additionalProperties: false
+        required: [kind, slot, assetId]
+        description: "Put one of the project's analysed videos in the slot (M7-4)."
+        properties: { kind: { const: place }, slot: { type: integer, minimum: 1 }, assetId: { type: string, minLength: 1 } }
+  VideoCutProjectAsset:
+    type: object
+    additionalProperties: false
+    required: [assetId, analysis, addedAt]
+    properties:
+      assetId: { type: string }
+      fileId: { type: string, description: "The file of the list it was uploaded from; absent for one added on the film page." }
+      analysis: { type: string, enum: [running, done, skipped] }
+      duration: { type: number, minimum: 0 }
+      width: { type: integer, minimum: 1 }
+      height: { type: integer, minimum: 1 }
+      takenAt: { type: string, format: date-time }
+      addedAt: { type: string, format: date-time }
+  VideoCutProjectAssets:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, maxItems: 1000, items: { $ref: "#/schemas/VideoCutProjectAsset" } }
+  VideoCutAssistantReply:
+    type: object
+    additionalProperties: false
+    required: [text, groups]
+    properties:
+      text: { type: string, description: "What the assistant says back." }
+      groups:
+        type: array
+        description: "Beats it found, by what they answer; empty for a reply in words only."
+        items:
+          type: object
+          additionalProperties: false
+          required: [title, items]
+          properties:
+            title: { type: string }
+            slot: { type: integer, minimum: 1, description: "The slot they are for, where the member asked about one." }
+            items: { type: array, maxItems: 12, items: { $ref: "#/schemas/VideoCutCandidate" } }
+  VideoCutAssistantStatus:
+    type: object
+    additionalProperties: false
+    required: [search]
+    properties:
+      search: { type: boolean, description: "Whether searching the member's videos works now; the page turns its box off while it does not." }
   VideoCutNotice:
     type: object
     additionalProperties: false
@@ -171,138 +356,3 @@ schemas:
     required: [items]
     properties:
       items: { type: array, items: { $ref: "#/schemas/VideoCutNotice" } }
-  VideoCutDraftOp:
-    type: object
-    additionalProperties: false
-    required: [type]
-    description: >-
-      One step of an edit (ADR 0039, decision 2; docs/architecture/videocut-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to
-      where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or
-      after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the
-      beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset
-      puts back the whole version; undo goes back a step, up to the last hundred.
-    properties:
-      type: { type: string, enum: [replace, move, delete, lock, unlock, shuffle, revert, reset, undo] }
-      shot: { type: integer, minimum: 1, description: "The shot's number, from 1: replace, move, delete, lock, unlock, revert." }
-      to: { type: integer, minimum: 1, description: "move: the shot whose place it takes." }
-      beat: { type: string, minLength: 1, maxLength: 140, description: "replace: the beat, card/n, as a candidate names it." }
-      seed: { type: integer, minimum: 0, description: "shuffle: the same seed on the same draft picks the same beats." }
-  VideoCutDraftShot:
-    type: object
-    additionalProperties: false
-    required: [number, beat, assetId, part, picture, slots, start, end, from, to, query, shotSize, what, locked, changed, extended, portrait]
-    properties:
-      number: { type: integer, minimum: 1 }
-      beat: { type: string, description: "card/n: the beat that leads the shot." }
-      assetId: { type: string, description: "The video it comes from." }
-      part: { type: integer, minimum: 1 }
-      picture: { type: integer, minimum: 1 }
-      slots: { type: array, minItems: 1, description: "The music's slots it covers, from 1; more than one where it took a deleted shot's.", items: { type: integer, minimum: 1 } }
-      start: { type: number, minimum: 0, description: "Seconds into the film." }
-      end: { type: number, minimum: 0 }
-      from: { type: number, minimum: 0, description: "Seconds into its video the rough preview plays from: where the version had it, or the beat's piece." }
-      to: { type: number, minimum: 0 }
-      query: { type: string, description: "What the plan asked of its picture: 规划要." }
-      shotSize: { type: string }
-      what: { type: string }
-      locked: { type: boolean }
-      changed: { type: boolean, description: "已换: not a beat the version had in these slots." }
-      extended: { type: boolean, description: "延长: it took a deleted shot's slots." }
-      portrait: { type: boolean, description: "竖: its video is narrower than 16:9 and is shown on a blurred background." }
-  VideoCutDraft:
-    type: object
-    additionalProperties: false
-    required: [id, versionId, projectId, versionNumber, revision, canUndo, songStart, songTranscode, seconds, plan, parts, shots, counts, updatedAt]
-    properties:
-      id: { type: string, minLength: 1 }
-      versionId: { type: string }
-      projectId: { type: string }
-      versionNumber: { type: integer, minimum: 1 }
-      revision: { type: integer, minimum: 0, description: "A step is made on this revision (baseRevision)." }
-      canUndo: { type: boolean }
-      songStart: { type: number, minimum: 0, description: "Where the version's excerpt starts in its song, in seconds." }
-      songTranscode: { type: boolean, description: "The draft's song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does." }
-      seconds: { type: number, minimum: 0, description: "How long the film is." }
-      plan: { $ref: "#/schemas/VideoCutFilmPlan" }
-      parts: { type: array, items: { $ref: "#/schemas/VideoCutFilmPart" } }
-      shots: { type: array, items: { $ref: "#/schemas/VideoCutDraftShot" } }
-      counts: { $ref: "#/schemas/VideoCutFilmCounts" }
-      message: { type: string, description: "What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上." }
-      updatedAt: { type: string, format: date-time }
-  VideoCutFilmPlan:
-    type: object
-    additionalProperties: false
-    required: [design, opening, ending]
-    description: The first step of the plan a version was cut by.
-    properties: { design: { type: string }, opening: { type: string }, ending: { type: string } }
-  VideoCutFilmPart:
-    type: object
-    additionalProperties: false
-    required: [number, name, summary, level, label, start, end]
-    description: A part of the music and of the plan.
-    properties:
-      number: { type: integer, minimum: 1 }
-      name: { type: string }
-      summary: { type: string }
-      level: { type: string, description: "The music part's strength, from the song's analysis: 安静, 中等 or 高潮." }
-      label: { type: string, description: "The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫." }
-      start: { type: number, minimum: 0 }
-      end: { type: number, minimum: 0 }
-  VideoCutFilmCounts:
-    type: object
-    additionalProperties: false
-    required: [shots, videos, portrait]
-    description: "A film's shots, the videos they come from, and how many of those are 竖."
-    properties: { shots: { type: integer, minimum: 0 }, videos: { type: integer, minimum: 0 }, portrait: { type: integer, minimum: 0 } }
-  VideoCutVersionOutline:
-    type: object
-    additionalProperties: false
-    required: [versionId, projectId, versionNumber, seconds, plan, parts, shots, counts, unmet]
-    description: "A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here."
-    properties:
-      versionId: { type: string }
-      projectId: { type: string }
-      versionNumber: { type: integer, minimum: 1 }
-      seconds: { type: number, minimum: 0, description: "How long the film is." }
-      plan: { $ref: "#/schemas/VideoCutFilmPlan" }
-      parts: { type: array, items: { $ref: "#/schemas/VideoCutFilmPart" } }
-      shots: { type: array, description: "The film's shots, none of them changed, extended or locked.", items: { $ref: "#/schemas/VideoCutDraftShot" } }
-      counts: { $ref: "#/schemas/VideoCutFilmCounts" }
-      unmet: { type: array, description: "What the plan found the videos do not have, as the planner wrote it.", items: { type: string } }
-  VideoCutCandidate:
-    type: object
-    additionalProperties: false
-    required: [beat, assetId, from, to, shotSize, what, scene, portrait, fits]
-    properties:
-      beat: { type: string }
-      assetId: { type: string }
-      from: { type: number, minimum: 0, description: "The part of its video a try plays, in seconds." }
-      to: { type: number, minimum: 0 }
-      shotSize: { type: string }
-      what: { type: string }
-      scene: { type: string }
-      portrait: { type: boolean }
-      fits: { type: boolean, description: "Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen." }
-      usedBy: { type: integer, minimum: 1, description: "已用在第 N 镜: the shot that has it; it cannot be chosen." }
-      score: { type: number, description: "How alike the search found it; only to order by." }
-      takenAt: { type: string, format: date-time }
-  VideoCutCandidates:
-    type: object
-    additionalProperties: false
-    required: [shot, query, sameCard, planned, results, scenes]
-    properties:
-      shot: { type: integer, minimum: 1 }
-      query: { type: string, description: "The picture's description, which the search box starts with." }
-      sameCard: { type: array, description: "The other beats of the shot's card.", items: { $ref: "#/schemas/VideoCutCandidate" } }
-      planned: { type: array, description: "The plan's spare beats for its picture.", items: { $ref: "#/schemas/VideoCutCandidate" } }
-      results: { type: array, description: "With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape.", items: { $ref: "#/schemas/VideoCutCandidate" } }
-      scenes:
-        type: array
-        maxItems: 9
-        description: "The scenes the cards were described in, most cards first: eight, and the rest as 其他."
-        items:
-          type: object
-          additionalProperties: false
-          required: [scene, cards]
-          properties: { scene: { type: string }, cards: { type: integer, minimum: 1 } }
-
