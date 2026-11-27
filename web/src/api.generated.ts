@@ -9341,7 +9341,7 @@ export interface components {
                 cards: number;
             }[];
         };
-        /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
+        /** @description What a photo is scored on (打分项): one of the built-in ones, composition, light_color (光影, named 光影色彩 before), narrative (叙事性, named 叙事意境 before), subject (主体), overall (总体, named 总分 before), quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
         ScoringDimension: {
             id: components["schemas"]["ScoringDimensionID"];

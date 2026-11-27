@@ -343,7 +343,7 @@ func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
 			Custom bool   `json:"custom"`
 		} `json:"items"`
 	}](t, a.call("admin-token", http.MethodGet, dimensions, nil))
-	if len(catalogue.Items) != 9 || catalogue.Items[0].ID != "overall" || catalogue.Items[8].ID != "custom_1" || !catalogue.Items[8].Custom {
+	if len(catalogue.Items) != 10 || catalogue.Items[0].ID != "composition" || catalogue.Items[9].ID != "custom_1" || !catalogue.Items[9].Custom {
 		t.Fatalf("catalogue: %+v", catalogue)
 	}
 	if code := a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
@@ -355,7 +355,7 @@ func TestAdministratorsMakeCustomDimensionsThatBatchesScore(t *testing.T) {
 		t.Fatalf("choosing alice: %d", code)
 	}
 	batches := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/batches", nil)
-	if !strings.Contains(batches.Body.String(), `"dimensions":[{"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true},{"id":"composition","name":"构图","description":"画面安排得好不好，主体清不清楚","custom":false}]`) {
+	if !strings.Contains(batches.Body.String(), `"dimensions":[{"id":"custom_1","name":"色彩和谐","description":"颜色是否协调","custom":true},{"id":"composition","name":"构图","description":"画面安排得好不好：层次、引导，边缘干不干净","custom":false}]`) {
 		t.Fatalf("alice's batches: %s", batches.Body)
 	}
 }
