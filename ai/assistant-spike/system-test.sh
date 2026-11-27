@@ -104,7 +104,7 @@ check "the members' settings are in the Host Agent's own state" \
   test "$(stat -c '%a %U' /var/lib/a-nas-host 2>/dev/null)" = "700 root" -a -f /var/lib/a-nas-host/assistant/members/alice/config.yaml
 check "alice now has VNAS" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available || true)" = true
 check "with VNAS a planning request registers her grant on its way to VideoCut" \
-  test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 404:404
+  test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 501:501
 check "the grants are root's alone, in the Host Agent's own state" \
   test "$(stat -c '%a %U' "$plans" 2>/dev/null):$(stat -c '%a %U %F' "$plans/alice" 2>/dev/null):$(stat -c '%a %U %F' "$plans/bob" 2>/dev/null)" = \
   "700 root:600 root regular file:600 root regular file"
