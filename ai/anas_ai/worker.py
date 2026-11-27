@@ -411,6 +411,27 @@ def read_limited(fd, limit):
         chunks.append(chunk)
 
 
+def remote_describer(reader, environ):
+    """Has reader describe cards through ANAS_AI_DESCRIBE_URL, when its unit sets it: the internal test only (#648).
+
+    The text is still read here. A URL without a model name, or for a reader
+    other than llama-server, leaves the cards described here, and says why.
+    """
+    url = environ.get("ANAS_AI_DESCRIBE_URL")
+    if not url:
+        return
+    if not isinstance(reader, providers.LlamaReader):
+        log.error("ANAS_AI_DESCRIBE_URL is set, but cards are described with %s", type(reader).__name__)
+        return
+    try:
+        reader.remote = providers.RemoteDescriber(url, environ.get("ANAS_AI_DESCRIBE_MODEL", ""),
+                                                  environ.get("ANAS_AI_DESCRIBE_KEY", ""))
+    except providers.Unavailable as error:
+        log.error("cards are described here: %s", error)
+        return
+    log.warning("cards are described by %s, off this device (#648)", reader.remote.host)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--socket", help="listen here when not socket-activated")
@@ -500,6 +521,7 @@ def main(argv=None):
         except providers.Unavailable as error:
             reader = Detector(reason=str(error))
             log.error("text reader unavailable: %s", error)
+    remote_describer(reader.provider, os.environ)
     scorer = Detector(reason="no aesthetic scorer")
     if args.fake_scorer:
         scorer = Detector(providers.FakeScorer())

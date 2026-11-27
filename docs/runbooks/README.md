@@ -32,6 +32,7 @@
 - [安装与移除照片打分](install-and-remove-photo-scoring.md)（draft；系统测试已验证，实验 NAS 待执行）
 - [启用配乐分析](enable-videocut-music.md)（draft；allin1 版权待议期间只手动装在实验 NAS 上，待执行）
 - [在实验 NAS 上演示剪辑中心](demo-videocut-center.md)（draft；只在实验 NAS 上用 drop-in 打开，待执行）
+- [内测期间把卡片描述交给外部接口](enable-remote-card-descriptions.md)（draft；#648 内测临时，`videocut-center` 合进 `main` 前随加入它的提交删除，待执行）
 
 ## 使用方式
 
