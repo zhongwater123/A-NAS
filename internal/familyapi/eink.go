@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
@@ -190,21 +191,65 @@ func (h *handler) deviceNext(w http.ResponseWriter, r *http.Request) {
 	httpjson.Write(w, http.StatusOK, answer)
 }
 
-// devicePicture and deviceBar answer once the screen outlet can draw; until
-// then a paired screen hears that the picture is not available and keeps
-// what it shows.
+// fonts are read once, on the first picture: Noto Sans CJK from Debian's
+// fonts-noto-cjk, which the a-nas package depends on.
+var fonts = sync.OnceValues(func() (*eink.Fonts, error) { return eink.LoadFonts(eink.FontDir) })
+
+// drawer finds the fonts or tells the screen pictures are unavailable, in
+// which case it keeps what it shows and asks again later.
+func (h *handler) drawer(w http.ResponseWriter, r *http.Request) (*eink.Fonts, bool) {
+	f, err := fonts()
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "e-ink screens cannot draw", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "eink_unavailable", "pictures for e-ink screens cannot be drawn")
+		return nil, false
+	}
+	return f, true
+}
+
+// devicePicture draws the board as it is now; its key, which the screen
+// keeps as what it shows, travels in X-Content-Hash.
 func (h *handler) devicePicture(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.device(w, r); !ok {
 		return
 	}
-	httpjson.WriteError(w, http.StatusServiceUnavailable, "eink_unavailable", "pictures for e-ink screens are not drawn yet")
+	f, ok := h.drawer(w, r)
+	if !ok {
+		return
+	}
+	todos, err := h.store.ScreenTodos(r.Context())
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	board := family.TodoBoard(todos, h.store.Today())
+	rows := make([]eink.Row, len(board.Rows))
+	for i, row := range board.Rows {
+		rows[i] = eink.Row{Text: row.Text, When: row.When, Urgent: row.Urgent}
+	}
+	picture := eink.Pack(f.Board(rows, board.More, family.BoardEmpty, h.store.Now()))
+	w.Header().Set("X-Content-Hash", board.Key())
+	writePicture(w, picture)
 }
 
+// deviceBar draws the offline bar with the time of this question, which the
+// screen keeps for when it cannot reach the NAS.
 func (h *handler) deviceBar(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.device(w, r); !ok {
 		return
 	}
-	httpjson.WriteError(w, http.StatusServiceUnavailable, "eink_unavailable", "pictures for e-ink screens are not drawn yet")
+	f, ok := h.drawer(w, r)
+	if !ok {
+		return
+	}
+	writePicture(w, eink.Pack(f.Bar(h.store.Now())))
+}
+
+func writePicture(w http.ResponseWriter, picture []byte) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Length", strconv.Itoa(len(picture)))
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(picture)
 }
 
 var (

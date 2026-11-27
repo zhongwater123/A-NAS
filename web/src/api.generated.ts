@@ -2387,7 +2387,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The screen's picture: 800×480 at one bit a pixel, rows top to bottom, pixels left to right, the high bit first, 1 white and 0 black; 48000 bytes, with its key in X-Content-Hash. 503 eink_unavailable until the NAS draws pictures. Device token as for askEinkNext */
+        /** The screen's picture: 800×480 at one bit a pixel, rows top to bottom, pixels left to right, the high bit first, 1 white and 0 black; 48000 bytes, with its key in X-Content-Hash. 503 eink_unavailable when the NAS cannot draw (Noto Sans CJK missing). Device token as for askEinkNext */
         get: operations["getEinkPicture"];
         put?: never;
         post?: never;
@@ -2404,7 +2404,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The bar a screen pastes bottom left when it cannot reach the NAS: 592×80 in the picture's format, 5920 bytes, reading 停止更新 · 画面停在 M月D日 HH:MM. 503 eink_unavailable until the NAS draws pictures. Device token as for askEinkNext */
+        /** The bar a screen pastes bottom left when it cannot reach the NAS: 592×80 in the picture's format, 5920 bytes, reading 停止更新 · 画面停在 M月D日 HH:MM. 503 eink_unavailable when the NAS cannot draw. Device token as for askEinkNext */
         get: operations["getEinkBar"];
         put?: never;
         post?: never;

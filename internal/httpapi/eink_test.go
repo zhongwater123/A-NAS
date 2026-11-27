@@ -60,10 +60,15 @@ func TestEinkScreensKeepToTheContract(t *testing.T) {
 	if answer.Action != "none" || answer.Bin != "" {
 		t.Fatalf("nothing changed, yet the answer is %+v", answer)
 	}
-	// Until the NAS draws, the picture is not available and the screen keeps
-	// what it shows.
-	screen.do(http.MethodGet, "/api/v1/eink/screen.bin?h="+key[:16], "", bearer, http.StatusServiceUnavailable)
-	screen.do(http.MethodGet, "/api/v1/eink/screen-bar.bin", "", bearer, http.StatusServiceUnavailable)
+	// The picture is the board drawn now, keyed as next said; the bar is the
+	// time of this question, white on black.
+	picture := screen.do(http.MethodGet, "/api/v1/eink/screen.bin?h="+key[:16], "", bearer, http.StatusOK)
+	if picture.Body.Len() != 48000 || picture.Header().Get("X-Content-Hash")+":bw" != key {
+		t.Fatalf("picture of %d bytes keyed %q, want 48000 keyed %q", picture.Body.Len(), picture.Header().Get("X-Content-Hash"), key)
+	}
+	if bar := screen.do(http.MethodGet, "/api/v1/eink/screen-bar.bin", "", bearer, http.StatusOK); bar.Body.Len() != 5920 {
+		t.Fatalf("bar of %d bytes, want 5920", bar.Body.Len())
+	}
 
 	var list struct {
 		Items []family.Screen `json:"items"`
