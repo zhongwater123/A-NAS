@@ -151,13 +151,29 @@ export interface Toast {
 export function useToasts(className = "") {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const next = useRef(0);
+  // Pending dismissals end with the window that showed them; a timer left
+  // behind would fire after a test's jsdom is gone.
+  const timers = useRef(new Set<number>());
+  useEffect(
+    () => () => {
+      for (const timer of timers.current) window.clearTimeout(timer);
+    },
+    [],
+  );
   const dismiss = useCallback((id: number) => setToasts((current) => current.filter((toast) => toast.id !== id)), []);
   const toast = useCallback(
     (text: string, tone: Toast["tone"] = "success", action?: Toast["action"]) => {
       if (!text) return;
       const id = ++next.current;
       setToasts((current) => [...current.slice(-2), { id, text, tone, action }]);
-      window.setTimeout(() => dismiss(id), tone === "error" ? 7000 : 4500);
+      const timer = window.setTimeout(
+        () => {
+          timers.current.delete(timer);
+          dismiss(id);
+        },
+        tone === "error" ? 7000 : 4500,
+      );
+      timers.current.add(timer);
     },
     [dismiss],
   );
