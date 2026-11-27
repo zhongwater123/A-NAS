@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
@@ -107,6 +108,9 @@ type Store struct {
 	// and adds the next one, and the service is this database's only writer.
 	writes sync.Mutex
 	live   live
+	// backupWaits is whether the last backup found the data volume at its
+	// reserve; Upkeep reports that once, not every time it runs.
+	backupWaits atomic.Bool
 }
 
 // Open opens workspace.db in directory, which the caller verified is the
@@ -250,8 +254,8 @@ func (s *Store) audit(ctx context.Context, q queryer, actor Actor, action, resou
 }
 
 // admit checks the data volume's reserve for size more bytes.
-func (s *Store) admit(size int) error {
-	ok, err := s.admits(s.directory, int64(size))
+func (s *Store) admit(size int64) error {
+	ok, err := s.admits(s.directory, size)
 	if err != nil {
 		return err
 	}

@@ -3,7 +3,6 @@ package scoring
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -46,21 +45,19 @@ func (s *Store) RunBackups(ctx context.Context) {
 	}
 }
 
-// BackupIfDue writes today's backup unless it exists. The copies taken
-// before an upgrade (migrate), named after the version they hold as in
-// scoring-2026-11-24-v4.db, count among the kept ones.
+// BackupIfDue writes today's backup unless it exists (sqlitedb.BackUpDaily).
+// The copies taken before an upgrade (migrate), named after the version they
+// hold as in scoring-2026-11-24-v4.db, count among the kept ones.
 func (s *Store) BackupIfDue(ctx context.Context) error {
-	dir := filepath.Join(s.dir, "backups")
-	name := filepath.Join(dir, "scoring-"+s.now().UTC().Format("2006-01-02")+".db")
-	if _, err := os.Stat(name); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := s.copyTo(ctx, name); err != nil {
-		return err
-	}
-	return sqlitedb.KeepNewest(dir, "scoring-", ".db", backupsKept)
+	return sqlitedb.BackUpDaily(ctx, sqlitedb.DailyBackup{
+		DB:     s.db,
+		Path:   filepath.Join(s.dir, "scoring.db"),
+		Dir:    filepath.Join(s.dir, "backups"),
+		Prefix: "scoring-",
+		Keep:   backupsKept,
+		Day:    s.now(),
+		Admit:  s.room,
+	})
 }
 
 // copyTo writes a consistent copy of the database to name, readable by the

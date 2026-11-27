@@ -191,7 +191,7 @@ func (s *Store) CreatePage(ctx context.Context, actor Actor, fileName string, co
 	if title == "" || title == "." || title == "/" {
 		title = "未命名页面"
 	}
-	if err := s.admit(len(content)); err != nil {
+	if err := s.admit(int64(len(content))); err != nil {
 		return Page{}, err
 	}
 	s.writes.Lock()
@@ -230,7 +230,7 @@ func (s *Store) SaveVersion(ctx context.Context, actor Actor, pageID string, bas
 	if err != nil {
 		return VersionInfo{}, err
 	}
-	if err := s.admit(len(content)); err != nil {
+	if err := s.admit(int64(len(content))); err != nil {
 		return VersionInfo{}, err
 	}
 	s.writes.Lock()
@@ -310,7 +310,7 @@ func (s *Store) EditPage(ctx context.Context, actor Actor, pageID string, base i
 		if err := checkContent(updated); err != nil {
 			return nil, nil, err
 		}
-		if err := s.admit(len(updated)); err != nil {
+		if err := s.admit(int64(len(updated))); err != nil {
 			return nil, nil, err
 		}
 		for i, position := range positions {
@@ -470,9 +470,10 @@ func (s *Store) DeletePage(ctx context.Context, actor Actor, pageID string) erro
 // mayManage returns the title of a page in the list, or in the trash when
 // trashed is true, if actor uploaded it or is an administrator.
 func (s *Store) mayManage(ctx context.Context, q queryer, actor Actor, pageID string, trashed bool) (string, error) {
-	var createdBy, title, deletedAt string
-	err := q.QueryRowContext(ctx, "SELECT created_by, title, deleted_at FROM pages WHERE id = ?", pageID).Scan(&createdBy, &title, &deletedAt)
-	if errors.Is(err, sql.ErrNoRows) || err == nil && (deletedAt != "") != trashed {
+	var createdBy, title string
+	err := q.QueryRowContext(ctx, "SELECT created_by, title FROM pages WHERE id = ? AND (deleted_at <> '') = ?", pageID, trashed).
+		Scan(&createdBy, &title)
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	if err != nil {

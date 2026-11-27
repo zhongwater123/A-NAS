@@ -4266,6 +4266,8 @@ paths:
                 $ref: '#/components/schemas/WorkspaceTrash'
         '403':
           $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/workspace/trash/{pageId}:
     parameters:
       - $ref: '#/components/parameters/WorkspacePageID'
@@ -4280,6 +4282,8 @@ paths:
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/workspace/trash/{pageId}/restore:
     parameters:
@@ -4299,6 +4303,8 @@ paths:
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/workspace/viewing:
     put:

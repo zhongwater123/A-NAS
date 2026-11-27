@@ -89,6 +89,9 @@ func (s *Store) RemoveAccount(ctx context.Context, accountID string) error {
 			"DELETE FROM members WHERE account_id = ?",
 			"DELETE FROM transfers WHERE account_id = ?",
 			"DELETE FROM audit_events WHERE actor_user_id = ?",
+			// Its pages in the trash keep the name it deleted them under,
+			// and their expiry records nothing for an account that is gone.
+			"UPDATE pages SET deleted_by = '' WHERE deleted_by = ? AND deleted_at <> ''",
 		} {
 			if _, err := tx.ExecContext(ctx, statement, accountID); err != nil {
 				return err
@@ -112,10 +115,21 @@ func (s *Store) Activity(ctx context.Context, actor Actor, q activity.Query) ([]
 }
 
 // Upkeep removes expired transfer links, audit events past AuditDays and
-// pages in the trash past TrashDays, and writes the day's backup.
+// pages in the trash past TrashDays, and writes the day's backup. A backup
+// that waits for room on the data volume is reported once (ErrVolumeFull),
+// as photo scoring's is, not every ten minutes until there is room.
 func (s *Store) Upkeep(ctx context.Context) error {
 	now := s.now()
 	_, transfers := s.db.ExecContext(ctx, "DELETE FROM transfers WHERE expires_at <= ?", formatTime(now))
 	_, audit := s.db.ExecContext(ctx, "DELETE FROM audit_events WHERE occurred_at < ?", formatTime(now.AddDate(0, 0, -AuditDays)))
-	return errors.Join(transfers, audit, s.emptyTrash(ctx), s.BackupIfDue(ctx))
+	trash := s.emptyTrash(ctx)
+	backup := s.BackupIfDue(ctx)
+	if errors.Is(backup, ErrVolumeFull) {
+		if s.backupWaits.Swap(true) {
+			backup = nil
+		}
+	} else if backup == nil {
+		s.backupWaits.Store(false)
+	}
+	return errors.Join(transfers, audit, trash, backup)
 }

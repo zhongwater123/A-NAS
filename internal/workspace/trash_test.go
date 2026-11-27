@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
+	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 	"github.com/zhongwater123/A-NAS/internal/workspace"
 )
 
@@ -170,6 +171,36 @@ func TestATrashedPageGoesForGoodWhenPurgedOrAfterThirtyDays(t *testing.T) {
 	}
 }
 
+func TestAnExpiredPageOfADeletedAccountLeavesNoActivity(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	page, err := f.store.CreatePage(ctx, f.bob, "b.html", []byte("<title>乙</title>"), workspace.Web, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.DeletePage(ctx, f.bob, page.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RemoveAccount(ctx, f.bob.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	// The trash keeps the name bob deleted it under.
+	trash, err := f.store.Trash(ctx)
+	if err != nil || len(trash) != 1 || trash[0].DeletedBy != (workspace.Person{Name: "bob"}) {
+		t.Fatalf("the trash after deleting bob's account = %+v, %v", trash, err)
+	}
+	*f.now = f.now.AddDate(0, 0, workspace.TrashDays)
+	if err := f.store.Upkeep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if trash, err := f.store.Trash(ctx); err != nil || len(trash) != 0 {
+		t.Fatalf("the trash thirty days later = %+v, %v", trash, err)
+	}
+	if events, err := f.store.Activity(ctx, f.bob, activity.Query{Limit: 10}); err != nil || len(events) != 0 {
+		t.Fatalf("activity recorded for the deleted account: %+v, %v", events, err)
+	}
+}
+
 func TestEachDayKeepsACompressedCopyOfThePages(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -198,39 +229,26 @@ func TestEachDayKeepsACompressedCopyOfThePages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// What a backup cut short by a power cut left goes first, even on a day
-	// with no room for a copy.
+	// At the reserve the backup waits, and upkeep says so once rather than
+	// every ten minutes.
 	backups := filepath.Join(dir, "backups")
-	plant := func(names ...string) {
-		t.Helper()
-		if err := os.MkdirAll(backups, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		for _, name := range names {
-			if err := os.WriteFile(filepath.Join(backups, name), []byte("left over"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	plant("copy.db", "copy.db.partial", "workspace-2026-11-26.db.gz.partial")
 	full = true
-	if err := store.BackupIfDue(ctx); !errors.Is(err, workspace.ErrVolumeFull) {
-		t.Fatalf("a backup at the reserve: %v", err)
+	if err := store.Upkeep(ctx); !errors.Is(err, workspace.ErrVolumeFull) {
+		t.Fatalf("upkeep at the reserve: %v", err)
+	}
+	if err := store.Upkeep(ctx); err != nil {
+		t.Fatalf("upkeep at the reserve again = %v; want it said once", err)
 	}
 	if entries, _ := os.ReadDir(backups); len(entries) != 0 {
 		t.Fatalf("a refused backup left %v", entries)
 	}
 	full = false
-	if err := store.BackupIfDue(ctx); err != nil {
+	if err := store.Upkeep(ctx); err != nil {
 		t.Fatal(err)
 	}
 	today := filepath.Join(backups, "workspace-2026-11-27.db.gz")
-	info, err := os.Stat(today)
-	if err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(today); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("today's backup: %v, %v", info, err)
-	}
-	if entries, _ := os.ReadDir(backups); len(entries) != 1 {
-		t.Fatalf("the backups folder holds %v; want only the copy", entries)
 	}
 
 	// The copy opens as a database with both pages and the page's source.
@@ -245,16 +263,15 @@ WHERE p.id = ?`, page.ID).Scan(&title, &deletedAt, &content); err != nil || titl
 		t.Fatalf("the trashed page in the copy: %q, %v", deletedAt, err)
 	}
 
-	// Once a day; a plain copy left by a crash after the archive was written
-	// goes all the same. The newest BackupsKept stay.
-	plant("copy.db")
-	if err := store.BackupIfDue(ctx); err != nil {
-		t.Fatal(err)
+	// Room running out again on another day is said again.
+	now = now.AddDate(0, 0, 1)
+	full = true
+	if err := store.Upkeep(ctx); !errors.Is(err, workspace.ErrVolumeFull) {
+		t.Fatalf("upkeep at the reserve after a backup: %v", err)
 	}
-	if entries, _ := os.ReadDir(backups); len(entries) != 1 {
-		t.Fatalf("the backups folder after a second run today holds %v", entries)
-	}
-	for range workspace.BackupsKept + 2 {
+	full = false
+	// The newest BackupsKept stay.
+	for range workspace.BackupsKept + 1 {
 		now = now.AddDate(0, 0, 1)
 		if err := store.Upkeep(ctx); err != nil {
 			t.Fatal(err)
@@ -269,7 +286,7 @@ WHERE p.id = ?`, page.ID).Scan(&title, &deletedAt, &content); err != nil || titl
 		names = append(names, entry.Name())
 	}
 	if len(names) != workspace.BackupsKept || names[0] != "workspace-2026-11-30.db.gz" || names[len(names)-1] != "workspace-2026-12-13.db.gz" {
-		t.Fatalf("the backups after %d more days = %v", workspace.BackupsKept+2, names)
+		t.Fatalf("the backups %d days later = %v", workspace.BackupsKept+2, names)
 	}
 }
 
@@ -296,13 +313,10 @@ func unpack(t *testing.T, name string) *sql.DB {
 	if err := out.Close(); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite3", "file:"+plain+"?mode=ro")
+	db, err := sqlitedb.OpenReadOnly(plain)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := db.Ping(); err != nil {
-		t.Fatal(err)
-	}
 	return db
 }

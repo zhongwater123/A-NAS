@@ -93,19 +93,20 @@ func (s *Store) PurgePage(ctx context.Context, actor Actor, pageID string) error
 }
 
 // emptyTrash removes the pages deleted more than TrashDays ago. Each one is
-// recorded in the activity of whoever deleted it. It holds s.writes, so no
-// restore comes between reading them and removing them.
+// recorded in the activity of whoever deleted it, unless that account has
+// been deleted (RemoveAccount).
 func (s *Store) emptyTrash(ctx context.Context) error {
 	s.writes.Lock()
 	defer s.writes.Unlock()
-	expired, err := s.expiredPages(ctx)
-	if err != nil || len(expired) == 0 {
-		return err
-	}
+	cutoff := formatTime(s.now().AddDate(0, 0, -TrashDays))
 	return sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
+		expired, err := deleteExpired(ctx, tx, cutoff)
+		if err != nil {
+			return err
+		}
 		for _, page := range expired {
-			if _, err := tx.ExecContext(ctx, "DELETE FROM pages WHERE id = ?", page.id); err != nil {
-				return err
+			if page.deletedBy == "" {
+				continue
 			}
 			if err := s.audit(ctx, tx, Actor{AccountID: page.deletedBy}, "workspace.page_expired", "page", page.id, page.title); err != nil {
 				return err
@@ -117,9 +118,11 @@ func (s *Store) emptyTrash(ctx context.Context) error {
 
 type expiredPage struct{ id, title, deletedBy string }
 
-func (s *Store) expiredPages(ctx context.Context) ([]expiredPage, error) {
-	cutoff := formatTime(s.now().AddDate(0, 0, -TrashDays))
-	rows, err := s.db.QueryContext(ctx, "SELECT id, title, deleted_by FROM pages WHERE deleted_at <> '' AND deleted_at <= ?", cutoff)
+// deleteExpired removes the pages deleted at or before cutoff, with their
+// versions, and returns them; the rows are read to the end and closed before
+// the transaction is used again.
+func deleteExpired(ctx context.Context, tx *sql.Tx, cutoff string) ([]expiredPage, error) {
+	rows, err := tx.QueryContext(ctx, "DELETE FROM pages WHERE deleted_at <> '' AND deleted_at <= ? RETURNING id, title, deleted_by", cutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -132,5 +135,8 @@ func (s *Store) expiredPages(ctx context.Context) ([]expiredPage, error) {
 		}
 		pages = append(pages, page)
 	}
-	return pages, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return pages, rows.Close()
 }

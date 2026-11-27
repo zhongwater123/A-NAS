@@ -32,17 +32,20 @@
    systemctl is-active anas-workspace.service
    ```
    - 预期：输出 `inactive`（`failed` 也表示服务已不在运行）。
-   - 完成标准：服务已停。输出 `active` 或 `deactivating` 时它还开着数据库：停止，不做下一步。
+   - 完成标准：服务已停。输出别的（`active`、`deactivating`、`activating` 等）时它还开着或正要打开数据库：停止，不做下一步。
 
-3. 留下现在的数据库。只在服务已停时移动：
+3. 留下现在的数据库。只在服务的状态是 `inactive` 或 `failed` 时移动：
    ```sh
    cd /srv/a-nas/data/workspace
-   if systemctl is-active --quiet anas-workspace.service; then echo "服务仍在运行，没有移动"; else
+   state=$(systemctl is-active anas-workspace.service)
+   case "$state" in inactive|failed)
      replaced=replaced-$(date -u +%Y%m%dT%H%M%SZ); mkdir -m 0700 "$replaced"
      for f in workspace.db workspace.db-wal workspace.db-shm; do [ -e "$f" ] && mv "$f" "$replaced/"; done
-     ls "$replaced"; fi
+     ls "$replaced";;
+   *) echo "服务是 $state，没有移动";;
+   esac
    ```
-   - 预期：列出 `workspace.db`（`-wal`、`-shm` 可能没有）。
+   - 预期：列出 `workspace.db`（`-wal`、`-shm` 可能没有）。输出“服务是 …，没有移动”时回到第 2 步。
    - 完成标准：目录里不再有 `workspace.db*`。现在的 `-wal` 与 `-shm` 不能留在原处：SQLite 会把它们写进恢复的数据库。
 
 4. 解压备份。

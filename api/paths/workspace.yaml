@@ -65,6 +65,7 @@
     responses:
       "200": { description: The trash, content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspaceTrash" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/workspace/trash/{pageId}:
   parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
   delete:
@@ -75,6 +76,7 @@
       "204": { description: Removed for good }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/workspace/trash/{pageId}/restore:
   parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
   post:
@@ -85,6 +87,7 @@
       "200": { description: "The page, back in the list", content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspacePageSummary" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/workspace/pages/{pageId}/versions:
   parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
   post:
