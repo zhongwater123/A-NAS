@@ -240,6 +240,32 @@ func TestTheWorkspaceKeepsToTheContract(t *testing.T) {
 	if got := f.member.call(t, http.MethodDelete, "/api/v1/workspace/pages/"+page.ID, ""); got.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d %s", got.Code, got.Body.String())
 	}
+	// A deleted page waits in the trash, which everyone sees; its uploader
+	// brings it back or removes it for good.
+	if got := f.member.call(t, http.MethodGet, "/api/v1/workspace/pages/"+page.ID, ""); got.Code != http.StatusNotFound {
+		t.Fatalf("a page in the trash = %d", got.Code)
+	}
+	if got := f.bob.call(t, http.MethodGet, "/api/v1/workspace/trash", ""); got.Code != http.StatusOK ||
+		!strings.Contains(got.Body.String(), `"id":"`+page.ID+`"`) || !strings.Contains(got.Body.String(), `"versions":2`) {
+		t.Fatalf("trash = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.bob.call(t, http.MethodPost, "/api/v1/workspace/trash/"+page.ID+"/restore", ""); got.Code != http.StatusForbidden {
+		t.Fatalf("another member restores the page: %d", got.Code)
+	}
+	if got := f.member.call(t, http.MethodPost, "/api/v1/workspace/trash/"+page.ID+"/restore", ""); got.Code != http.StatusOK ||
+		!strings.Contains(got.Body.String(), `"version":2`) {
+		t.Fatalf("restore = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.member.call(t, http.MethodDelete, "/api/v1/workspace/trash/"+page.ID, ""); got.Code != http.StatusNotFound {
+		t.Fatalf("purging a page in the list = %d", got.Code)
+	}
+	f.member.call(t, http.MethodDelete, "/api/v1/workspace/pages/"+page.ID, "")
+	if got := f.member.call(t, http.MethodDelete, "/api/v1/workspace/trash/"+page.ID, ""); got.Code != http.StatusNoContent {
+		t.Fatalf("purge = %d %s", got.Code, got.Body.String())
+	}
+	if got := f.member.call(t, http.MethodPost, "/api/v1/workspace/trash/"+page.ID+"/restore", ""); got.Code != http.StatusNotFound {
+		t.Fatalf("restoring a purged page = %d", got.Code)
+	}
 	if got := f.owner.call(t, http.MethodDelete, "/api/v1/workspace/admin/members/"+f.alice.ID, ""); got.Code != http.StatusNoContent {
 		t.Fatalf("remove a member = %d", got.Code)
 	}

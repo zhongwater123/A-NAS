@@ -2,11 +2,11 @@ import { ArrowUpRight, Check, Minus, RotateCcw, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import type { MouseEvent } from "react";
 
-import type { Space, TrashItem } from "../api.generated";
+import type { Space } from "../api.generated";
 import { formatClock, formatDateTime } from "../backup/format";
 import { formatBytes } from "../lib/bytes";
 import { FileGlyph } from "./FileGlyph";
-import { type ExpiryTone, expiryOf, spaceName, splitName } from "./model";
+import { type BinItem, type ExpiryTone, expiryOf, spaceName, splitName, workspaceName } from "./model";
 import styles from "./trash.module.css";
 
 export function Checkbox({
@@ -38,7 +38,7 @@ export function Checkbox({
 }
 
 // Name shows a file's name with its extension kept when the name is cut short.
-export function Name({ item }: { item: Pick<TrashItem, "name" | "kind"> }) {
+export function Name({ item }: { item: Pick<BinItem, "name" | "kind"> }) {
   const { stem, extension } = splitName(item.name, item.kind);
   return (
     <strong className={styles.trName} title={item.name}>
@@ -49,7 +49,8 @@ export function Name({ item }: { item: Pick<TrashItem, "name" | "kind"> }) {
 }
 
 // TrashRow is one item: what it is and where it goes back to, its size, when
-// it was deleted and how long it stays. A click on the row selects it.
+// it was deleted and how long it stays. A click on the row selects it. A
+// shared workspace page goes back to 共享工作区 with all its versions.
 export function TrashRow({
   item,
   space,
@@ -62,7 +63,7 @@ export function TrashRow({
   onPurge,
   onOpenOrigin,
 }: {
-  item: TrashItem;
+  item: BinItem;
   space?: Space;
   timeOnly: boolean;
   selected: boolean;
@@ -74,7 +75,11 @@ export function TrashRow({
   onOpenOrigin: () => void;
 }) {
   const expiry = expiryOf(item);
-  const path = [spaceName(space), ...(item.originalPath ? item.originalPath.split("/") : [])].join(" / ");
+  const path =
+    item.kind === "page"
+      ? `${workspaceName} · ${item.page.versions} 个版本`
+      : [spaceName(space), ...(item.originalPath ? item.originalPath.split("/") : [])].join(" / ");
+  const opens = item.kind === "page" ? "在共享工作区中打开" : "在文件管理中打开";
   return (
     // The checkbox selects by keyboard; a click anywhere else on the row is the same for a pointer.
     // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions
@@ -97,7 +102,7 @@ export function TrashRow({
       <FileGlyph name={item.name} kind={item.kind} />
       <div className={styles.trMain}>
         <Name item={item} />
-        {item.originalGone ? (
+        {item.kind !== "page" && item.originalGone ? (
           <span className={styles.trOrigin} title={`原文件夹已不在，恢复后放在${spaceName(space)}`}>
             <span>{path}</span>
             <em>已不在</em>
@@ -106,8 +111,8 @@ export function TrashRow({
           <button
             type="button"
             className={styles.trOrigin}
-            title="在文件管理中打开"
-            aria-label={`在文件管理中打开 ${path}`}
+            title={opens}
+            aria-label={`${opens} ${path}`}
             onClick={onOpenOrigin}
           >
             <span>{path}</span>

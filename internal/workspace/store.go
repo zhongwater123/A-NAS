@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
@@ -30,6 +31,10 @@ const (
 	MaxEdits      = 50
 	// AuditDays bounds the workspace's audit trail.
 	AuditDays = 180
+	// TrashDays is how long a deleted page can be brought back.
+	TrashDays = 30
+	// BackupsKept is how many daily copies of workspace.db stay.
+	BackupsKept = 14
 )
 
 var (
@@ -103,6 +108,9 @@ type Store struct {
 	// and adds the next one, and the service is this database's only writer.
 	writes sync.Mutex
 	live   live
+	// backupWaits is whether the last backup found the data volume at its
+	// reserve; Upkeep reports that once, not every time it runs.
+	backupWaits atomic.Bool
 }
 
 // Open opens workspace.db in directory, which the caller verified is the
@@ -203,6 +211,22 @@ DROP TABLE members;
 DROP TABLE versions;
 DROP TABLE pages;
 `,
+}, {
+	// A deleted page waits in the trash for TrashDays with its versions.
+	// Going back to a build without the trash brings its pages back to the
+	// list rather than losing them.
+	Up: `
+ALTER TABLE pages ADD COLUMN deleted_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE pages ADD COLUMN deleted_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE pages ADD COLUMN deleted_by_name TEXT NOT NULL DEFAULT '';
+CREATE INDEX pages_deleted ON pages(deleted_at) WHERE deleted_at <> '';
+`,
+	Down: `
+DROP INDEX pages_deleted;
+ALTER TABLE pages DROP COLUMN deleted_by_name;
+ALTER TABLE pages DROP COLUMN deleted_by;
+ALTER TABLE pages DROP COLUMN deleted_at;
+`,
 }}}
 
 type queryer interface {
@@ -230,8 +254,8 @@ func (s *Store) audit(ctx context.Context, q queryer, actor Actor, action, resou
 }
 
 // admit checks the data volume's reserve for size more bytes.
-func (s *Store) admit(size int) error {
-	ok, err := s.admits(s.directory, int64(size))
+func (s *Store) admit(size int64) error {
+	ok, err := s.admits(s.directory, size)
 	if err != nil {
 		return err
 	}

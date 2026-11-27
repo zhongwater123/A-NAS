@@ -70,6 +70,25 @@ schemas:
     required: [items]
     properties:
       items: { type: array, items: { $ref: "#/schemas/WorkspacePageSummary" } }
+  WorkspaceTrashedPage:
+    type: object
+    additionalProperties: false
+    required: [id, title, createdBy, deletedBy, deletedAt, purgeAt, versions, sizeBytes]
+    properties:
+      id: { type: string }
+      title: { type: string }
+      createdBy: { $ref: "#/schemas/WorkspacePerson" }
+      deletedBy: { $ref: "#/schemas/WorkspacePerson" }
+      deletedAt: { type: string, format: date-time }
+      purgeAt: { type: string, format: date-time, description: "When the page and its versions go for good: 30 days after it was deleted." }
+      versions: { type: integer, minimum: 1, description: How many versions come back with the page }
+      sizeBytes: { type: integer, format: int64, minimum: 0, description: "What the page's versions take up, which purging frees." }
+  WorkspaceTrash:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/WorkspaceTrashedPage" }, description: The most recently deleted first }
   WorkspacePageChanged:
     type: object
     additionalProperties: false

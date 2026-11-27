@@ -2373,7 +2373,7 @@ export interface paths {
         get: operations["getWorkspacePage"];
         put?: never;
         post?: never;
-        /** Delete a page and all its versions for everyone. Only the account that uploaded it and administrators may (403 forbidden) */
+        /** Move a page and all its versions to the trash, for everyone: it leaves the list and every operation on it answers 404 until it is restored. After 30 days in the trash it goes for good. Only the account that uploaded it and administrators may (403 forbidden) */
         delete: operations["deleteWorkspacePage"];
         options?: never;
         head?: never;
@@ -2436,6 +2436,61 @@ export interface paths {
         get: operations["exportWorkspacePage"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The deleted pages, the most recently deleted first, with when each goes for good */
+        get: operations["listWorkspaceTrash"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/trash/{pageId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a page in the trash and all its versions for good. Only the account that uploaded it and administrators may (403 forbidden); a page not in the trash is 404 */
+        delete: operations["purgeWorkspacePage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace/trash/{pageId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bring a page back from the trash with all its versions, in its place in the list. Only the account that uploaded it and administrators may (403 forbidden); a page not in the trash is 404 */
+        post: operations["restoreWorkspacePage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8940,6 +8995,30 @@ export interface components {
             error: components["schemas"]["ErrorDetail"];
             latest: components["schemas"]["WorkspaceVersion"];
         };
+        WorkspaceTrashedPage: {
+            id: string;
+            title: string;
+            createdBy: components["schemas"]["WorkspacePerson"];
+            deletedBy: components["schemas"]["WorkspacePerson"];
+            /** Format: date-time */
+            deletedAt: string;
+            /**
+             * Format: date-time
+             * @description When the page and its versions go for good: 30 days after it was deleted.
+             */
+            purgeAt: string;
+            /** @description How many versions come back with the page */
+            versions: number;
+            /**
+             * Format: int64
+             * @description What the page's versions take up, which purging frees.
+             */
+            sizeBytes: number;
+        };
+        WorkspaceTrash: {
+            /** @description The most recently deleted first */
+            items: components["schemas"]["WorkspaceTrashedPage"][];
+        };
         WorkspaceViewing: {
             pageId: string;
             version: number;
@@ -9849,6 +9928,8 @@ export type WorkspacePageSummary = components['schemas']['WorkspacePageSummary']
 export type WorkspacePageList = components['schemas']['WorkspacePageList'];
 export type WorkspacePage = components['schemas']['WorkspacePage'];
 export type WorkspacePageChanged = components['schemas']['WorkspacePageChanged'];
+export type WorkspaceTrashedPage = components['schemas']['WorkspaceTrashedPage'];
+export type WorkspaceTrash = components['schemas']['WorkspaceTrash'];
 export type WorkspaceViewing = components['schemas']['WorkspaceViewing'];
 export type WorkspaceRect = components['schemas']['WorkspaceRect'];
 export type WorkspaceSelection = components['schemas']['WorkspaceSelection'];
@@ -14643,7 +14724,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Deleted */
+            /** @description Moved to the trash */
             204: {
                 headers: {
                     [name: string]: unknown;
@@ -14785,6 +14866,80 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+        };
+    };
+    listWorkspaceTrash: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trash */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceTrash"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    purgeWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed for good */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    restoreWorkspacePage: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                pageId: components["parameters"]["WorkspacePageID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page, back in the list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePageSummary"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     setWorkspaceViewing: {

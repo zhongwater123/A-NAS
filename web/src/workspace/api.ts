@@ -11,6 +11,7 @@ export type WorkspacePresence = components["schemas"]["WorkspacePresence"];
 export type WorkspaceAgentWork = components["schemas"]["WorkspaceAgentWork"];
 export type WorkspaceSelection = components["schemas"]["WorkspaceSelection"];
 export type WorkspaceMemberAccount = components["schemas"]["WorkspaceMemberAccount"];
+export type WorkspaceTrashedPage = components["schemas"]["WorkspaceTrashedPage"];
 export type AgentToken = components["schemas"]["AgentToken"];
 export type AgentKind = components["schemas"]["AgentKind"];
 
@@ -41,7 +42,15 @@ export const saveVersion = (pageId: string, baseVersion: number, file: File) =>
 export const renamePage = (pageId: string, title: string) =>
   call(client.PATCH("/api/v1/workspace/pages/{pageId}", { ...page(pageId), body: { title } }));
 
+// deletePage moves a page to the trash, where it stays for 30 days.
 export const deletePage = (pageId: string) => call(client.DELETE("/api/v1/workspace/pages/{pageId}", page(pageId)));
+
+export async function listTrash(signal?: AbortSignal): Promise<WorkspaceTrashedPage[]> {
+  return (await call(client.GET("/api/v1/workspace/trash", { signal }))).items;
+}
+export const restorePage = (pageId: string) =>
+  call(client.POST("/api/v1/workspace/trash/{pageId}/restore", page(pageId)));
+export const purgePage = (pageId: string) => call(client.DELETE("/api/v1/workspace/trash/{pageId}", page(pageId)));
 
 const versionPath = (pageId: string, version: number) =>
   `/api/v1/workspace/pages/${encodeURIComponent(pageId)}/versions/${version}`;

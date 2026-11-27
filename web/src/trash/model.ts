@@ -1,8 +1,48 @@
 import { errorText } from "../api/errorMessages";
-import type { RestoredEntry, Space, TrashItem } from "../api.generated";
+import type { RestoredEntry, Space, TrashItem, WorkspaceTrashedPage } from "../api.generated";
 import { formatDay } from "../backup/format";
 import { calendarDays } from "../lib/time";
 import type { RestoreConflict } from "./api";
+
+// workspaceBin stands in for a space in the recycle bin for the pages of
+// 共享工作区, which keeps them in a trash of its own
+// (docs/specs/shared-workspace.md).
+export const workspaceBin = "workspace";
+export const workspaceName = "共享工作区";
+
+// PageItem is a shared workspace page in the recycle bin. Its id keeps it
+// apart from files; restoring and deleting it go to the workspace.
+export interface PageItem {
+  id: string;
+  kind: "page";
+  name: string;
+  spaceId: typeof workspaceBin;
+  sizeBytes: number;
+  deletedAt: string;
+  purgeAt: string;
+  page: WorkspaceTrashedPage;
+}
+
+// BinItem is one row of the recycle bin: a file or folder, or a page.
+export type BinItem = TrashItem | PageItem;
+
+// binPages are the trashed pages the recycle bin lists for an account: the
+// ones it uploaded or deleted. It may restore and purge each of them; the
+// workspace's own trash shows the rest.
+export function binPages(pages: WorkspaceTrashedPage[], userId: string): PageItem[] {
+  return pages
+    .filter((page) => page.createdBy.id === userId || page.deletedBy.id === userId)
+    .map((page) => ({
+      id: `${workspaceBin}:${page.id}`,
+      kind: "page",
+      name: page.title,
+      spaceId: workspaceBin,
+      sizeBytes: page.sizeBytes,
+      deletedAt: page.deletedAt,
+      purgeAt: page.purgeAt,
+      page,
+    }));
+}
 
 export type TrashSort = "deleted" | "expiry" | "size";
 
@@ -52,14 +92,14 @@ export function restoredName(name: string, kind: TrashItem["kind"], attempt = 1)
 
 // splitName parts a file's name before its extension, so a long name can be
 // cut short and still show what kind of file it is.
-export function splitName(name: string, kind: TrashItem["kind"]): { stem: string; extension: string } {
+export function splitName(name: string, kind: BinItem["kind"]): { stem: string; extension: string } {
   const dot = name.lastIndexOf(".");
-  if (kind === "directory" || dot <= 0 || name.length - dot > 8) return { stem: name, extension: "" };
+  if (kind !== "file" || dot <= 0 || name.length - dot > 8) return { stem: name, extension: "" };
   return { stem: name.slice(0, dot), extension: name.slice(dot) };
 }
 
-export function sortItems(items: TrashItem[], sort: TrashSort): TrashItem[] {
-  const newest = (left: TrashItem, right: TrashItem) => Date.parse(right.deletedAt) - Date.parse(left.deletedAt);
+export function sortItems(items: BinItem[], sort: TrashSort): BinItem[] {
+  const newest = (left: BinItem, right: BinItem) => Date.parse(right.deletedAt) - Date.parse(left.deletedAt);
   return [...items].sort((left, right) =>
     sort === "expiry"
       ? Date.parse(left.purgeAt) - Date.parse(right.purgeAt)
@@ -72,13 +112,13 @@ export function sortItems(items: TrashItem[], sort: TrashSort): TrashItem[] {
 export interface TrashGroup {
   key: string;
   label: string;
-  items: TrashItem[];
+  items: BinItem[];
 }
 
 // groupItems groups sorted items by the day they were deleted, or, sorted
 // by expiry, into those that go within a week and the rest. Sorted by size
 // they are one group without a name.
-export function groupItems(items: TrashItem[], sort: TrashSort, now = new Date()): TrashGroup[] {
+export function groupItems(items: BinItem[], sort: TrashSort, now = new Date()): TrashGroup[] {
   if (sort === "size") return items.length ? [{ key: "size", label: "", items }] : [];
   const groups: TrashGroup[] = [];
   for (const item of items) {
@@ -121,7 +161,7 @@ const urgency: ExpiryTone[] = ["calm", "soon", "urgent"];
 // purgeSchedule is what the recycle bin deletes on each of the coming days,
 // from today to the last day anything is due and for at least 30 days. A
 // day is as urgent as the most urgent of its items.
-export function purgeSchedule(items: TrashItem[], now = new Date()): PurgeDay[] {
+export function purgeSchedule(items: BinItem[], now = new Date()): PurgeDay[] {
   const offsets = items.map((item) => Math.min(purgeOffset(item, now), scheduleLimit));
   const days: PurgeDay[] = Array.from({ length: Math.max(scheduleDays, ...offsets) + 1 }, (_, offset) => ({
     offset,
@@ -140,9 +180,9 @@ export function purgeSchedule(items: TrashItem[], now = new Date()): PurgeDay[] 
   return days;
 }
 
-// matches filters by space, by a part of the name, ignoring case, and by the
-// day the item is deleted for good.
-export function matches(item: TrashItem, spaceId: string, query: string, purgeDay?: number, now = new Date()): boolean {
+// matches filters by space (or the workspace's pages), by a part of the
+// name, ignoring case, and by the day the item is deleted for good.
+export function matches(item: BinItem, spaceId: string, query: string, purgeDay?: number, now = new Date()): boolean {
   if (spaceId && item.spaceId !== spaceId) return false;
   if (purgeDay !== undefined && Math.min(purgeOffset(item, now), scheduleLimit) !== purgeDay) return false;
   const needle = query.trim().toLocaleLowerCase("zh-CN");
@@ -151,13 +191,13 @@ export function matches(item: TrashItem, spaceId: string, query: string, purgeDa
 
 // BatchOutcome is what restoring a selection did. renamed and replaced count
 // the restored items that came back beside, or in place of, one of their
-// name; skipped ones stay in the recycle bin.
+// name; skipped ones, files whose name was taken, stay in the recycle bin.
 export interface BatchOutcome {
-  done: TrashItem[];
+  done: BinItem[];
   renamed: number;
   replaced: number;
   skipped: TrashItem[];
-  gone: TrashItem[];
+  gone: BinItem[];
   failed: string[];
 }
 
@@ -197,6 +237,7 @@ export function restoredText(
   return `已恢复“${restored.name}”到 ${location}`;
 }
 
-export function messageOf(error: unknown): string {
-  return errorText(error, "trash");
+// messageOf words an error of the recycle bin, or of 共享工作区 for its pages.
+export function messageOf(error: unknown, item?: BinItem): string {
+  return errorText(error, item?.kind === "page" ? "workspace" : "trash");
 }

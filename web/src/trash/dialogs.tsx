@@ -7,7 +7,7 @@ import { formatBytes } from "../lib/bytes";
 import { Dialog } from "../ui/workspace";
 import { type RestoreConflict, restoreTrash } from "./api";
 import { FileGlyph } from "./FileGlyph";
-import { messageOf, restoredName } from "./model";
+import { type BinItem, messageOf, restoredName } from "./model";
 import { Name } from "./TrashRow";
 import styles from "./trash.module.css";
 
@@ -16,7 +16,7 @@ function Spinner() {
 }
 
 // Subjects lists the first few items a dialog is about, and how many more.
-function Subjects({ items, detail }: { items: TrashItem[]; detail: (item: TrashItem) => string }) {
+function Subjects<Item extends BinItem>({ items, detail }: { items: Item[]; detail: (item: Item) => string }) {
   const shown = items.slice(0, 4);
   return (
     <>
@@ -270,7 +270,7 @@ export function PurgeDialog({
   onClose,
   onConfirm,
 }: {
-  items: TrashItem[];
+  items: BinItem[];
   everything: boolean;
   busy: boolean;
   onClose: () => void;
@@ -307,7 +307,7 @@ export function PurgeDialog({
         {everything
           ? `全部 ${items.length} 个项目（共 ${size}）将被立即删除，无法再恢复。`
           : single
-            ? `${single.kind === "directory" ? "这个文件夹及其中的全部内容" : "这个文件"}将被立即删除，无法再恢复。`
+            ? `${whatGoes(single)}将被立即删除，无法再恢复。`
             : `所选的 ${items.length} 个项目（共 ${size}）将被立即删除，无法再恢复。`}
       </p>
     </Dialog>
@@ -316,7 +316,14 @@ export function PurgeDialog({
 
 // sizeOf is an item's size; a folder of empty files or one not yet indexed
 // has none worth showing.
-function sizeOf(item: TrashItem): string {
+function sizeOf(item: BinItem): string {
+  if (item.kind === "page") return `${item.page.versions} 个版本 · ${formatBytes(item.sizeBytes)}`;
   if (item.kind === "directory") return item.sizeBytes > 0 ? `文件夹 · ${formatBytes(item.sizeBytes)}` : "文件夹";
   return formatBytes(item.sizeBytes);
+}
+
+// whatGoes names what purging one item removes.
+function whatGoes(item: BinItem): string {
+  if (item.kind === "page") return `这个共享页面及其全部 ${item.page.versions} 个版本`;
+  return item.kind === "directory" ? "这个文件夹及其中的全部内容" : "这个文件";
 }

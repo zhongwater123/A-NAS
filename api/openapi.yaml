@@ -155,6 +155,9 @@ paths:
   /api/v1/workspace/pages/{pageId}/versions: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions" }
   /api/v1/workspace/pages/{pageId}/versions/{version}/view: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1view" }
   /api/v1/workspace/pages/{pageId}/versions/{version}/file: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1file" }
+  /api/v1/workspace/trash: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1trash" }
+  /api/v1/workspace/trash/{pageId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1trash~1{pageId}" }
+  /api/v1/workspace/trash/{pageId}/restore: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1trash~1{pageId}~1restore" }
   /api/v1/workspace/viewing: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing" }
   /api/v1/workspace/viewing/{tab}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing~1{tab}" }
   /api/v1/workspace/selection: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1selection" }
