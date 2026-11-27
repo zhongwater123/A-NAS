@@ -311,10 +311,12 @@ describe("ScoringPanel for a rater", () => {
     expect(await screen.findByText("练习结束，这一张不计分。下面是要打分的照片。")).toBeTruthy();
     expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
     expect(screen.getByText(counted("已打 0 张"))).toBeTruthy();
-    await user.click(within(bubble() as HTMLElement).getByRole("button", { name: "开始打分" }));
+    // The guide counts as seen once the practice photo is answered, and the
+    // first score on a photo to score puts its last bubble away.
+    expect(window.localStorage.getItem(`a-nas.scoring.coach.user:alice.${batch.id}`)).toBe("1");
+    await user.keyboard("3");
     expect(bubble()).toBeNull();
     expect(answered).toHaveLength(0);
-    expect(window.localStorage.getItem(`a-nas.scoring.coach.user:alice.${batch.id}`)).toBe("1");
     // The next visit opens on the photos.
     await user.click(screen.getByRole("button", { name: `返回批次（${batch.name}）` }));
     await user.click(await screen.findByRole("button", { name: "开始打分" }));
@@ -351,6 +353,31 @@ describe("ScoringPanel for a rater", () => {
     expect((await shownPhoto()).getAttribute("src")).toContain("/claims/t1/image");
     expect(bubble()).toBeNull();
     expect(answered).toHaveLength(0);
+  });
+
+  it("ends the steps about the first 打分项 when the rater moves on before they are read", async () => {
+    const batch = raterBatch({
+      id: `b-${Math.random()}`,
+      scale: "five",
+      dimensions: dimensionsOf("composition", "overall"),
+    });
+    const { handlers } = raterHandlers(batch, ["t1"]);
+    server.use(...handlers);
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:alice" access={{ admin: false, rater: true }} />);
+    await user.click(await screen.findByRole("button", { name: "开始打分" }));
+    await screen.findByRole("img", { name: "练习用的照片" });
+    const said = () => bubble()?.querySelector("p")?.textContent;
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.keyboard("4");
+    expect(said()).toMatch(/^你打了 4 分。手册给这张 3 分/);
+    // Enter before the rest of the steps: 总体's bubble, and after it none of
+    // the first 打分项's.
+    await user.keyboard("{Enter}");
+    expect(said()).toMatch(/^最后打总体/);
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    expect(bubble()).toBeNull();
   });
 
   it("skips the guide, and shows it again from the scoring guide with the handbook, keeping the photo", async () => {

@@ -533,11 +533,13 @@ export function Stage({
   };
 
   // scoredPractice moves the guide on once the rater scored the practice
-  // photo's first 打分项: to the handbook's answer, where there is one.
+  // photo's first 打分项: to the handbook's answer, where there is one. A score
+  // on a photo to score puts away the bubble that ends the guide.
   const scoredPractice = () => {
     if (practice && item === 0 && (step === "photo" || step === "item" || step === "pick")) {
       setStep(practice.answer ? "feedback" : "acts");
     }
+    if (!practice && step === "done") setStep(undefined);
   };
 
   // endPractice leaves the practice photo for the photos to score, with what
@@ -600,12 +602,15 @@ export function Stage({
   // to the next photo, or back to the one the rater left to change this one.
   const answer = (kind: ScoringRatingInput["kind"], scores?: Record<string, number>) => {
     if (!shown || !ready) return;
-    // The practice photo's answer goes nowhere.
+    // The practice photo's answer goes nowhere; answering it is having
+    // seen the guide, whether or not 开始打分 is pressed after.
     if (practice) {
       endPractice();
       if (step !== undefined) setStep("done");
+      onCoached?.();
       return;
     }
+    if (step === "done") setStep(undefined);
     setArmed(false);
     const { body, now } = answerOf(kind, first, scores, watch.current, root.current, image.current);
     outbox.push({ token: shown.token, body });
@@ -658,10 +663,10 @@ export function Stage({
       setItem(item + 1);
       setReached((furthest) => Math.max(furthest, item + 1));
       // On the practice photo, 情绪 and a 总体 after the first 打分项 get a
-      // bubble of their own; the guide ends its waiting for Enter at the
-      // first move on.
+      // bubble of their own. The other steps are about the first 打分项: moving
+      // on ends them, also when the rater moves on before reaching Enter's.
       if (practice && step !== undefined && step !== "done") {
-        const moved = step === "confirm" ? "free" : step;
+        const moved = isAside(step) ? step : "free";
         const aside = asideFor(dimensions[item + 1].id);
         if (aside) {
           resumeStep.current = isAside(moved) ? "free" : moved;
