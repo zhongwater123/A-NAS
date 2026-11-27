@@ -28,17 +28,28 @@
 
 ## 步骤
 
-1. **确认这台 NAS 连得上接口**（以普通账号即可）：
+1. **确认这台 NAS 连得上接口，且接口按描述请求的样子回答**（以普通账号即可）。探测请求和真正的描述请求一样：带一张图、JSON Schema 的 `response_format`、`repetition_penalty`、`chat_template_kwargs`，流式回答：
    ```bash
    read -rp 'URL: ' URL; read -rp 'Model: ' MODEL; read -rsp 'Key: ' KEY; echo
-   curl -sS -o /dev/null -w '%{http_code}\n' --connect-timeout 10 --max-time 60 \
+   MODEL="$MODEL" /usr/lib/a-nas/ai/runtime/bin/python -c '
+   import base64, io, json, os
+   from PIL import Image
+   picture = io.BytesIO(); Image.new("RGB", (512, 288), "gray").save(picture, "JPEG")
+   image = "data:image/jpeg;base64," + base64.b64encode(picture.getvalue()).decode()
+   schema = {"type": "object", "properties": {"color": {"type": "string"}}, "required": ["color"]}
+   print(json.dumps({"model": os.environ["MODEL"], "max_tokens": 50, "temperature": 0.2, "repetition_penalty": 1.1,
+       "stream": True, "stream_options": {"include_usage": True}, "chat_template_kwargs": {"enable_thinking": False},
+       "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}},
+       "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}},
+                                                  {"type": "text", "text": "图里是什么颜色？"}]}]}))' > /tmp/describe-probe.json
+   curl -sS -w '\nHTTP %{http_code}\n' --connect-timeout 10 --max-time 60 \
      -H @<(printf 'Authorization: Bearer %s\n' "$KEY") -H 'Content-Type: application/json' \
-     -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" "$URL"
-   unset KEY
+     --data-binary @/tmp/describe-probe.json "$URL" | tail -n 6
+   unset KEY; rm /tmp/describe-probe.json
    ```
    - 密钥经 `printf`（shell 内建命令）写进只有 curl 读的管道，不出现在任何进程的命令行里，别的账号用 `ps` 看不到。
-   - 预期：`200`。
-   - 完成标准：是 `200`。连不上、60 秒内没有回答（curl 报超时）或 `401` 时停下。
+   - 预期：最后一行 `HTTP 200`；前面是 `data: {...}` 的流，拼起来是 `{"color": ...}` 这样的 JSON，倒数几行里有 `"usage"` 与 `prompt_tokens`，最后是 `data: [DONE]`。
+   - 完成标准：如上。连不上、60 秒内没有回答（curl 报超时）、`401`，或回答 `4xx` 说不支持图片、`response_format`、`chat_template_kwargs`、`repetition_penalty` 时停下：AI Worker 遇到这些会一直等接口修好，卡片不会有描述。
 2. **root：写接口地址、模型名与密钥**，只有 root 能读：
    ```bash
    read -rp 'URL: ' URL; read -rp 'Model: ' MODEL; read -rsp 'Key: ' KEY; echo

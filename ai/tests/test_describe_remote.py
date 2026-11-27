@@ -12,7 +12,9 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from unittest import mock
 
 from anas_ai import providers, worker
 
@@ -23,7 +25,10 @@ STAND_IN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_llama_
 
 
 class Endpoint(http.server.ThreadingHTTPServer):
-    """Answers each POST with the next of answers: (status, body) or "stream", the answer as vLLM streams it."""
+    """Answers each POST with the next of answers: (status, body), or "stream" or "length", an answer as vLLM streams it.
+
+    "length" is an answer the context cut short, after 7000 prompt tokens.
+    """
 
     def __init__(self, answers):
         super().__init__(("127.0.0.1", 0), EndpointHandler)
@@ -37,7 +42,7 @@ class EndpointHandler(http.server.BaseHTTPRequestHandler):
         self.server.requests.append({"path": self.path, "authorization": self.headers.get("Authorization"),
                                      "body": body})
         answer = self.server.answers.pop(0)
-        if answer != "stream":
+        if answer not in ("stream", "length"):
             status, text = answer
             self.send_response(status)
             self.send_header("Content-Length", str(len(text)))
@@ -48,9 +53,11 @@ class EndpointHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         text = json.dumps(ANSWER, ensure_ascii=False)
+        cut = answer == "length"
         events = [{"choices": [{"delta": {"content": text[:10]}}]},
-                  {"choices": [{"delta": {"content": text[10:]}, "finish_reason": "stop"}]},
-                  {"choices": [], "usage": {"prompt_tokens": 1210}}]
+                  {"choices": [{"delta": {"content": text[10:20] if cut else text[10:]},
+                                "finish_reason": "length" if cut else "stop"}]},
+                  {"choices": [], "usage": {"prompt_tokens": 7000 if cut else 1210}}]
         for event in events:
             self.wfile.write(b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n")
         self.wfile.write(b"data: [DONE]\n\n")
@@ -151,10 +158,55 @@ class RemoteDescriberTest(unittest.TestCase):
         with self.assertRaisesRegex(providers.Unavailable, "401"):
             self.describe(self.reader(server, key="wrong"))
 
-    def test_a_request_the_endpoint_refuses_is_invalid(self):
-        server = self.endpoint((400, "bad image"))
+    def test_a_request_the_endpoint_cannot_serve_waits_for_the_endpoint(self):
+        # Its configuration, not the card: the card is not failed for it.
+        for answer in ((400, "response_format is not supported"), (413, "too large a body"), (422, "bad image"),
+                       (301, "moved")):
+            server = self.endpoint(answer)
+            with self.assertRaisesRegex(providers.Unavailable, str(answer[0])):
+                self.describe(self.reader(server))
+
+    def test_a_card_too_long_for_the_model_is_invalid(self):
+        server = self.endpoint((400, "This model's maximum context length is 8192 tokens."))
         with self.assertRaises(providers.InvalidInput):
             self.describe(self.reader(server))
+
+    def test_a_gateway_that_fails_is_waited_for(self):
+        server = self.endpoint((502, "bad gateway"), (504, "timeout"), "stream")
+        self.assertEqual(self.describe(self.reader(server))["summary"], "两人走向雪山")
+        server = self.endpoint((500, "oops"), (500, "oops"), (500, "oops"))
+        with self.assertRaisesRegex(providers.Unavailable, "500"):
+            self.describe(self.reader(server))
+
+    def test_an_answer_cut_short_is_asked_again_whatever_the_prompt_took(self):
+        # llama-server's context is not the endpoint's: a long prompt does
+        # not make the card fail at once, it is asked again as any answer.
+        server = self.endpoint("length", "length", "length")
+        with self.assertRaises(providers.InvalidResult):
+            self.describe(self.reader(server))
+        self.assertEqual(len(server.requests), 3)
+
+    def test_looking_the_endpoint_up_stops_when_told_and_in_time(self):
+        server = self.endpoint()
+        reader = self.reader(server)
+        never = threading.Event()
+        self.addCleanup(never.set)
+
+        def slow(*_args, **_kwargs):
+            never.wait(10)
+            raise OSError("too late")
+
+        run = reader.run_options()
+        threading.Timer(0.3, lambda: setattr(run, "terminate", True)).start()
+        started = time.monotonic()
+        with mock.patch.object(providers.socket, "getaddrinfo", slow), self.assertRaises(providers.Cancelled):
+            reader.describe([b"one", b"two", b"three"], [0, 2.4, 5], [1, 2, 3], 6, run)
+        self.assertLess(time.monotonic() - started, 3)
+        with mock.patch.object(providers.socket, "getaddrinfo", slow), \
+                mock.patch.object(providers, "DESCRIBE_CONNECT_SECONDS", 0.3), \
+                self.assertRaisesRegex(providers.Unavailable, "no address"):
+            self.describe(reader)
+        self.assertEqual(server.requests, [])
 
     def test_an_endpoint_that_cannot_be_reached_is_unavailable(self):
         server = self.endpoint()
@@ -175,6 +227,9 @@ class RemoteDescriberTest(unittest.TestCase):
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "http://127.0.0.1:port/v1/chat/completions",
                                          "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b"})
         self.assertIsNone(reader.remote, "a URL whose port is no number")
+        worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "https://[::1/v1/chat/completions",
+                                         "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b"})
+        self.assertIsNone(reader.remote, "a URL that does not parse")
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "http://describer.example/v1/chat/completions",
                                          "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b", "ANAS_AI_DESCRIBE_KEY": "secret"})
         self.assertIsNone(reader.remote, "plain http to another machine")
