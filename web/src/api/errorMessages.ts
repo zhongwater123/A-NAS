@@ -1,5 +1,6 @@
 import { accountErrors } from "../auth/accountRules";
 import { nameErrors } from "../lib/fileNames";
+import { passwordRuleText, ssidRuleText } from "../settings/network/rules";
 import { APIError } from "./client";
 
 // Only known product copy reaches the interface. Server/browser messages
@@ -24,6 +25,10 @@ const messages: Record<string, string> = {
   request_failed: "请求失败，请稍后重试",
 };
 const domains = {
+  phoneHotspot: {
+    invalid_ssid: ssidRuleText,
+    invalid_password: passwordRuleText,
+  },
   imageSearch: {
     unsupported_media_type: "无法读取这张图片，换一张试试",
     too_large: "图片太大，换一张小一些的试试",
@@ -124,6 +129,25 @@ const domains = {
     song_start_unusable: "从这里起没有可用的选段",
     media_unavailable: "媒体服务暂不可用，请稍后重试",
     compute_unavailable: "计算服务暂不可用，请稍后重试",
+  },
+  workspace: {
+    workspace_unavailable: "共享工作区暂时不可用（数据盘未就绪），请稍后再试",
+    workspace_forbidden: "管理员没有让你使用共享工作区",
+    page_changed: "页面在你打开之后有了新版本",
+    not_found: "页面或版本已不存在",
+    forbidden: "只有上传这个页面的人和管理员能删除它",
+    validation_failed: "要上传 UTF-8 编码的 HTML 文件，标题最多 200 个字",
+    request_too_large: "页面不能超过 20 MB",
+    agent_token_limit: "每个账号最多连接 20 个 agent，先撤销不用的",
+  },
+  // The family service serves the to-dos, so its codes name the family; here
+  // they name the to-dos.
+  todos: {
+    family_unavailable: "待办暂时不可用（数据盘未就绪），请稍后再试",
+    validation_failed: "填写的内容不符合要求，请检查标题、日期、金额和“谁的”",
+    changed: "别人刚改过这件事，已刷新，请再改一次",
+    conflict: "这件事已经处理或忽略了，不能再推迟",
+    not_found: "这件事已不存在",
   },
   webSearch: {
     web_search_disabled: "管理员已关闭网页搜索",

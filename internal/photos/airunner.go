@@ -763,7 +763,9 @@ ON CONFLICT(object_id, derivation) DO NOTHING`, now, now, petsDerivation, info.A
 		if err := lib.requeueStaleTexts(ctx, info.OCR, record.Reader != info.OCR); err != nil {
 			return err
 		}
-		// The montage center's descriptions: only those a grant still refers to.
+		// The montage center's descriptions: only those a grant still refers
+		// to, the cards that failed under another release among them
+		// (staleFailure). A new reader also starts the failed jobs over.
 		if err := lib.queueMissingDescriptions(ctx, lib.db, info.OCR, record.Reader != info.OCR, referencedObjects); err != nil {
 			return err
 		}

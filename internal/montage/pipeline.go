@@ -33,6 +33,9 @@ type Compute interface {
 	// ShotsAnswer turns the second step's answer back into the outline's
 	// pictures, as the fill reads them.
 	ShotsAnswer(ctx context.Context, answer, picked json.RawMessage, pictures []int) (json.RawMessage, error)
+	// Likeness is how alike two beats look: the cosine of the means of the
+	// window vectors each covers, a and b of dimensions values a window.
+	Likeness(ctx context.Context, a, b []float32, dimensions int) (float64, error)
 }
 
 // PlanBriefRequest asks for a planning step's brief: the catalog's cards in
@@ -45,6 +48,10 @@ type PlanBriefRequest struct {
 	Ask           string          `json:"ask"`
 	Chronological bool            `json:"chronological"`
 	Picked        json.RawMessage `json:"picked,omitempty"`
+	// Change and Base, for a recut (#596): the member's sentence, and the
+	// outline and shots of the version it starts from.
+	Change string          `json:"change,omitempty"`
+	Base   json.RawMessage `json:"base,omitempty"`
 }
 
 // PlanBrief is a step's brief: Data and Schema go to the model; Slots and
@@ -91,7 +98,10 @@ type FillRow struct {
 }
 
 // FillRequest is the fill's input: the catalog's cards, the windows beneath
-// them, the excerpt, the plans and the clear spans already found.
+// them, the excerpt, the plans and the clear spans already found. Pins,
+// for a film edited after it was made (#596), list its slots in film order
+// with the beat that leads each; without them the fill is the eighth
+// version's.
 type FillRequest struct {
 	FPS     int                   `json:"fps"`
 	Rows    []FillRow             `json:"rows"`
@@ -101,6 +111,16 @@ type FillRequest struct {
 	Planned json.RawMessage       `json:"planned"`
 	Picked  json.RawMessage       `json:"picked"`
 	Known   map[string][2]float64 `json:"known"`
+	Pins    []FillPin             `json:"pins,omitempty"`
+}
+
+// FillPin is one slot of an edited film: the plan's part and picture it
+// belongs to, its span in the film and the beat ("card/n") that leads it.
+type FillPin struct {
+	Part    int        `json:"part"`
+	Picture int        `json:"picture"`
+	Slot    [2]float64 `json:"slot"`
+	Beat    string     `json:"beat"`
 }
 
 // FillNeed is the clear span the fill needs next.
@@ -117,7 +137,9 @@ type FillNeed struct {
 // Clip is one shot of the film: Start to End seconds of Video, shown for
 // Share seconds (longer than the source when Slow stretches it) in Slot.
 type Clip struct {
-	Card  string     `json:"card"`
+	Card string `json:"card"`
+	// Beat is the beat of the card the shot was cut around, "card/n".
+	Beat  string     `json:"beat,omitempty"`
 	Video string     `json:"video"`
 	Start float64    `json:"start"`
 	End   float64    `json:"end"`
@@ -179,12 +201,15 @@ type Planner interface {
 var (
 	// ErrPlanPending: the plan is not back yet; the job waits for it.
 	ErrPlanPending = errors.New("the plan is not back yet")
-	// ErrPlanUnknown: the planning round ended without a plan.
+	// ErrPlanUnknown: the planning ended without a plan, and only the
+	// member may plan again. The member's VNAS plans again on its own
+	// (ErrPlanFailed); a planner that cannot, as FixedPlanner, says this.
 	ErrPlanUnknown = errors.New("the planning round ended without a plan")
-	// ErrPlanInvalid: the plan failed its checks too many times.
+	// ErrPlanInvalid: the plan is not one the job can take, and planning
+	// again is the member's call (FixedPlanner).
 	ErrPlanInvalid = errors.New("the plan failed its checks")
-	// ErrPlanFailed: the planning itself failed twice before the model
-	// planned (docs/architecture/montage-planning-session.md, 重试).
+	// ErrPlanFailed: the planning was tried as many rounds as a job's is
+	// and none finished it; the job fails (docs/architecture/montage-planning-session.md, 重试).
 	ErrPlanFailed = errors.New("the planning failed")
 )
 

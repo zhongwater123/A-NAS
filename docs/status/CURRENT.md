@@ -1,6 +1,6 @@
 # 当前状态
 
-更新时间：2026-11-23
+更新时间：2026-11-24
 
 本页是目录：只记当前事实、阻塞、待用户决定的事与下一步，每条一两行，细节在链接的文档中。使用者可见的变化见 [CHANGELOG](../../CHANGELOG.md)，版本范围见[发布记录](../releases/README.md)，决定的经过见[决定记录](../decisions/README.md)与 [ADR](../adr/README.md)。每次部署前的本页存为同目录下按安装日期命名的快照（如 [2026-11-10](2026-11-10.md)），规则见[文档系统](../README.md#写入规则)第 8 条。
 
@@ -48,5 +48,7 @@
 6. 家庭局域网版的 NAS 侧（发现、配对、HTTPS）：等“开始做”（[决定](../decisions/2026-11-09-home-network-first.md)）。
 7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
-9. 剪辑中心：allin1 版权待议；二次编辑按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#交付) 的 R1–R6 实施（#596）。
-10. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
+9. 剪辑中心：allin1 版权待议；二次编辑的界面按新交互重做，先写新的 ADR 与规格（[#632](https://github.com/zhongwater123/A-NAS/issues/632)），再拆 #596 的子 issue；导出与修改稿、重剪从修改稿出发两处要先定（[ADR 0039 的修订说明](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#实现与后续修订2026-11-25)）；已有的服务端见[实施方案](../architecture/montage-center.md#出片后的二次编辑)。
+10. 家庭待办：随下次发布部署到实验 NAS，再把验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
+11. 共享工作区：M1（共享页面与 agent 修改）合入后部署并实机验收，再做 M2 的批注与版本对比（[规格](../specs/shared-workspace.md)）。
+12. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

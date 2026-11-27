@@ -196,9 +196,17 @@ func (s *Store) room(incoming int64) error {
 	return nil
 }
 
-// migrations take the database from each version to the next; its version
-// is how many have run.
-var migrations = []string{schemaV1, schemaV2, schemaV3, schemaV4}
+// schema takes the database from each version to the next; its version is
+// how many steps have run (sqlitedb.Schema). The first four were released
+// without a Down; every later step has one.
+var schema = sqlitedb.Schema{
+	Name: "scoring.db",
+	Steps: []sqlitedb.Step{
+		{Up: schemaV1}, {Up: schemaV2}, {Up: schemaV3}, {Up: schemaV4},
+		{Up: schemaV5, Down: schemaV5Down},
+	},
+	WithoutDown: 4,
+}
 
 const schemaV1 = `
 CREATE TABLE raters (
@@ -336,31 +344,91 @@ ALTER TABLE batches ADD COLUMN hide_decimals INTEGER NOT NULL DEFAULT 0
 	CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'));
 `
 
+// schemaV5 lets a batch be scored on five levels. SQLite cannot change a
+// column's CHECK, so batches is rebuilt with every row as it was; the step
+// runs with foreign keys off, so that items and anchors keep their batch.
+//
+// The same version names overall 总体 and adds 画质 and 情绪 (BuiltIn). A
+// custom 打分项 an administrator gave one of those names keeps its ID and
+// gets 自定义 added to its name, or its ID when that name is taken too, so
+// that names stay unique as CreateDimension keeps them.
+const schemaV5 = `
+UPDATE custom_dimensions SET name = CASE
+	WHEN EXISTS (SELECT 1 FROM custom_dimensions AS other WHERE other.name = custom_dimensions.name || '（自定义）')
+		THEN custom_dimensions.name || '（' || custom_dimensions.id || '）'
+	ELSE custom_dimensions.name || '（自定义）'
+END
+WHERE name IN ('总体', '画质', '情绪');
+CREATE TABLE batches_v5 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three', 'five')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v5 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v5 RENAME TO batches;
+`
+
+// schemaV5Down takes batches back to version 4's scales. A five-level batch
+// becomes whole points, whose scores include all of its own; renamed custom
+// 打分项 keep their new names, which version 4 accepts as well. No build
+// runs it yet: the builds of version 4 migrate without sqlitedb.Schema and
+// refuse a newer database (migrate), but sqlitedb wants every step after
+// the released ones reversible, and the stored Down is what a build with
+// this schema and fewer steps would use.
+const schemaV5Down = `
+CREATE TABLE batches_v4 (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	source TEXT NOT NULL,
+	required INTEGER NOT NULL CHECK (required BETWEEN 1 AND 10),
+	rubric TEXT NOT NULL,
+	state TEXT NOT NULL CHECK (state IN ('importing', 'open', 'closed')),
+	scanned INTEGER NOT NULL DEFAULT 0,
+	created_by TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	dimensions TEXT NOT NULL DEFAULT 'overall',
+	scale TEXT NOT NULL DEFAULT 'hundredths'
+		CHECK (scale IN ('hundredths', 'tenths', 'whole', 'three')),
+	hide_decimals INTEGER NOT NULL DEFAULT 0
+		CHECK (hide_decimals = 0 OR hide_decimals = 1 AND scale IN ('hundredths', 'tenths'))
+);
+INSERT INTO batches_v4 (id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions, scale, hide_decimals)
+	SELECT id, name, source, required, rubric, state, scanned, created_by, created_at, dimensions,
+		CASE scale WHEN 'five' THEN 'whole' ELSE scale END, hide_decimals FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v4 RENAME TO batches;
+`
+
+// migrate brings the database to the schema's version, copying it first when
+// it has to be upgraded. Builds of version 4 and before migrated by hand and
+// refuse a database newer than theirs instead of taking it back, so going
+// back to one of them means restoring that copy
+// (docs/runbooks/install-and-remove-photo-scoring.md).
 func (s *Store) migrate(ctx context.Context) error {
 	var version int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	switch {
-	case version == len(migrations):
-		return nil
-	case version > len(migrations):
-		return fmt.Errorf("scoring database version %d is newer than this module (%d)", version, len(migrations))
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, step := range migrations[version:] {
-		if _, err := tx.ExecContext(ctx, step); err != nil {
-			return err
+	if version > 0 && version < len(schema.Steps) {
+		name := fmt.Sprintf("scoring-%s-v%d.db", s.now().UTC().Format("2006-01-02"), version)
+		if err := s.copyTo(ctx, filepath.Join(s.dir, "backups", name)); err != nil {
+			return fmt.Errorf("copy scoring.db before upgrading it from version %d: %w", version, err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return sqlitedb.Migrate(ctx, s.db, schema)
 }
 
 // each runs scan for every row of query and closes the rows.

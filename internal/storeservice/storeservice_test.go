@@ -126,6 +126,14 @@ func start(t *testing.T, stuck bool) *service {
 
 func (s *service) get(path, token string) (int, string) {
 	s.t.Helper()
+	status, body, err := s.request(path, token)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return status, body
+}
+
+func (s *service) request(path, token string) (int, string, error) {
 	client := http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", s.socket)
 	}}, Timeout: 5 * time.Second}
@@ -135,24 +143,25 @@ func (s *service) get(path, token string) (int, string) {
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		s.t.Fatal(err)
+		return 0, "", err
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(response.Body)
-	return response.StatusCode, strings.TrimSpace(string(body))
+	return response.StatusCode, strings.TrimSpace(string(body)), nil
 }
 
 func (s *service) waitFor(want int) string {
 	s.t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(s.socket); err == nil {
-			if status, body := s.get("/quick", "alice-session"); status == want {
-				return body
-			}
+		// The socket file appears when it is bound, a moment before the
+		// service listens on it: until then a connection is refused.
+		status, body, err := s.request("/quick", "alice-session")
+		if err == nil && status == want {
+			return body
 		}
 		if time.Now().After(deadline) {
-			s.t.Fatalf("the service did not answer %d", want)
+			s.t.Fatalf("the service did not answer %d: %d %s %v", want, status, body, err)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

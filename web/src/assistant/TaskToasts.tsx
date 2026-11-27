@@ -9,7 +9,7 @@ import { CalendarClock, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { AssistantTaskNotice } from "../desktop/api";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 import { loadTaskNotices, readTaskNotice, useTaskNotices } from "./taskNotices";
 import { whenText } from "./taskTime";
 import styles from "./taskToasts.module.css";

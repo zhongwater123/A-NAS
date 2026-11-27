@@ -19,10 +19,12 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/openapitest"
 )
 
-// Subtitles are WebVTT, which kin-openapi does not decode by itself, and
-// web search sends newline-delimited JSON, checked as an array of its lines.
+// Subtitles are WebVTT and shared pages HTML, which kin-openapi does not
+// decode by itself, and web search sends newline-delimited JSON, checked as
+// an array of its lines.
 func init() {
 	openapi3filter.RegisterBodyDecoder("text/vtt", openapi3filter.FileBodyDecoder)
+	openapi3filter.RegisterBodyDecoder("text/html", openapi3filter.FileBodyDecoder)
 	openapi3filter.RegisterBodyDecoder("application/x-ndjson", decodeLines)
 }
 
@@ -150,6 +152,11 @@ func guardAnswer(recorder *httptest.ResponseRecorder) bool {
 	case status == http.StatusForbidden && (code == "csrf_failed" || code == "password_change_required"):
 		return true
 	case status == http.StatusForbidden && code == "forbidden" && body.Error.Message == "administrator permission is required":
+		return true
+	// The agent posture's own answers (ADR 0040).
+	case status == http.StatusForbidden && code == "forbidden" && (body.Error.Message == httpapi.AgentBrowserRefused || body.Error.Message == httpapi.AgentHostRefused):
+		return true
+	case status == http.StatusTooManyRequests && code == "too_many_attempts":
 		return true
 	}
 	return false

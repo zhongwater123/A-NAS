@@ -2,9 +2,23 @@
 
 本页写给开发者。AI Agent 从 [AGENTS.md](AGENTS.md) 开始；它是唯一的项目指令文件，本页与它不一致时以它为准。
 
+## 按任务选运行环境
+
+开发机是你编辑代码的电脑。文档里提到“宿主机”时，先看它承载什么：运行 WSL2 或 Colima 的宿主机是你的电脑；A-NAS 的 Host Agent 管理的是真实设备上的 Linux 系统。日常预览用 Fake 模式模拟后者。
+
+| 我要做什么 | 在哪里开始 | 怎样算完成 |
+|---|---|---|
+| 第一次打开网页桌面 | Linux 或 Windows 的 WSL2 终端按[快速开始](README.md#快速开始)运行；Mac 在本机终端按 [Colima 预览](docs/development/environments/macos.md#fake-预览)启动并初始化测试管理员 | 在本机浏览器打开预览地址，用测试账号进入桌面 |
+| 跑完整检查（默认） | 提交改动后，在检出根目录按[共享开发服务器上的门禁步骤](.agents/skills/check-on-shared-server/SKILL.md#步骤)把提交拷到服务器上运行 | 记录 `PASS`、提交号和拷回本机的日志路径；失败时记录失败项和同一份日志 |
+| 服务器连不上时在 Windows 上跑完整检查 | 在检出根目录打开 **Git Bash**，按 [Windows 完整检查步骤](.agents/skills/check-in-wsl/SKILL.md#步骤)启动；测试在 WSL 的 ext4 副本里执行 | 记录 `PASS` 和日志路径；失败时记录失败项和同一份日志 |
+| Mac 上检查改动 | 在本机终端按 [macOS 运行检查](docs/development/environments/macos.md#运行检查)把任务交给 Colima 虚拟机 | 记录实际通过的目标；ARM64 完整门禁受 Qdrant 限制，需要全量结果时用 Windows/WSL 或 CI |
+| 复测共享模型，或本机资源不足 | 按[共享开发服务器](docs/development/environments/shared-dev-server.md#申请账号)向维护者申请个人账号，在服务器的个人工作目录检出待测提交 | 用指定输入复现结果，留下提交号、输入清单和运行命令 |
+| 改了文件权限，自动测试 Linux 账号、ACL 或 Samba | 在有 Docker 的开发环境按 [Root 集成测试](docs/development/testing.md#root-集成测试)构建并启动一次性 Debian 容器；创建账号和修改 Samba 配置都在容器内执行 | 对应测试通过，能报告哪个提交通过了检查 |
+| 验收已安装版本的 Web 与 SMB 共享 | 先按[前提与停止条件](docs/runbooks/provision-v1.0.1-experimental-storage.md#前提与停止条件)核对实验 NAS 和可丢弃的测试数据；已安装设备直接做同页的[功能验收](docs/runbooks/provision-v1.0.1-experimental-storage.md#功能验收)，用浏览器与 SMB 客户端访问 | 记录设备版本、测试账号和两种客户端的读写结果 |
+
 ## 开发环境
 
-产品的 Go 服务面向 Linux。Windows 开发机用 WSL2，macOS 用 Colima，依赖装在虚拟机自己的目录里。首次开工先查同类环境的已知问题，再按[环境登记说明](docs/development/LOCAL_ENVIRONMENT.md#登记开发环境与已知问题)记录自己的实际配置。团队另有[共享开发服务器](docs/development/LOCAL_ENVIRONMENT.md#共享开发服务器)，可就近验证大模型，或运行本机资源不足的任务。
+产品的 Go 服务面向 Linux。Windows 开发机用 WSL2，macOS 用 Colima，依赖装在虚拟机自己的目录里。初次使用已登记的机器，从[开发机 A 的环境检查](docs/development/environments/windows.md#日常使用)、[开发机 B 的运行检查](docs/development/environments/windows.md#运行检查)或[开发机 C 的配置](docs/development/environments/macos.md#配置)开始。使用新机器或发现配置变化时，按[环境登记说明](docs/development/LOCAL_ENVIRONMENT.md#登记开发环境与已知问题)更新记录。
 
 - Go 版本见 `.go-version`，模块路径是 `github.com/zhongwater123/A-NAS`（[ADR 0001](docs/adr/0001-use-go-for-product-services.md)）。
 - Node 版本见 `.nvmrc`，网页桌面用 React、TypeScript、Vite 与 npm lockfile（[ADR 0003](docs/adr/0003-use-react-typescript-for-web-desktop.md)）。
@@ -28,6 +42,8 @@ ANAS_HOSTSTATE_MODE=fake go run ./cmd/anas-api
 
 ## 检查
 
+Windows 和 macOS 从上方[任务表](#按任务选运行环境)选对应的平台步骤。已配齐工具的原生 Linux 开发环境在检出根目录执行：
+
 ```bash
 make check
 ```
@@ -45,6 +61,7 @@ make check
 - PR 解决某个 issue 时，在描述里写 `Closes #编号`。只解决了一部分时，把剩下的写成新的 issue，PR 仍然关闭原来的 issue，不留下没关联的 PR。
 - 动手处理已有的 issue 之前，先看有没有开放的 PR 或新推送的分支在做同一件事（`gh pr list`、`git fetch`）；开 PR 之前再看一次。几个会话常常同时处理同一批 issue。
 - PR 描述列出作者自行决定、没问过维护者的默认值与取舍（上限、阈值、措辞、行为），维护者可以只改其中一条。
+- PR 与 issue 的描述先写结论和它对用户的意义，再讲机制；用词照[文档的写入规则](docs/README.md#写入规则)：工作单位叫 issue、子 issue，不叫“票”，产品概念只用[领域语言](CONTEXT.md)里的词。
 - 推送前先 `git fetch`：维护者可能已经在 GitHub 上点过“Update branch”，或已经合并了 PR。先把远端合并进来再推，不强制推送（叠放 PR 的变基除外，见下）；PR 合并后才写的提交另开 PR。
 - 提交前对照[文档路由的“何时更新”](docs/README.md#路由)核对本次差异。行为、操作步骤、开发环境或验证范围有变化时，同一 PR 更新对应文档，在 PR 描述链接到改动处并附验证结果。只有实现细节或依赖版本变化且现有说明仍准确时，简述依据即可。评审者按链接核对下一位开发者能否复现。
 

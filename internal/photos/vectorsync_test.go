@@ -183,7 +183,7 @@ func sorted(values ...string) []string {
 func indexedService(t *testing.T) (*photos.Service, *fakeEmbedder, *vectorindex.Client, *sql.DB, string) {
 	t.Helper()
 	instance := vectorindextest.Start(t)
-	index := vectorindex.New(instance.Socket, nil)
+	index := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = index.Close() })
 	service, _, root := newService(t)
 	return service, newFakeEmbedder(), index, catalogDB(t, root), root
@@ -499,7 +499,7 @@ func TestANewCollectionTakesTheCommonSize(t *testing.T) {
 // instance can stop while the library does not change.
 func TestAnIdleSyncLeavesTheIndexAlone(t *testing.T) {
 	instance := vectorindextest.Start(t)
-	index := vectorindex.New(instance.Socket, nil)
+	index := vectorindex.New(instance.Socket, vectorindex.Options{})
 	defer func() { _ = index.Close() }()
 	service, _, _ := newService(t)
 	private, _ := libraries(t, service, alice)
@@ -569,7 +569,7 @@ func TestForgettingTheVectorIndex(t *testing.T) {
 // line with the Catalog, and in line again after reconciliation.
 func TestChecksCompareSearchesWithTheCatalog(t *testing.T) {
 	instance := vectorindextest.Start(t)
-	index := vectorindex.New(instance.Socket, nil)
+	index := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = index.Close() })
 	embedder := newFakeEmbedder()
 	service, err := photos.Open(t.TempDir()+"/photos", photos.Options{Now: newClock().Now, DisableCapacityReserve: true,
@@ -681,7 +681,7 @@ func TestChecksCompareSearchesWithTheCatalog(t *testing.T) {
 // checked.
 func TestChecksAreSpaced(t *testing.T) {
 	instance := vectorindextest.Start(t)
-	index := vectorindex.New(instance.Socket, nil)
+	index := vectorindex.New(instance.Socket, vectorindex.Options{})
 	t.Cleanup(func() { _ = index.Close() })
 	embedder := newFakeEmbedder()
 	service, err := photos.Open(t.TempDir()+"/photos", photos.Options{Now: newClock().Now, DisableCapacityReserve: true,

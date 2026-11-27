@@ -11,11 +11,14 @@ check "the Host Agent identifies an active scheduled-task owner" \
   test "$(status_of --unix-socket "$host_socket" -H 'Content-Type: application/json' \
     -d "{\"uid\":$bob_uid}" http://host-agent/v1/accounts/resolve-uid)" = 200
 
+# The stand-ins run under tini, as the units' own programs do: with PrivatePIDs= a
+# bare sleep is process 1 of its PID namespace and ignores SIGTERM, so each stop
+# waited out TimeoutStopSec (90 s).
 install -d /etc/systemd/system/anas-assistant-cron@bob.service.d
 cat > /etc/systemd/system/anas-assistant-cron@bob.service.d/disable-test.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=/bin/sleep infinity
+ExecStart=/usr/bin/tini -- /bin/sleep infinity
 TimeoutStartSec=0
 EOF
 systemctl daemon-reload
@@ -38,7 +41,7 @@ cat > /etc/systemd/system/anas-assistant@bob.service.d/disable-test.conf <<'EOF'
 StopWhenUnneeded=no
 [Service]
 ExecStart=
-ExecStart=/bin/sleep infinity
+ExecStart=/usr/bin/tini -- /bin/sleep infinity
 ExecStartPost=
 ExecStop=/bin/sleep 2
 EOF

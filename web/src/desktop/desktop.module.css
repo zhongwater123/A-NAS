@@ -782,55 +782,6 @@
   background: #fff;
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
 }
-.local-console-screensaver {
-  position: fixed;
-  z-index: 1000;
-  inset: 0;
-  overflow: hidden;
-  cursor: none;
-  background: #000;
-  animation: screensaver-in 0.28s ease-out;
-}
-.local-console-screensaver video {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  object-position: center;
-}
-@keyframes screensaver-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .local-console-screensaver {
-    animation: none;
-  }
-}
-/* While either cover is up, everything else on the page, portals included,
-   skips rendering. Under an opaque cover the desktop would otherwise go on
-   drawing its gauges' transitions and any running animation every frame; the
-   kiosk spent about a quarter of a core on that behind the black screen
-   (docs/investigations/2026-10-28-screensaver-video-cpu.md). The page keeps
-   its DOM and layout, so the first input brings it back as it was. The switch
-   waits until the screen saver has faded in. */
-body:has(> .local-console-screensaver, > .local-console-sleep)
-  > :not(.local-console-screensaver, .local-console-sleep) {
-  content-visibility: hidden;
-  transition: content-visibility 0s 0.3s allow-discrete;
-}
-/* 息屏: plain black over everything, the photo slideshow and sign-in page included, until the first input. */
-.local-console-sleep {
-  position: fixed;
-  z-index: 2147483647;
-  inset: 0;
-  cursor: none;
-  background: #000;
-}
 .icon-settings {
   background: linear-gradient(155deg, #c9cdd3, #777e89);
 }
@@ -850,6 +801,10 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 }
 .icon-montage {
   background: linear-gradient(155deg, #8f7bff, #4b2fd6);
+}
+/* 共享工作区: pages written together, on teal. */
+.icon-workspace {
+  background: linear-gradient(155deg, #43c6d8, #0e7f97);
 }
 /* Docker's own whale and blue (#2496ed). */
 .icon-docker {
@@ -919,6 +874,11 @@ body:has(> .local-console-screensaver, > .local-console-sleep)
 .launcher-icon.icon-photos svg {
   width: 36px;
   height: 36px;
+}
+/* 待办: a white checklist on green, as on its reminder. */
+.icon-todos,
+.app-window-todos .window-app-icon {
+  background: linear-gradient(155deg, #4fd19c, #14875f);
 }
 /* AI 助手 is the user's ink portrait on white: it fills its white tile edge to
    edge and takes the tile's corners, with no gloss over the drawing. */
@@ -1445,6 +1405,26 @@ button.net-rates {
   overflow: hidden;
   background: #fbf7f2;
 }
+/* 待办 */
+.window-content-todos {
+  overflow: hidden;
+  background: var(--color-bg);
+}
+/* The notices of VNAS's scheduled tasks, 家庭中心, 剪辑中心 and 待办, one under
+   another below the status bar. Between them the wallpaper takes the pointer. */
+.notice-stack {
+  position: absolute;
+  z-index: 78;
+  top: 78px;
+  right: 22px;
+  width: min(352px, calc(100% - 140px));
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+}
+.notice-stack:empty {
+  display: none;
+}
 /* 分享 */
 .app-window-shares .window-app-icon {
   background: linear-gradient(155deg, #ffb25e, #f2621c);
@@ -1580,50 +1560,6 @@ button.net-rates {
   height: 58px;
   border-radius: 17px;
   font-size: 25px;
-}
-
-/* People's avatars, wherever they appear (people/PersonAvatar.tsx). */
-/* Any avatar disc may hold the account's picture instead of its initial. */
-.person-avatar {
-  position: relative;
-  overflow: hidden;
-  user-select: none;
-}
-.person-avatar > img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
-  border-radius: inherit;
-}
-.person-avatar.pictured {
-  text-shadow: none;
-}
-.avatar-c0 {
-  background: linear-gradient(150deg, #ffbe8a, #ee7a4b);
-  color: #fff;
-}
-.avatar-c1 {
-  background: linear-gradient(150deg, #7cb8ff, #3b74e6);
-  color: #fff;
-}
-.avatar-c2 {
-  background: linear-gradient(150deg, #6fdba5, #22a067);
-  color: #fff;
-}
-.avatar-c3 {
-  background: linear-gradient(150deg, #b59cff, #7350e0);
-  color: #fff;
-}
-.avatar-c4 {
-  background: linear-gradient(150deg, #ff9fbe, #e2517f);
-  color: #fff;
-}
-.avatar-c5 {
-  background: linear-gradient(150deg, #6fd8d0, #16918a);
-  color: #fff;
 }
 
 .center-state {

@@ -30,24 +30,35 @@ func (c Client) Music(ctx context.Context, request montage.MusicRequest) (montag
 	if err == nil {
 		err = decodeSelection(answer, &selection)
 	}
-	switch {
-	case errors.Is(err, ErrRefused) && strings.Contains(err.Error(), unknownOperation):
-		// A Worker from before the operation existed, still running while
-		// the device is updated: one to wait for. It says nothing of the
-		// song.
-		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
-	case errors.Is(err, ErrRefused):
-		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerRefused, err)
-	case errors.Is(err, ErrFailed):
-		// The Worker took the song and broke on it, or stopped: the montage
-		// center counts these, and gives the song up after a few.
-		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerFailed, err)
-	case err != nil:
-		return montage.Selection{}, fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
-	case selection.Unusable == "" && (len(selection.Parts) == 0 || selection.Seconds <= 0):
+	if err := waitedError(err); err != nil {
+		return montage.Selection{}, err
+	}
+	if selection.Unusable == "" && (len(selection.Parts) == 0 || selection.Seconds <= 0) {
 		return montage.Selection{}, fmt.Errorf("%w: an empty excerpt", montage.ErrWorkerRefused)
 	}
 	return selection, nil
+}
+
+// waitedError turns a call's error into the montage center's, for a call a
+// member waits on (the song's excerpt, a step of an edit) rather than a job:
+// the request's handler tells them apart, where a job's runner retries.
+func waitedError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrRefused) && strings.Contains(err.Error(), unknownOperation):
+		// A Worker from before the operation existed, still running while
+		// the device is updated: one to wait for. It says nothing of the
+		// input.
+		return fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
+	case errors.Is(err, ErrRefused):
+		return fmt.Errorf("%w: %v", montage.ErrWorkerRefused, err)
+	case errors.Is(err, ErrFailed):
+		// The Worker took the request and broke on it, or stopped: for a
+		// song the montage center counts these, and gives it up after a few.
+		return fmt.Errorf("%w: %v", montage.ErrWorkerFailed, err)
+	}
+	return fmt.Errorf("%w: %v", montage.ErrWorkerUnavailable, err)
 }
 
 // decodeSelection reads the answer, and keeps the excerpt as the domain

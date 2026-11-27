@@ -29,6 +29,7 @@ function job(state: MontageJob["state"], extra: Partial<MontageJob> = {}): Monta
   return {
     id: "job:1",
     projectId: "project:1",
+    kind: "generate",
     state,
     createdAt: "2026-11-18T10:00:00Z",
     steps: steps.map((name, i) => ({
@@ -187,8 +188,26 @@ afterEach(() => {
 
 // A job's two 方案, as the job and the project list them.
 const saved: MontageProjectDetail["versions"] = [
-  { number: 1, jobId: "job:1", plan: 1, filmAssetId: "photo:film-1", createdAt: "2026-11-18T10:05:00Z" },
-  { number: 2, jobId: "job:1", plan: 2, filmAssetId: "photo:film-2", createdAt: "2026-11-18T10:08:00Z" },
+  {
+    id: "version:1",
+    number: 1,
+    jobId: "job:1",
+    plan: 1,
+    filmAssetId: "photo:film-1",
+    createdAt: "2026-11-18T10:05:00Z",
+    editable: true,
+    kind: "plan",
+  },
+  {
+    id: "version:2",
+    number: 2,
+    jobId: "job:1",
+    plan: 2,
+    filmAssetId: "photo:film-2",
+    createdAt: "2026-11-18T10:08:00Z",
+    editable: true,
+    kind: "plan",
+  },
 ];
 
 describe("剪辑中心", () => {
@@ -364,6 +383,29 @@ describe("剪辑中心", () => {
     await waitFor(() => expect(seen.did).toEqual(["replan"]));
   });
 
+  it("says a job failed when three rounds of planning did not finish, and plans it again with one click", async () => {
+    const seen = fresh();
+    const failed = job("failed", {
+      waitReason: "plan_failed",
+      step: "pick",
+      error: "规划试了 3 轮都没有完成：the connection to the planning instance closed",
+    });
+    serve(
+      () => project({ job: failed }),
+      () => failed,
+      seen,
+    );
+    const page = await openProject();
+    expect(await within(page).findByText("规划没有完成，没有剪成")).toBeInTheDocument();
+    expect(
+      within(page).getByText("规划试了 3 轮都没有完成：the connection to the planning instance closed"),
+    ).toBeInTheDocument();
+    // The job has ended: nothing to cancel.
+    expect(within(page).queryByRole("button", { name: "取消" })).not.toBeInTheDocument();
+    await userEvent.click(within(page).getByRole("button", { name: "重新规划" }));
+    await waitFor(() => expect(seen.did).toEqual(["replan"]));
+  });
+
   it("says why a job waits: for VNAS with the reason, and for the photo library", async () => {
     let waiting = job("waiting", { waitReason: "vnas", step: "pick", error: "VNAS 没有开启" });
     serve(
@@ -497,14 +539,17 @@ describe("剪辑中心", () => {
 
   it("plays and downloads the films of earlier jobs", async () => {
     const earlier = {
+      id: "version:0",
       number: 1,
       jobId: "job:0",
       plan: 1,
       filmAssetId: "photo:film-0",
       createdAt: "2026-11-17T10:00:00Z",
+      editable: true,
+      kind: "plan" as const,
     };
-    const gone = { ...earlier, number: 2, plan: 2, filmAssetId: "photo:film-00", gone: true };
-    const later = saved.map((version) => ({ ...version, number: version.number + 2 }));
+    const gone = { ...earlier, id: "version:00", number: 2, plan: 2, filmAssetId: "photo:film-00", gone: true };
+    const later = saved.map((version) => ({ ...version, id: `${version.id}+2`, number: version.number + 2 }));
     serve(
       () => project({ versions: [...later].reverse().concat(gone, earlier) }),
       () => job("done"),

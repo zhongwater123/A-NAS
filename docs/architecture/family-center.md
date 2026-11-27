@@ -11,7 +11,7 @@
 Web 家庭中心窗口 / 桌面提示
     │ 会话 + CSRF
     ▼
-产品服务 ── /api/v1/family 转发（HTTP over UDS，只带会话令牌）──► 家庭服务 a-nas-family
+产品服务 ── /api/v1/family、/api/v1/todos 转发（HTTP over UDS，只带会话令牌）──► 家庭服务 a-nas-family
     │                                                            ├── Host Agent 家庭会话查询（确认身份、列出在用账号）
     │                                                            ├── 数据卷 family/：family.db 与 recordings/
     │                                                            ├── 相册服务 /internal/photos/lookup（以读者会话，只读）
@@ -29,11 +29,12 @@ Web 家庭中心窗口 / 桌面提示
 
 | 入口 | 责任 |
 |---|---|
-| [`internal/family`](../../internal/family/family.go) | 家人与家长、宝宝档案、各类记录与留言、最近删除、录音文件、云相册、生长标准、疫苗程序、大事记、桌面提示 |
-| [`internal/familyapi`](../../internal/familyapi/handler.go) | `/api/v1/family` 的 HTTP 接口、错误码、录音的流式上传与播放 |
+| [`internal/family`](../../internal/family/family.go) | 家人与家长、宝宝档案、各类记录与留言、最近删除、录音文件、云相册、生长标准、疫苗程序、大事记、桌面提示；家庭待办与待办提醒 |
+| [`internal/familyapi`](../../internal/familyapi/handler.go) | `/api/v1/family` 的 HTTP 接口、错误码、录音的流式上传与播放；另有 `/api/v1/todos` 下的[家庭待办](../specs/family-todos.md)，按共享与本人授权，不看家人关系（[ADR 0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md) 决定 6） |
 | [`internal/familyservice`](../../internal/familyservice/service.go) | 独立进程：会话确认、数据卷上存储的检查与重新打开、每小时清理到期的最近删除；[相册查询客户端](../../internal/familyservice/photos.go) |
 | [`internal/photos/lookup.go`](../../internal/photos/lookup.go) | 相册服务按读者 Policy 批量回答照片是否可见 |
 | `web/src/family` | 窗口、各板块、记录对话框、桌面提示 |
+| `web/src/todos` | 待办窗口与桌面上的待办提醒 |
 
 - 家庭服务 `anas-api family-service` 以 `a-nas-family`（UID/GID 31002）运行，单元见 [`anas-family.service`](../../deploy/systemd/system/anas-family.service)：无网络、`ProtectSystem=strict`，只写数据卷。它带 `a-nas-photos` 附加组，以连接相册服务的接口套接字与 FFmpeg Worker；和分享服务一样，这个组也让它能连上 AI Worker 的套接字，但相册接口的每个请求仍要读者的会话。
 - `family/` 由 Host Agent 在数据卷就绪时创建为子卷，属主 `a-nas-family`、`0700`，每 15 分钟修复漂移（[`EnsureFamilyStore`](../../internal/hostops/linux/photos.go)）。家庭服务只在它是本身份所有、`0700`、位于可写 Btrfs 数据卷且卷标记存在时打开；数据卷离开后整体回答 `family_unavailable`，不在系统盘暂存。

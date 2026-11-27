@@ -1,6 +1,6 @@
 # 测试与验证
 
-更新时间：2026-11-24
+更新时间：2026-11-25
 
 本文维护检查目标、测试依赖与覆盖范围。机器配置从[开发环境入口](LOCAL_ENVIRONMENT.md)选择；变更需要执行哪些检查，以 [AGENTS.md](../../AGENTS.md#验证) 为准。
 
@@ -8,18 +8,28 @@
 
 | 任务 | 执行步骤 |
 |---|---|
-| Windows/WSL 完整门禁 | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
+| 完整门禁、race 测试（默认） | [check-on-shared-server](../../.agents/skills/check-on-shared-server/SKILL.md) |
+| Windows/WSL 完整门禁（服务器连不上时） | [check-in-wsl](../../.agents/skills/check-in-wsl/SKILL.md) |
 | macOS/Colima 检查与当前限制 | [macOS 环境](environments/macos.md#运行检查) |
 | Fake 模式界面预览 | Windows 用 [fake-preview](../../.agents/skills/fake-preview/SKILL.md)，macOS 用[Colima 预览](environments/macos.md#fake-预览) |
 | systemd 系统测试 | [system-test](../../.agents/skills/system-test/SKILL.md) |
 
-`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+`make check-steps` 执行 `make check` 的检查目标；后者还依赖 Git 写入部署校验清单。开发机上 `make check` 以 `make -k` 运行这些目标，一步失败后继续运行其余各步，一次报出全部失败；CI 把 Makefile 的 `CHECK_FLAGS` 设为空，在第一个失败处停止。直接运行 `make check-steps` 时同样加 `-k`。记录实际目标、失败项和日志位置；纯文档检查或缺依赖跳过的测试不能作为完整门禁证据。
+
+### 并行
+
+- `make check-steps` 同时运行 `CHECK_JOBS` 个目标，`CHECK_JOBS=1` 逐个运行；默认值、输出方式与负载上限 `CHECK_LOAD` 见 Makefile 中 `check-steps` 的说明。一个长目标运行期间日志没有新行，它结束时才整段打印。最后列出每个目标的秒数，从慢到快，最后一行是全程（[`scripts/check-times.sh`](../../scripts/check-times.sh)）。
+- 负载上限让同一台机器上两个会话的门禁轮流启动目标。2026-11-25 在开发服务器上，两个不带这个上限的门禁同时运行时，一条平时 2 秒的 Web 用例超过了 20 秒。
+- 4 个目标同时运行时内存峰值约 5 GB（开发服务器上限 14 个 CPU 时各进程常驻内存之和），逐个运行约 3 GB。内存不到 8 GB 的环境（WSL 默认只有主机的一半）给 `CHECK_JOBS=2`，峰值与逐个运行相当。
+- 目标之间真实的先后写在 Makefile 里，原因写在依赖旁的注释中。新加的目标若读写别的目标的产物，同样写明依赖，不靠列表顺序。
+- Web 测试同时运行 4 个测试文件（`web/vite.config.ts` 的 `maxWorkers`），`VITEST_MAX_WORKERS` 改变一次运行的数目。一个文件里的用例仍逐个运行，所以最慢的文件决定 Web 测试的下限：用例不要等真实的时长，用假时钟或等它真正等待的条件。
+- 并行与负载会暴露测试自己的竞态，例如看到套接字文件就去连（文件在 bind 时出现，比 listen 早）。这类失败按缺陷修：等就绪的条件，不等固定时长，也不放宽时限。
 
 ## Qdrant 测试依赖
 
 向量索引的测试（`internal/vectorindex` 与相册的同步）运行 [`deploy/qdrant/qdrant.json`](../../deploy/qdrant/qdrant.json) 固定的 Qdrant 二进制。在 Linux x86_64 开发环境中先运行一次 `scripts/fetch-qdrant.sh`：它下载官方压缩包，核对大小与 SHA-256，把二进制留在 `build/qdrant/<sha256>/`。测试默认取这个位置，也可以用 `ANAS_QDRANT_BINARY` 指定。缺少二进制时这些测试跳过；设 `ANAS_QDRANT_REQUIRED=1` 时改为失败，CI 就是这样设的。ext4 副本不带 `build/`，复制后再把 `build/qdrant` 一并复制过去，或在副本中重新获取。
 
-清单目前固定 Linux x86_64 包。其他架构使用 `ANAS_QDRANT_BINARY` 前需自行验证同版本二进制的可运行性；项目尚无已验证的 ARM64 完整门禁流程。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
+清单目前固定 Linux x86_64 包。ARM64 Linux 上经 binfmt 注册的 x86_64 模拟（qemu-user-static 或 Rosetta）运行同一个二进制，开发机 C 的做法见 [macOS 环境](environments/macos.md#运行检查)；[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 检查二进制是否已获取、binfmt 是否已注册。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
 
 ## 测试素材
 
@@ -92,7 +102,7 @@ tar -xzf /tmp/lychee.tar.gz -C /tmp
 install /tmp/lychee-x86_64-unknown-linux-gnu/lychee ~/.local/opt/bin/lychee
 ```
 
-开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。
+开发机 C（macOS，Apple 芯片）改用同一发布中的 `lychee-aarch64-apple-darwin.tar.gz`，SHA-256 为 `c9d3740ea2d891854d37116c9fba840f37b6e7c89d330e7db84ac333631c4977`（用 `shasum -a 256` 核对），解出的目录是 `lychee-aarch64-apple-darwin/`。Homebrew 的 lychee 跟随最新版，版本不同时 `docs-check` 会拒绝。它的 Colima 虚拟机用 `lychee-aarch64-unknown-linux-gnu.tar.gz`，SHA-256 为 `91a7bd65685da41b90ccb9bc867a3d649a7818042dae04ff405e55a25bddee4c`，装到 `~/.local/opt/lychee/lychee`，由虚拟机的 `~/.anas-env` 加入 `PATH`。
 
 Ruff、pip-audit、zizmor 与 uv 不随 npm 或 Go 安装，[`ai/requirements-dev.txt`](../../ai/requirements-dev.txt) 按哈希固定它们。有 `ensurepip` 的机器装进独立的 venv，再把其 `bin` 加入 `PATH`：
 
@@ -110,6 +120,19 @@ Web 代码由 Biome 格式化并排列导入（`web/biome.json`：先 Node 与 n
 各作业的 Go 版本取自 `.go-version`，Node.js 版本取自 `.nvmrc`；`package.json` 的 `engines` 只是允许的范围。竞态作业不装 Node.js：`make race-test` 不跑只服务前端构建产物的 `internal/webui`，它由 `make check` 覆盖。系统测试的 Debian 13 镜像按构建脚本与 `a-nas-host` 包定义的哈希及所在的周缓存，二者改了或过了一周才重新组装。
 
 另有两个每周定时、不在规则集中的工作流：`vuln.yml` 运行 `make vuln-check`，报告此后新发布的公告；`fuzz.yml` 从代码中找出全部 `func Fuzz…`，每个目标跑 5 分钟，失败时上传触发失败的输入，把它放进该包的 `testdata/fuzz/<目标>/` 就成为回归用例。
+
+## AI Worker 的无模型测试
+
+`make ai-test` 包含协议分帧、文件描述符所有权和真实进程启动测试（[#427](https://github.com/zhongwater123/A-NAS/issues/427)）。协议测试通过真实 `socketpair` 传递描述符，并限制单次读取长度，确保头部与正文重组都会执行多轮。测试覆盖恰为 1 MiB 的帧、超长帧、截断、非法 JSON 和非对象请求。描述符数量超过接收上限时，请求被拒绝，接收端已取得的描述符关闭，发送端仍持有原描述符。成功时，接收端能读取随帧传来的文件。
+
+几何测试用已知旋转、缩放、平移和镜像点集检查人脸对齐，验证 float32 输入的双精度计算，用精确像素区域检查横向与纵向图片中动物裁剪的边界和留白；只依赖 CI 已安装的 NumPy，不加载模型。启动测试以 `python3 -m anas_ai.worker --fake --socket ...` 启动独立进程，检查 `info`，再通过 `release all` 退出。请求辅助函数有读取超时，响应提前结束时立即失败；无响应、截断头部与正文也有回归测试。
+
+单独复现：
+
+```bash
+cd ai
+python3 -m unittest tests.test_protocol tests.test_provider_geometry tests.test_worker_startup -v
+```
 
 ## Root 集成测试
 
@@ -179,7 +202,8 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - 向量索引（[ADR 0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)）：
   - 套接字只属于相册服务的账号，产品服务的账号连不上；
   - 连接时拉起实例，实例与代理同在一个只有 `lo` 的网络命名空间，以每个实例自己的动态身份运行；
-  - 代理空闲（经 drop-in 缩短为 3 秒）后实例停止；
+  - 相册服务的连接空闲后断开（经 drop-in 从一分钟缩短为 5 秒），代理 2 秒后退出，实例随之停止；
+  - 损坏的集合让 Qdrant 启动时 panic：排队的连接经两次失败的启动（从日志计数）与清空存储后的第三次得到回答，套接字始终在监听；
   - 换了 Qdrant 二进制时存储被清空；
   - 放在实例单元中的探针看不到网络、读不到数据卷与产品状态；
   - 相册服务建好集合、同步照片；重启后的一次搜索读索引，后台核对与 Catalog 一致，没有回退到 Catalog。
@@ -239,3 +263,4 @@ root 集成测试与相册冒烟都由测试进程直接启动服务，覆盖不
 - [系统测试](../../scripts/system-test.sh)、[助手沙箱的系统测试](../../ai/assistant-spike/system-test.sh)与[沙箱探针](../../ai/assistant-spike/probe.sh)
 - [相册冒烟](../../scripts/smoke-photo-service.sh)
 - [AI 开发与评估](ai-development.md)
+- [协议测试](../../ai/tests/test_protocol.py)、[几何测试](../../ai/tests/test_provider_geometry.py)与[启动测试](../../ai/tests/test_worker_startup.py)

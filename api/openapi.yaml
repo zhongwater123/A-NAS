@@ -9,11 +9,12 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
     container agent, and each member's AI assistant (ADR 0024). Every operation that takes a JSON body
-    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares and the family center, 64 KiB for the montage center, 65 KiB for
+    bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
-    feedback resolved.
+    feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up
+    to 4 MiB from members' agents.
 servers:
   - url: http://127.0.0.1:8080
 security:
@@ -32,6 +33,8 @@ paths:
   /api/v1/session/password: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1password" }
   /api/v1/session/profile: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1profile" }
   /api/v1/session/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1avatar" }
+  /api/v1/session/agent-tokens: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens" }
+  /api/v1/session/agent-tokens/{tokenId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens~1{tokenId}" }
   /api/v1/profiles: { $ref: "paths/accounts.yaml#/~1api~1v1~1profiles" }
   /api/v1/users/{userId}/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1avatar" }
   /api/v1/notifications: { $ref: "paths/accounts.yaml#/~1api~1v1~1notifications" }
@@ -79,6 +82,7 @@ paths:
   /api/v1/system-logs: { $ref: "paths/logs.yaml#/~1api~1v1~1system-logs" }
   /api/v1/web-search: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search" }
   /api/v1/network/phone-hotspot: { $ref: "paths/phone-hotspot.yaml#/~1api~1v1~1network~1phone-hotspot" }
+  /api/v1/network/phone-hotspot/settings: { $ref: "paths/phone-hotspot.yaml#/~1api~1v1~1network~1phone-hotspot~1settings" }
   /api/v1/web-search/query: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1query" }
   /api/v1/web-search/thumbnail: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1thumbnail" }
   /api/v1/web-search/license: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license" }
@@ -138,6 +142,26 @@ paths:
   /api/v1/family/records/{recordId}/comments: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1comments" }
   /api/v1/family/records/{recordId}/reactions/{reaction}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1records~1{recordId}~1reactions~1{reaction}" }
   /api/v1/family/comments/{commentId}: { $ref: "paths/family.yaml#/~1api~1v1~1family~1comments~1{commentId}" }
+  /api/v1/todos: { $ref: "paths/todos.yaml#/~1api~1v1~1todos" }
+  /api/v1/todos/owners: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1owners" }
+  /api/v1/todos/reminders: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders" }
+  /api/v1/todos/reminders/seen: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1reminders~1seen" }
+  /api/v1/todos/{todoId}: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}" }
+  /api/v1/todos/{todoId}/status: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1status" }
+  /api/v1/todos/{todoId}/snooze: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1snooze" }
+  /api/v1/workspace: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace" }
+  /api/v1/workspace/pages: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages" }
+  /api/v1/workspace/pages/{pageId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}" }
+  /api/v1/workspace/pages/{pageId}/versions: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions" }
+  /api/v1/workspace/pages/{pageId}/versions/{version}/view: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1view" }
+  /api/v1/workspace/pages/{pageId}/versions/{version}/file: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}~1versions~1{version}~1file" }
+  /api/v1/workspace/viewing: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing" }
+  /api/v1/workspace/viewing/{tab}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1viewing~1{tab}" }
+  /api/v1/workspace/selection: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1selection" }
+  /api/v1/workspace/admin/members: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1admin~1members" }
+  /api/v1/workspace/admin/members/{accountId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1admin~1members~1{accountId}" }
+  /api/v1/workspace/mcp: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1mcp" }
+  /api/v1/workspace/transfers/{key}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1transfers~1{key}" }
   /api/v1/montage: { $ref: "paths/montage.yaml#/~1api~1v1~1montage" }
   /api/v1/montage/projects: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects" }
   /api/v1/montage/projects/{projectId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}" }
@@ -154,6 +178,17 @@ paths:
   /api/v1/montage/projects/{projectId}/song/audio: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1song~1audio" }
   /api/v1/montage/hero: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero" }
   /api/v1/montage/hero/poster: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1hero~1poster" }
+  /api/v1/montage/versions/{versionId}/confirm: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1confirm" }
+  /api/v1/montage/versions/{versionId}/recut: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1recut" }
+  /api/v1/montage/versions/{versionId}/outline: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1outline" }
+  /api/v1/montage/versions/{versionId}/draft: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1draft" }
+  /api/v1/montage/drafts/{draftId}/ops: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1ops" }
+  /api/v1/montage/drafts/{draftId}/save: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1save" }
+  /api/v1/montage/drafts/{draftId}/song: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1song" }
+  /api/v1/montage/drafts/{draftId}/candidates: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1candidates" }
+  /api/v1/montage/versions/{versionId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1versions~1{versionId}~1shots" }
+  /api/v1/montage/drafts/{draftId}/shots: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1drafts~1{draftId}~1shots" }
+  /api/v1/montage/projects/{projectId}/frames/{assetId}: { $ref: "paths/montage.yaml#/~1api~1v1~1montage~1projects~1{projectId}~1frames~1{assetId}" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }
@@ -308,6 +343,10 @@ components:
       type: apiKey
       in: cookie
       name: anas_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
   parameters:
     CSRFToken: { $ref: "components/common.yaml#/parameters/CSRFToken" }
     UserID: { $ref: "components/accounts.yaml#/parameters/UserID" }
@@ -340,6 +379,7 @@ components:
     FamilyRecordID: { $ref: "components/family.yaml#/parameters/FamilyRecordID" }
     FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
     FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
+    TodoID: { $ref: "components/todos.yaml#/parameters/TodoID" }
     ScoringBatchID: { $ref: "components/scoring.yaml#/parameters/ScoringBatchID" }
     ScoringAnchorID: { $ref: "components/scoring.yaml#/parameters/ScoringAnchorID" }
     ScoringClaimToken: { $ref: "components/scoring.yaml#/parameters/ScoringClaimToken" }
@@ -511,6 +551,16 @@ components:
     FamilyTimelineEntry: { $ref: "components/family.yaml#/schemas/FamilyTimelineEntry" }
     FamilyHint: { $ref: "components/family.yaml#/schemas/FamilyHint" }
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
+    TodoDate: { $ref: "components/todos.yaml#/schemas/TodoDate" }
+    TodoCategory: { $ref: "components/todos.yaml#/schemas/TodoCategory" }
+    TodoScope: { $ref: "components/todos.yaml#/schemas/TodoScope" }
+    TodoStatus: { $ref: "components/todos.yaml#/schemas/TodoStatus" }
+    TodoStage: { $ref: "components/todos.yaml#/schemas/TodoStage" }
+    Todo: { $ref: "components/todos.yaml#/schemas/Todo" }
+    TodoFields: { $ref: "components/todos.yaml#/schemas/TodoFields" }
+    TodoEdit: { $ref: "components/todos.yaml#/schemas/TodoEdit" }
+    TodoOwner: { $ref: "components/todos.yaml#/schemas/TodoOwner" }
+    TodoReminder: { $ref: "components/todos.yaml#/schemas/TodoReminder" }
     ScoringMe: { $ref: "components/scoring.yaml#/schemas/ScoringMe" }
     ScoringScale: { $ref: "components/scoring.yaml#/schemas/ScoringScale" }
     ScoringRaterBatch: { $ref: "components/scoring.yaml#/schemas/ScoringRaterBatch" }

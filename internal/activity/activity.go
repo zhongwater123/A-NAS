@@ -31,24 +31,27 @@ const (
 	CategoryStorage Category = "storage"
 	CategoryPhoto   Category = "photo"
 	CategoryFamily  Category = "family"
+	// CategoryWorkspace is the shared workspace (ADR 0040).
+	CategoryWorkspace Category = "workspace"
 	// CategorySystem is the device itself, such as a system update.
 	CategorySystem Category = "system"
 	CategoryOther  Category = "other"
 )
 
 // Categories lists the categories a client may filter by.
-var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto, CategoryFamily, CategorySystem}
+var Categories = []Category{CategorySession, CategoryAccount, CategoryFile, CategoryStorage, CategoryPhoto, CategoryFamily, CategoryWorkspace, CategorySystem}
 
 // categoryPrefixes maps each category to the action prefixes that belong to
 // it. "photos.viewing" (an account action) must not match "photo.".
 var categoryPrefixes = map[Category][]string{
-	CategorySession: {"session."},
-	CategoryAccount: {"user.", "space.viewing", "photos.viewing"},
-	CategoryFile:    {"file.", "snapshot."},
-	CategoryStorage: {"storage."},
-	CategoryPhoto:   {"photo."},
-	CategoryFamily:  {"family."},
-	CategorySystem:  {"system."},
+	CategorySession:   {"session."},
+	CategoryAccount:   {"user.", "space.viewing", "photos.viewing"},
+	CategoryFile:      {"file.", "snapshot."},
+	CategoryStorage:   {"storage."},
+	CategoryPhoto:     {"photo."},
+	CategoryFamily:    {"family."},
+	CategoryWorkspace: {"workspace."},
+	CategorySystem:    {"system."},
 }
 
 // CategoryOf returns the category of an action.

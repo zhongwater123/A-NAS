@@ -281,6 +281,15 @@ func (submission Submission) answers(dimensions []string, scale Scale) error {
 			return invalid("a score of %s is %s", dimension, scale.says())
 		}
 	}
+	// 情绪 goes from 1, calm, to 5, intense, on every scale: the handbook
+	// has no 0 for it.
+	emotion, scored := submission.Scores[Emotion]
+	if len(dimensions) > 0 && dimensions[0] == Emotion {
+		emotion, scored = *submission.Score, true
+	}
+	if scored && emotion < lowestEmotion {
+		return invalid("a score of %s is 1 to 5", Emotion)
+	}
 	later := laterDimensions(dimensions)
 	answered := len(submission.Scores) == len(later)
 	for _, dimension := range later {

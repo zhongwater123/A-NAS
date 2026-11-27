@@ -35,4 +35,10 @@ describe("desktopApps", () => {
     expect(app?.keywords).toContain("助手");
     expect(app?.onClick).toBeUndefined();
   });
+
+  it("shows 共享工作区 only to accounts that may use it", () => {
+    const has = (context: WindowContext) => desktopApps(context, () => false).some((app) => app.id === "workspace");
+    expect(has({ ...withoutKey(false), workspace: null })).toBe(false);
+    expect(has({ ...withoutKey(false), workspace: { admin: false } })).toBe(true);
+  });
 });

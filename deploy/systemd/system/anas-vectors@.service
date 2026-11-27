@@ -9,6 +9,11 @@ Documentation=https://github.com/zhongwater123/A-NAS
 # [Install] section: a manual start without the proxy would stop at once.
 StopWhenUnneeded=yes
 AssertPathExists=/usr/lib/a-nas/vectors/config.yaml
+# As the proxy's: an instance that refused a start would fail the proxy at
+# once, and the connection queued on the socket would start it again and
+# again until the socket hit its trigger limit and failed for good.
+# wait-ready.sh spaces failed starts instead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
