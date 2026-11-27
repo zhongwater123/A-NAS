@@ -56,16 +56,18 @@ const summaryOf = ({ id, title, createdBy, createdAt, latest, presence }: Worksp
 export interface WorkspaceStore {
   pages: WorkspacePage[];
   selection?: WorkspaceSelection;
-  // viewing is what this tab said it shows; reports counts what it said.
+  // viewing is what this tab said it shows; reports counts what it said;
+  // seqs is the seq of each report and take-back, in the order they came.
   viewing?: WorkspaceViewing;
   reports: WorkspaceViewing[];
+  seqs: number[];
   members: WorkspaceMemberAccount[];
   tokens: AgentToken[];
   uploads: { name: string | null; base?: number; body: string }[];
 }
 
 export function workspaceStore(pages: WorkspacePage[] = []): WorkspaceStore {
-  return { pages, members: [], tokens: [], uploads: [], reports: [] };
+  return { pages, members: [], tokens: [], uploads: [], reports: [], seqs: [] };
 }
 
 // addVersion saves a version as the service would, for a test to bring in
@@ -121,10 +123,12 @@ export function workspaceHandlers(store: WorkspaceStore) {
     http.put("/api/v1/workspace/viewing", async ({ request, response }) => {
       store.viewing = await request.json();
       store.reports.push(store.viewing);
+      store.seqs.push(store.viewing.seq);
       return response(204).empty();
     }),
-    http.delete("/api/v1/workspace/viewing/{tab}", ({ params, response }) => {
+    http.delete("/api/v1/workspace/viewing/{tab}", ({ params, query, response }) => {
       if (store.viewing?.tab === params.tab) store.viewing = undefined;
+      store.seqs.push(Number(query.get("seq")));
       return response(204).empty();
     }),
     http.put("/api/v1/workspace/selection", async ({ request, response }) => {

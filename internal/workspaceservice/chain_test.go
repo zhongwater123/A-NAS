@@ -178,7 +178,7 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 
 	// The member picks the button: the frame reports its data-anas-at.
 	button := bytes.Index(source, []byte(`<button class="btn btn-primary">`))
-	member.call(t, http.MethodPut, "/api/v1/workspace/viewing", "application/json", []byte(`{"pageId":"`+page.ID+`","version":1,"tab":"tab-1","focused":true}`))
+	member.call(t, http.MethodPut, "/api/v1/workspace/viewing", "application/json", []byte(`{"pageId":"`+page.ID+`","version":1,"tab":"tab-1","focused":true,"seq":1}`))
 	selection := `{"pageId":"` + page.ID + `","version":1,"at":` + strconv.Itoa(button) + `,"generated":false,"tag":"button","text":"发出分享","dom":"",` +
 		`"rect":{"x":10,"y":20,"w":120,"h":52},"style":{"padding":"14px 28px"},"rules":[".btn",".btn-primary"]}`
 	if status, body := member.call(t, http.MethodPut, "/api/v1/workspace/selection", "application/json", []byte(selection)); status != http.StatusNoContent {

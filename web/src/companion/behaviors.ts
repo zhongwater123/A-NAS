@@ -2,7 +2,7 @@
 // the member can tell reading from searching or running a command, and the lines its bubble picks from.
 // A line with {detail} names what the step works on (behaviorLine); the others do not.
 import { toolLabel } from "../assistant/toolLabels";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 
 /** A kind of step of a VNAS turn, or how the turn ended. */
 export type Behavior =

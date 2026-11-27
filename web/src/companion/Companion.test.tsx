@@ -24,8 +24,8 @@ import {
 // Whether the local console's screen saver or black screen covers the page; the rest of the module as it is.
 // A test that takes the cover away tells who listens, as the screen saver does.
 const cover = vi.hoisted(() => ({ up: false, local: false, dismissed: new Set<() => void>() }));
-vi.mock("../desktop/LocalConsoleScreenSaver", async (original) => ({
-  ...(await original<typeof import("../desktop/LocalConsoleScreenSaver")>()),
+vi.mock("../lib/localConsole", async (original) => ({
+  ...(await original<typeof import("../lib/localConsole")>()),
   localConsoleCovered: () => cover.up,
   isLocalConsole: () => cover.local,
   onLocalConsoleDismissed: (listener: () => void) => {

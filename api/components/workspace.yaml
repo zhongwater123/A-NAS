@@ -80,12 +80,13 @@ schemas:
   WorkspaceViewing:
     type: object
     additionalProperties: false
-    required: [pageId, version, tab, focused]
+    required: [pageId, version, tab, focused, seq]
     properties:
       pageId: { type: string }
       version: { type: integer, minimum: 1 }
       tab: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "A name the tab made for itself when it opened, random." }
       focused: { type: boolean, description: "Whether the tab has the focus: the tab focused last is the one the member uses." }
+      seq: { type: integer, format: int64, minimum: 1, description: "The tab's count of its reports, its closing included: requests can arrive out of order, and one older than the tab's last changes nothing." }
   WorkspaceViewer:
     type: object
     additionalProperties: false

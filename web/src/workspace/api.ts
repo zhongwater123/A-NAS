@@ -78,14 +78,24 @@ const thisTab = (() => {
   }
 })();
 
+// seq counts this tab's reports. A hidden tab's take-back and the report when
+// it is shown again are separate requests that can arrive in either order:
+// the service ignores one older than the tab's last.
+let seq = 0;
+
 // reportViewing says this tab shows a page's version; focused, that the
 // member is using it.
 export const reportViewing = (pageId: string, version: number, focused: boolean) =>
-  call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version, tab: thisTab, focused } }));
+  call(client.PUT("/api/v1/workspace/viewing", { body: { pageId, version, tab: thisTab, focused, seq: ++seq } }));
 
 // stopViewing takes it back; keepalive lets a closing tab send it.
 export const stopViewing = (keepalive = false) =>
-  call(client.DELETE("/api/v1/workspace/viewing/{tab}", { params: { path: { tab: thisTab } }, keepalive }));
+  call(
+    client.DELETE("/api/v1/workspace/viewing/{tab}", {
+      params: { path: { tab: thisTab }, query: { seq: ++seq } },
+      keepalive,
+    }),
+  );
 
 export const setSelection = (selection: WorkspaceSelection) =>
   call(client.PUT("/api/v1/workspace/selection", { body: selection }));

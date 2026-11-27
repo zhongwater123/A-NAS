@@ -2450,7 +2450,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. No tab name is 400 invalid_request */
+        /** The page and version one of the caller's tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab's last, its closing included, changes nothing. No tab name or seq is 400 invalid_request */
         put: operations["setWorkspaceViewing"];
         post?: never;
         delete?: never;
@@ -2472,7 +2472,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** This tab of the caller's closed or went to the background; the caller's other tabs stay */
+        /** This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request */
         delete: operations["clearWorkspaceViewing"];
         options?: never;
         head?: never;
@@ -8942,6 +8942,11 @@ export interface components {
             tab: string;
             /** @description Whether the tab has the focus: the tab focused last is the one the member uses. */
             focused: boolean;
+            /**
+             * Format: int64
+             * @description The tab's count of its reports, its closing included: requests can arrive out of order, and one older than the tab's last changes nothing.
+             */
+            seq: number;
         };
         WorkspaceRect: {
             x: number;
@@ -14806,7 +14811,10 @@ export interface operations {
     };
     clearWorkspaceViewing: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description The tab's count of its reports, as in WorkspaceViewing */
+                seq: number;
+            };
             header: {
                 "X-CSRF-Token": components["parameters"]["CSRFToken"];
             };
@@ -14825,6 +14833,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
         };
     };

@@ -2,16 +2,17 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { localConsoleActive } from "../lib/localConsole";
-import { http, server } from "../test/server";
 import {
-  defaultSleepAfterMinutes,
   isLocalConsole,
-  LocalConsoleScreenSaver,
-  loadScreenSaverVideos,
   localConsoleCovered,
   localConsoleScreenSaverIdleMs,
   onLocalConsoleDismissed,
+} from "../lib/localConsole";
+import { http, server } from "../test/server";
+import {
+  defaultSleepAfterMinutes,
+  LocalConsoleScreenSaver,
+  loadScreenSaverVideos,
   selectScreenSaverVideo,
 } from "./LocalConsoleScreenSaver";
 
@@ -50,17 +51,28 @@ describe("local console screen saver", () => {
     expect(isLocalConsole("")).toBe(false);
   });
 
-  it("counts use a page reports from inside a frame, but only input takes a cover away", async () => {
-    render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} />);
-    await act(async () => undefined);
-    await idle(localConsoleScreenSaverIdleMs - 1_000);
-    act(() => localConsoleActive());
-    await idle(localConsoleScreenSaverIdleMs - 1_000);
-    expect(saver()).toBeNull();
-    await idle(1_000);
-    expect(saver()).not.toBeNull();
-    act(() => localConsoleActive());
-    expect(saver()).not.toBeNull();
+  it("counts input the browser saw inside a frame, but only input takes a cover away", async () => {
+    // Input inside a frame never reaches the window; the browser's user
+    // activation does, for about five seconds.
+    const activation = { isActive: false };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    try {
+      render(<LocalConsoleScreenSaver enabled loadVideos={async () => videos} loadSleepAfter={neverSleep} />);
+      await act(async () => undefined);
+      await idle(localConsoleScreenSaverIdleMs - 10_000);
+      activation.isActive = true;
+      await idle(2_000);
+      activation.isActive = false;
+      await idle(localConsoleScreenSaverIdleMs - 2_000);
+      expect(saver()).toBeNull();
+      await idle(2_000);
+      expect(saver()).not.toBeNull();
+      activation.isActive = true;
+      await idle(4_000);
+      expect(saver()).not.toBeNull();
+    } finally {
+      Reflect.deleteProperty(navigator, "userActivation");
+    }
   });
 
   it("selects one video uniformly from the pool", () => {

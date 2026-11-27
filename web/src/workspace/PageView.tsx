@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
-import { localConsoleActive } from "../lib/localConsole";
 import { relativeTime } from "../lib/time";
 import {
   clearSelection,
@@ -238,7 +237,6 @@ function Viewer({
         case "anas:picked": {
           // One element each time the member asks to pick.
           if (!armed.current) break;
-          localConsoleActive();
           pick(false);
           const { type: _, ...picked } = message;
           const selection: Selected = { picked, version: load.version, state: "saving" };
@@ -258,8 +256,6 @@ function Viewer({
           }
           break;
         case "anas:scrolled":
-          // Reading a page is input its tab's window never sees.
-          localConsoleActive();
           onScrolled(message.y);
           break;
       }
