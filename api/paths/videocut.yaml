@@ -1,6 +1,7 @@
 # 剪辑中心 as Venus (docs/specs/venus.md, ADR 0041). The contract came first
 # (#694): an operation VideoCut does not serve yet answers 501
-# not_implemented, and the Web answers it from its MSW stand-ins
+# not_implemented, which each such operation declares until it is served
+# (drop its 501 then), and the Web answers it from its MSW stand-ins
 # (web/src/videocut/mocks) until it does. Served only while
 # ANAS_VIDEOCUT_ENABLED is on; otherwise every path answers 404. A sample
 # project's id works on every read; anything that changes it is
@@ -19,6 +20,7 @@
     responses:
       "200": { description: The catalog, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutCatalog" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/songs/{songId}/audio:
   get:
     operationId: getVideoCutCatalogSongAudio
@@ -31,6 +33,7 @@
       "206": { description: Partial audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "416": { description: The range is outside the song. }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects:
   get:
     operationId: listVideoCutProjects
@@ -39,6 +42,7 @@
       "200": { description: The projects, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProjectList" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: createVideoCutProject
     description: >-
@@ -67,6 +71,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}:
   get:
     operationId: getVideoCutProject
@@ -76,6 +81,7 @@
       "200": { description: The project, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProject" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: deleteVideoCutProject
     summary: "Delete the project, stopping its work first: its film, timeline, candidates, anchors and imported song go with it; the videos uploaded stay in the photo library (ADR 0041). The sample is sample_read_only (403)"
@@ -84,6 +90,7 @@
       "204": { description: Deleted }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/files:
   post:
     operationId: addVideoCutProjectFiles
@@ -109,6 +116,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/files/{fileId}:
   delete:
     operationId: deleteVideoCutProjectFile
@@ -122,6 +130,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/selection:
   patch:
     operationId: updateVideoCutSelection
@@ -156,6 +165,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/settings:
   patch:
     operationId: updateVideoCutSettings
@@ -179,6 +189,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/song:
   put:
     operationId: putVideoCutSong
@@ -208,6 +219,7 @@
       "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
   get:
     operationId: getVideoCutSongStructure
     summary: "The film's parts and slots as the project's song makes them, before the timeline is made (M5-1, M6-3, M6-4). A song still being analysed is song_not_ready (409)"
@@ -216,6 +228,7 @@
       "200": { description: The song's structure, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutSongStructure" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/song/import:
   post:
     operationId: importVideoCutSong
@@ -236,6 +249,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "413": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/song/audio:
   get:
     operationId: getVideoCutSongAudio
@@ -248,6 +262,7 @@
       "206": { description: Partial audio content, content: { audio/*: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "416": { description: The range is outside the song. }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/heartbeat:
   post:
     operationId: reportVideoCutProject
@@ -259,6 +274,7 @@
     responses:
       "204": { description: Noted }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/generate:
   post:
     operationId: generateVideoCutFilm
@@ -286,6 +302,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/resume:
   post:
     operationId: resumeVideoCutUpload
@@ -296,6 +313,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/retry:
   post:
     operationId: retryVideoCutProject
@@ -307,6 +325,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/assets:
   get:
     operationId: listVideoCutProjectAssets
@@ -316,6 +335,7 @@
       "200": { description: The videos, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProjectAssets" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
   post:
     operationId: addVideoCutProjectAsset
     description: >-
@@ -344,6 +364,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy:
   get:
     operationId: getVideoCutProxy
@@ -358,6 +379,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "416": { description: The range is outside the proxy. }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/assets/{assetId}/frame:
   get:
     operationId: getVideoCutFrame
@@ -371,6 +393,7 @@
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/timeline:
   get:
     operationId: getVideoCutTimeline
@@ -380,6 +403,7 @@
       "200": { description: The timeline, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutTimeline" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/timeline/edits:
   post:
     operationId: editVideoCutTimeline
@@ -408,6 +432,7 @@
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/timeline/undo:
   post:
     operationId: undoVideoCutTimeline
@@ -428,6 +453,7 @@
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/slots/{slot}/candidates:
   get:
     operationId: listVideoCutCandidates
@@ -437,6 +463,7 @@
       "200": { description: The candidates, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutCandidates" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/assistant:
   get:
     operationId: getVideoCutAssistant
@@ -444,6 +471,7 @@
     responses:
       "200": { description: What works, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutAssistantStatus" } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/assistant:
   post:
     operationId: askVideoCutAssistant
@@ -470,6 +498,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/export:
   post:
     operationId: exportVideoCutFilm
@@ -495,6 +524,7 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/projects/{projectId}/film:
   get:
     operationId: getVideoCutFilm
@@ -510,6 +540,7 @@
       "206": { description: Part of the film, content: { video/mp4: { schema: { type: string, format: binary } } } }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "416": { description: The range is outside the film. }
+      "501": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/videocut/notices:
   get:
     operationId: listVideoCutNotices

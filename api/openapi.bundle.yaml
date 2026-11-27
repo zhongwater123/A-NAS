@@ -4488,6 +4488,8 @@ paths:
                 $ref: '#/components/schemas/VideoCutCatalog'
         '404':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/songs/{songId}/audio:
     get:
       operationId: getVideoCutCatalogSongAudio
@@ -4517,6 +4519,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '416':
           description: The range is outside the song.
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects:
     get:
       operationId: listVideoCutProjects
@@ -4529,6 +4533,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/VideoCutProjectList'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -4577,6 +4583,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}:
@@ -4594,6 +4602,8 @@ paths:
                 $ref: '#/components/schemas/VideoCutProject'
         '404':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
     delete:
@@ -4608,6 +4618,8 @@ paths:
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/files:
     post:
@@ -4649,6 +4661,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/files/{fileId}:
     delete:
       operationId: deleteVideoCutProjectFile
@@ -4669,6 +4683,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/selection:
     patch:
@@ -4722,6 +4738,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/settings:
     patch:
       operationId: updateVideoCutSettings
@@ -4762,6 +4780,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/song:
     put:
@@ -4804,6 +4824,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
     get:
@@ -4821,6 +4843,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/song/import:
     post:
@@ -4863,6 +4887,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/song/audio:
     get:
       operationId: getVideoCutSongAudio
@@ -4892,6 +4918,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '416':
           description: The range is outside the song.
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/heartbeat:
     post:
       operationId: reportVideoCutProject
@@ -4903,6 +4931,8 @@ paths:
         '204':
           description: Noted
         '404':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/generate:
     post:
@@ -4940,6 +4970,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/resume:
@@ -4962,6 +4994,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/retry:
     post:
       operationId: retryVideoCutProject
@@ -4982,6 +5016,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/assets:
@@ -4998,6 +5034,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/VideoCutProjectAssets'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -5044,6 +5082,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy:
@@ -5076,6 +5116,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '416':
           description: The range is outside the proxy.
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/assets/{assetId}/frame:
@@ -5105,6 +5147,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/timeline:
@@ -5123,6 +5167,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/timeline/edits:
     post:
@@ -5164,6 +5210,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/timeline/undo:
@@ -5199,6 +5247,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/slots/{slot}/candidates:
     get:
       operationId: listVideoCutCandidates
@@ -5217,6 +5267,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/assistant:
     get:
       operationId: getVideoCutAssistant
@@ -5229,6 +5281,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/VideoCutAssistantStatus'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/assistant:
     post:
@@ -5267,6 +5321,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '409':
           $ref: '#/components/responses/ProductError'
+        '501':
+          $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
   /api/v1/videocut/projects/{projectId}/export:
@@ -5302,6 +5358,8 @@ paths:
         '404':
           $ref: '#/components/responses/ProductError'
         '409':
+          $ref: '#/components/responses/ProductError'
+        '501':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -5339,6 +5397,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '416':
           description: The range is outside the film.
+        '501':
+          $ref: '#/components/responses/ProductError'
   /api/v1/videocut/notices:
     get:
       operationId: listVideoCutNotices

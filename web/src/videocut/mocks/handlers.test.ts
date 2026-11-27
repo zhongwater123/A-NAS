@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 import { http, server } from "../../test/server";
 import { SAMPLE_ID, VenusFake } from "./fake";
@@ -7,23 +8,18 @@ import { videocutHandlers } from "./handlers";
 
 // The operations the desktop's own handlers answer (test/handlers/shell.ts).
 const DESKTOP = new Set(["GET /api/v1/videocut", "GET /api/v1/videocut/notices"]);
+const METHODS = new Set(["get", "put", "post", "patch", "delete", "head", "options", "trace"]);
 
 // contractOperations reads the bundled contract for VideoCut's operations; tests run in web/.
 function contractOperations(): string[] {
-  const bundle = readFileSync("../api/openapi.bundle.yaml", "utf8");
-  const operations: string[] = [];
-  let path: string | undefined;
-  for (const line of bundle.split("\n")) {
-    const opened = /^ {2}(\/api\/v1\/videocut[^:]*):$/.exec(line);
-    if (opened) {
-      path = opened[1];
-      continue;
-    }
-    if (/^ {2}\S/.test(line) || /^\S/.test(line)) path = undefined;
-    const method = /^ {4}(get|put|post|patch|delete):$/.exec(line);
-    if (path && method) operations.push(`${method[1].toUpperCase()} ${path}`);
-  }
-  return operations;
+  const bundle = parse(readFileSync("../api/openapi.bundle.yaml", "utf8")) as { paths: Record<string, object> };
+  return Object.entries(bundle.paths)
+    .filter(([path]) => path === "/api/v1/videocut" || path.startsWith("/api/v1/videocut/"))
+    .flatMap(([path, item]) =>
+      Object.keys(item)
+        .filter((key) => METHODS.has(key))
+        .map((method) => `${method.toUpperCase()} ${path}`),
+    );
 }
 
 describe("Venus's stand-ins", () => {
@@ -35,7 +31,7 @@ describe("Venus's stand-ins", () => {
       return `${String(info.method)} ${path}`;
     });
     const wanted = contractOperations().filter((operation) => !DESKTOP.has(operation));
-    expect(wanted.length).toBeGreaterThan(20);
+    expect(wanted).toContain("POST /api/v1/videocut/projects/{projectId}/timeline/edits");
     expect(served.sort()).toEqual(wanted.sort());
   });
 });
@@ -48,8 +44,8 @@ describe("VenusFake behind the stand-ins", () => {
       headers: body === undefined ? {} : { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    const text = await response.text();
-    return { status: response.status, body: text ? JSON.parse(text) : undefined };
+    const json = response.headers.get("Content-Type")?.includes("json");
+    return { status: response.status, body: json ? await response.json() : undefined };
   };
   const file = (name: string, read = true) => ({
     name,
@@ -138,5 +134,32 @@ describe("VenusFake behind the stand-ins", () => {
     expect((await send("POST", `/projects/${body.id}/generate`, { requestKey: "g" })).body.error.code).toBe(
       "nothing_selected",
     );
+  });
+
+  it("repeats a video's request key, and refuses it for another request", async () => {
+    const { body } = await send("POST", "/projects", { requestKey: "k4", files: [file("d.mp4")] });
+    await send("POST", `/projects/${body.id}/generate`, { requestKey: "g4" });
+    const fileId = body.files[0].id as string;
+    const first = await send("POST", `/projects/${body.id}/assets`, { requestKey: "a1", assetId: "photo:1", fileId });
+    expect(first.status).toBe(200);
+    expect(
+      (await send("POST", `/projects/${body.id}/assets`, { requestKey: "a1", assetId: "photo:1", fileId })).body,
+    ).toEqual(first.body);
+    const other = await send("POST", `/projects/${body.id}/assets`, { requestKey: "a1", assetId: "photo:2", fileId });
+    expect(other).toMatchObject({ status: 409, body: { error: { code: "conflict" } } });
+  });
+
+  it("serves only the project's own videos, and moves listed projects on", async () => {
+    const { body } = await send("POST", "/projects", { requestKey: "k5", files: [file("e.mp4")] });
+    expect((await send("GET", `/projects/${SAMPLE_ID}/assets/sample-asset:1/frame?t=0`)).status).toBe(200);
+    expect((await send("GET", `/projects/${body.id}/assets/sample-asset:1/frame?t=0`)).status).toBe(404);
+    expect((await send("GET", `/projects/${body.id}/assets/sample-asset:1/proxy`)).status).toBe(404);
+    await send("POST", `/projects/${body.id}/generate`, { requestKey: "g5" });
+    const states = [];
+    for (let i = 0; i < 3; i++) {
+      const items = (await send("GET", "/projects")).body.items as { id: string; state: string }[];
+      states.push(items.find((item) => item.id === body.id)?.state);
+    }
+    expect(states).toEqual(["generating", "generating", "ready"]);
   });
 });

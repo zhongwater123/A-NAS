@@ -15050,6 +15050,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     getVideoCutCatalogSongAudio: {
@@ -15091,6 +15092,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            501: components["responses"]["ProductError"];
         };
     };
     listVideoCutProjects: {
@@ -15112,6 +15114,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15155,6 +15158,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15179,6 +15183,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15204,6 +15209,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     addVideoCutProjectFiles: {
@@ -15239,6 +15245,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     deleteVideoCutProjectFile: {
@@ -15267,6 +15274,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     updateVideoCutSelection: {
@@ -15306,6 +15314,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     updateVideoCutSettings: {
@@ -15343,6 +15352,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     getVideoCutSongStructure: {
@@ -15367,6 +15377,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     putVideoCutSong: {
@@ -15404,6 +15415,7 @@ export interface operations {
             409: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15442,6 +15454,7 @@ export interface operations {
             409: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     getVideoCutSongAudio: {
@@ -15483,6 +15496,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            501: components["responses"]["ProductError"];
         };
     };
     reportVideoCutProject: {
@@ -15506,6 +15520,7 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     generateVideoCutFilm: {
@@ -15541,6 +15556,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15569,6 +15585,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     retryVideoCutProject: {
@@ -15596,6 +15613,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15620,6 +15638,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15658,6 +15677,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15701,6 +15721,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15730,6 +15751,7 @@ export interface operations {
             };
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15755,6 +15777,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     editVideoCutTimeline: {
@@ -15791,6 +15814,7 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15825,6 +15849,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     listVideoCutCandidates: {
@@ -15851,6 +15876,7 @@ export interface operations {
             };
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     getVideoCutAssistant: {
@@ -15872,6 +15898,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     askVideoCutAssistant: {
@@ -15906,6 +15933,7 @@ export interface operations {
             400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15941,6 +15969,7 @@ export interface operations {
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15985,6 +16014,7 @@ export interface operations {
                 };
                 content?: never;
             };
+            501: components["responses"]["ProductError"];
         };
     };
     listVideoCutNotices: {

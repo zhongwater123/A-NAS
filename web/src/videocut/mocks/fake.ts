@@ -171,7 +171,10 @@ export class VenusFake {
 
   // --- Reading
 
+  // list moves on, as a read of each would, the projects whose work goes on
+  // by itself: the start page polls the list, not each project.
   list(): VideoCutProjectList {
+    if (this.options.advanceOnRead) for (const stored of this.stored.values()) this.advance(stored);
     const own = [...this.stored.values()]
       .filter((s) => !s.project.sample)
       .map((s) => s.project)
@@ -464,8 +467,18 @@ export class VenusFake {
     return asset;
   }
 
-  addVideo(id: string, assetId: string, fileId?: string): VideoCutProjectAsset {
+  addVideo(id: string, requestKey: string, assetId: string, fileId?: string): VideoCutProjectAsset {
     const stored = this.writable(id);
+    // The same key again repeats the same request and nothing more; with
+    // another request, or on another project, it is a conflict.
+    const request = `asset:${assetId}:${fileId ?? ""}`;
+    for (const other of this.stored.values()) {
+      const made = other.requestKeys.get(requestKey);
+      if (made === undefined) continue;
+      const repeated = other === stored && made === request && stored.assets.find((a) => a.assetId === assetId);
+      if (repeated) return repeated;
+      throw new FakeError(409, "conflict");
+    }
     if (fileId) {
       this.inState(stored, "uploading");
       const file = stored.project.files.find((f) => f.id === fileId);
@@ -476,10 +489,28 @@ export class VenusFake {
       const progress = stored.project.progress;
       progress.uploaded = stored.project.files.filter((f) => f.selected && f.upload === "done").length;
       progress.analysed = progress.uploaded;
+      stored.requestKeys.set(requestKey, request);
       return this.addAsset(stored, assetId, fileId, "done");
     }
     this.inState(stored, "ready", "exported");
+    stored.requestKeys.set(requestKey, request);
     return this.addAsset(stored, assetId, undefined, "running");
+  }
+
+  // media says whether a video is the project's, to serve its proxy and
+  // frames; another project's, or none, is not_found.
+  media(id: string, assetId: string) {
+    const stored = this.find(id);
+    const own =
+      stored.project.files.some((file) => file.assetId === assetId) ||
+      stored.assets.some((asset) => asset.assetId === assetId) ||
+      (stored.timeline?.shots.some((shot) => shot.assetId === assetId) ?? false);
+    if (!own) throw new FakeError(404, "not_found");
+  }
+
+  // songAudio says whether the project has a song to play.
+  songAudio(id: string) {
+    if (!this.find(id).project.settings.song) throw new FakeError(404, "not_found");
   }
 
   // --- The film page

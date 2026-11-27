@@ -40,7 +40,12 @@ async function answer(run: () => Response | Promise<Response>): Promise<Response
 export function videocutHandlers(fake: VenusFake, http: OpenApiHttpHandlers<paths>) {
   return [
     http.get("/api/v1/videocut/catalog", ({ response }) => response(200).json(catalog)),
-    http.get("/api/v1/videocut/songs/{songId}/audio", () => binary("audio/mpeg")),
+    http.get("/api/v1/videocut/songs/{songId}/audio", ({ params }) =>
+      answer(() => {
+        if (!catalog.songs.some((song) => song.id === params.songId)) throw new FakeError(404, "not_found");
+        return binary("audio/mpeg");
+      }),
+    ),
     http.get("/api/v1/videocut/projects", ({ response }) => response(200).json(fake.list())),
     http.post("/api/v1/videocut/projects", ({ request, response }) =>
       answer(async () => {
@@ -89,7 +94,12 @@ export function videocutHandlers(fake: VenusFake, http: OpenApiHttpHandlers<path
         );
       }),
     ),
-    http.get("/api/v1/videocut/projects/{projectId}/song/audio", () => binary("audio/mpeg")),
+    http.get("/api/v1/videocut/projects/{projectId}/song/audio", ({ params }) =>
+      answer(() => {
+        fake.songAudio(params.projectId);
+        return binary("audio/mpeg");
+      }),
+    ),
     http.post("/api/v1/videocut/projects/{projectId}/heartbeat", ({ params, response }) =>
       answer(() => {
         fake.heartbeat(params.projectId);
@@ -111,11 +121,21 @@ export function videocutHandlers(fake: VenusFake, http: OpenApiHttpHandlers<path
     http.post("/api/v1/videocut/projects/{projectId}/assets", ({ params, request, response }) =>
       answer(async () => {
         const body = await request.json();
-        return response(200).json(fake.addVideo(params.projectId, body.assetId, body.fileId));
+        return response(200).json(fake.addVideo(params.projectId, body.requestKey, body.assetId, body.fileId));
       }),
     ),
-    http.get("/api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy", () => binary("video/mp4")),
-    http.get("/api/v1/videocut/projects/{projectId}/assets/{assetId}/frame", () => binary("image/jpeg", FRAME)),
+    http.get("/api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy", ({ params }) =>
+      answer(() => {
+        fake.media(params.projectId, params.assetId);
+        return binary("video/mp4");
+      }),
+    ),
+    http.get("/api/v1/videocut/projects/{projectId}/assets/{assetId}/frame", ({ params }) =>
+      answer(() => {
+        fake.media(params.projectId, params.assetId);
+        return binary("image/jpeg", FRAME);
+      }),
+    ),
     http.get("/api/v1/videocut/projects/{projectId}/timeline", ({ params, response }) =>
       answer(() => response(200).json(fake.timeline(params.projectId))),
     ),
