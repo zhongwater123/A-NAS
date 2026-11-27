@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/files"
 )
@@ -212,27 +213,10 @@ func (s *Service) dropFrames(ids []string) {
 	}
 }
 
-// writeAtomically puts data at target through a synced temporary file. A
-// cached file that exists is served as it is, so a crash must never leave an
-// empty one behind under its final name.
+// writeAtomically puts data at target. A cached file that exists is served
+// as it is, so a crash must never leave an empty one behind under its name.
 func writeAtomically(target string, data []byte) error {
-	temporary, err := os.CreateTemp(filepath.Dir(target), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temporary.Name()) }()
-	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), target)
+	return atomicfile.Write(target, data, 0o600)
 }
 
 func truncate(value string, limit int) string {

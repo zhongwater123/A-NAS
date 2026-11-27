@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
+
+	"github.com/zhongwater123/A-NAS/internal/atomicfile"
 )
 
 const diskMaxBytes int64 = 512 << 20
@@ -61,7 +63,8 @@ func openDiskCache(directory string) (*diskCache, error) {
 	}
 	var previews []found
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".preview-") && !entry.IsDir() {
+		// A temporary file a crash left behind; previews never start with a dot.
+		if strings.HasPrefix(entry.Name(), ".") && !entry.IsDir() {
 			_ = os.Remove(filepath.Join(directory, entry.Name()))
 			continue
 		}
@@ -133,17 +136,9 @@ func (c *diskCache) put(key string, data []byte) {
 	if !c.trim(int64(len(data)), 1) {
 		return
 	}
-	f, err := os.CreateTemp(c.directory, ".preview-")
-	if err != nil {
-		return
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-	_, err = f.Write(data)
-	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		return
-	}
-	if err = os.Rename(f.Name(), c.path(key)); err != nil {
+	// A preview on disk is served as it is, so a power cut must leave the
+	// whole file or none under its name (#272).
+	if err := atomicfile.Write(c.path(key), data, 0o600); err != nil {
 		return
 	}
 	c.entries.Add(key, int64(len(data)))
