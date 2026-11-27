@@ -52,10 +52,37 @@
       "422": { $ref: "../components/common.yaml#/responses/ProductError" }
   delete:
     operationId: deleteWorkspacePage
-    summary: Delete a page and all its versions for everyone. Only the account that uploaded it and administrators may (403 forbidden)
+    summary: "Move a page and all its versions to the trash, for everyone: it leaves the list and every operation on it answers 404 until it is restored. After 30 days in the trash it goes for good. Only the account that uploaded it and administrators may (403 forbidden)"
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
-      "204": { description: Deleted }
+      "204": { description: Moved to the trash }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/workspace/trash:
+  get:
+    operationId: listWorkspaceTrash
+    summary: The deleted pages, the most recently deleted first, with when each goes for good
+    responses:
+      "200": { description: The trash, content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspaceTrash" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/workspace/trash/{pageId}:
+  parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
+  delete:
+    operationId: purgeWorkspacePage
+    summary: Remove a page in the trash and all its versions for good. Only the account that uploaded it and administrators may (403 forbidden); a page not in the trash is 404
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Removed for good }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/workspace/trash/{pageId}/restore:
+  parameters: [{ $ref: "../components/workspace.yaml#/parameters/WorkspacePageID" }]
+  post:
+    operationId: restoreWorkspacePage
+    summary: Bring a page back from the trash with all its versions, in its place in the list. Only the account that uploaded it and administrators may (403 forbidden); a page not in the trash is 404
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: "The page, back in the list", content: { application/json: { schema: { $ref: "../components/workspace.yaml#/schemas/WorkspacePageSummary" } } } }
       "403": { $ref: "../components/common.yaml#/responses/ProductError" }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/workspace/pages/{pageId}/versions:

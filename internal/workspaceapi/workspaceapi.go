@@ -129,6 +129,9 @@ func New(store *workspace.Store, options Options) http.Handler {
 		"GET /pages/{pageID}":           h.page,
 		"PATCH /pages/{pageID}":         h.renamePage,
 		"DELETE /pages/{pageID}":        h.deletePage,
+		"GET /trash":                    h.trash,
+		"POST /trash/{pageID}/restore":  h.restorePage,
+		"DELETE /trash/{pageID}":        h.purgePage,
 		"POST /pages/{pageID}/versions": h.saveVersion,
 		"GET /pages/{pageID}/versions/{version}/view": h.view,
 		"GET /pages/{pageID}/versions/{version}/file": h.file,
@@ -350,6 +353,32 @@ func (h *handler) renamePage(w http.ResponseWriter, r *http.Request, caller work
 
 func (h *handler) deletePage(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
 	if err := h.store.DeletePage(r.Context(), caller.Actor, r.PathValue("pageID")); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) trash(w http.ResponseWriter, r *http.Request, _ workspace.Caller) {
+	pages, err := h.store.Trash(r.Context())
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": pages})
+}
+
+func (h *handler) restorePage(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
+	page, err := h.store.RestorePage(r.Context(), caller.Actor, r.PathValue("pageID"))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpjson.Write(w, http.StatusOK, presentSummary{page, presenceOf(h.store.Presence(), page.ID)})
+}
+
+func (h *handler) purgePage(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
+	if err := h.store.PurgePage(r.Context(), caller.Actor, r.PathValue("pageID")); err != nil {
 		h.fail(w, r, err)
 		return
 	}
