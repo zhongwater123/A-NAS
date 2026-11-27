@@ -6,14 +6,14 @@
 #
 # Ruff for `make ai-lint`, which refuses another version: another may judge
 # differently.
-ruff==0.17.1
+ruff==0.17.5
 # Known vulnerabilities in the runtime's packages (`make vuln-check`).
 pip-audit==2.10.1
 # Security audit of the GitHub workflows and Dependabot's configuration
 # (`make ops-check`), which refuses another version: releases add audits.
 zizmor==1.32.0
 # Resolves the lock files and installs the runtime (scripts/build-ai-runtime.sh).
-uv==0.13.4
+uv==0.13.8
 # Reads dsh-pet's config.jsonc for scripts/vendor-dsh-pet.py: comments,
 # trailing commas and strings that contain either.
 json5==0.17.3
