@@ -7,4 +7,5 @@
 - 样式用 CSS Modules 与 `src/styles/tokens.css` 的令牌；窗口一律经 `src/ui/lazyCode.ts` 懒加载。首屏体积有上限（`.size-limit.js`），超出即构建失败。
 - 界面设计与文案按[界面设计与文案](../docs/architecture/web-desktop.md#界面设计与文案)：一次到位、文案只写事实与操作、不动 `.desktop-shell` 的尺寸与溢出。
 - 测试：Vitest 与 Testing Library，请求由 MSW 按契约应答（`src/test/handlers/`），按角色与可访问名称查元素。单个文件：`npx vitest run src/<路径>`；类型检查：`npm run typecheck`。
+- 组件里的 `setTimeout` 与 `setInterval` 在卸载时清掉：测试结束、jsdom 拆掉后才触发的计时器报 `window is not defined`，整轮 Vitest 失败（提示框的计时器先后让 #253、#683 的 CI 偶发失败）。
 - 格式化：提交前在仓库根运行 `make fmt`（编辑后的钩子也会运行）；整个目录可用 `npm run format`。
