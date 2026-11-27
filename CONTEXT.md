@@ -270,7 +270,7 @@ _Avoid_：通知、家庭提示（家庭中心的疫苗提示）、闹钟、定�
 _Avoid_：剪辑插件、视频剪辑器、VideoCut 或 videocut 服务（在产品文案中；VideoCut 是代码与运行时用的名字，[#639](https://github.com/zhongwater123/A-NAS/issues/639)）
 
 **Venus**：
-剪辑中心按《Venus PRD v3》改版后的产品名，界面上分开始页、准备页、成片页（[规格](docs/specs/venus.md)）。代码与运行时仍叫 VideoCut；PRD 里的“作品”“卡位”在文档中叫剪辑项目、音乐槽。
+剪辑中心按《Venus PRD v3》改版后的产品名，界面上分开始页、准备页、成片页（[规格](docs/specs/venus.md)）。代码与运行时仍叫 VideoCut；PRD 里的“作品”“卡位”在文档中叫剪辑项目、音乐槽。一个项目只有一条成片，成片存在项目里，原片仍在相册（[ADR 0041](docs/adr/0041-edit-venus-films-on-one-timeline-per-project.md)）。
 _Avoid_：Venus 服务、Venus 模块（服务与代码不改名）
 
 **剪辑项目（VideoCut Project）**：
@@ -294,7 +294,7 @@ _Avoid_：拍子、重拍（那是配乐分析的节拍，在剪辑语境中说�
 _Avoid_：时间段、格子
 
 **修改稿（Draft）**：
-成员在某个剪辑版本上做的二次编辑，存在剪辑中心的服务端，记着每个音乐槽用哪个节拍、是否锁定；每一步是一个修订，可以撤销。存为新版本后修改稿保留（ADR 0039）。
+成员在某个剪辑版本上做的二次编辑，存在剪辑中心的服务端，记着每个音乐槽用哪个节拍、是否锁定；每一步是一个修订，可以撤销。存为新版本后修改稿保留（ADR 0039）。Venus 不用修改稿，ADR 0039 已被 [ADR 0041](docs/adr/0041-edit-venus-films-on-one-timeline-per-project.md) 取代。
 _Avoid_：草稿版本、副本
 
 **锚点（Anchor）**：

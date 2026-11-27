@@ -1,7 +1,7 @@
 # 剪辑中心二次编辑起草时选的两项默认做法
 
-状态：decided（2026-11-19，用户）
-更新时间：2026-11-19
+状态：superseded（2026-11-27 随 ADR 0039 作废，被 [ADR 0041](../adr/0041-edit-venus-films-on-one-timeline-per-project.md) 取代；原为 decided，2026-11-19，用户）
+更新时间：2026-11-27
 
 ## 问题
 
