@@ -158,7 +158,7 @@ describe("共享工作区", () => {
     expect(screen.queryByRole("list", { name: "页面" })).toBeNull();
   });
 
-  it("gives the command that connects Claude Code and waits for its first call", async () => {
+  it("gives the prompt that has Claude Code connect itself and waits for its first call", async () => {
     const user = userEvent.setup();
     // 设置 → 我的账号, open beside it, follows the same list.
     render(
@@ -169,10 +169,13 @@ describe("共享工作区", () => {
     );
     await user.click(screen.getByRole("button", { name: "连接 agent" }));
     const dialog = await screen.findByRole("dialog", { name: "连接 agent" });
-    await user.type(within(dialog).getByRole("textbox", { name: "名字" }), "办公电脑");
-    await user.click(within(dialog).getByRole("button", { name: "生成命令" }));
-    const command = await within(dialog).findByText(/^claude mcp add/);
-    expect(command.textContent).toBe(
+    const name = within(dialog).getByRole("textbox", { name: "名字" });
+    await user.clear(name);
+    await user.type(name, "办公电脑");
+    await user.click(within(dialog).getByRole("button", { name: "生成提示词" }));
+    await within(dialog).findByText("把这段话发给你电脑上的 Claude Code：");
+    const prompt = within(dialog).getByLabelText("提示词");
+    expect(prompt.textContent).toContain(
       `claude mcp add --transport http --scope user a-nas ${location.origin}/api/v1/workspace/mcp ` +
         `--header "Authorization: Bearer anas_ws_${"0".repeat(64)}"`,
     );

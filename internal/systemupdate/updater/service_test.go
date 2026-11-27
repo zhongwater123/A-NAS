@@ -716,9 +716,16 @@ func TestARevertWhoseWayBackFailsTheCheckIsShownUntilItPasses(t *testing.T) {
 	if state = run(t, service, RequestCheck); state.Phase != PhaseRolledBack || state.Problem.Code != ProblemRollback {
 		t.Fatalf("a check while 2 still fails = %+v, want the warning kept", state)
 	}
+	host.versions = append(host.versions, "3")
 	host.checkFails["2"] = false
-	if state = run(t, service, RequestCheck); state.Phase != PhaseUpToDate || state.Problem != nil {
-		t.Fatalf("a check once 2 passes = %+v, want up to date", state)
+	host.auditOutput = "package is half installed"
+	state = run(t, service, RequestCheck)
+	if state.Phase != PhaseRolledBack || state.Problem == nil || state.Problem.Code != ProblemRollback || state.Candidate != "" {
+		t.Fatalf("a check with 3 available while the dpkg audit fails = %+v, want the warning kept", state)
+	}
+	host.auditOutput = ""
+	if state = run(t, service, RequestCheck); state.Phase != PhaseReady || state.Candidate != "3" || state.Problem != nil {
+		t.Fatalf("a check once 2 passes = %+v, want 3 ready", state)
 	}
 }
 

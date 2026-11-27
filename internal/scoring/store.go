@@ -204,6 +204,7 @@ var schema = sqlitedb.Schema{
 	Steps: []sqlitedb.Step{
 		{Up: schemaV1}, {Up: schemaV2}, {Up: schemaV3}, {Up: schemaV4},
 		{Up: schemaV5, Down: schemaV5Down},
+		{Up: schemaV6, Down: schemaV6Down},
 	},
 	WithoutDown: 4,
 }
@@ -410,6 +411,25 @@ INSERT INTO batches_v4 (id, name, source, required, rubric, state, scanned, crea
 		CASE scale WHEN 'five' THEN 'whole' ELSE scale END, hide_decimals FROM batches;
 DROP TABLE batches;
 ALTER TABLE batches_v4 RENAME TO batches;
+`
+
+// schemaV6 goes with the handbook's 打分项 of 2026-11-26: it adds 主体 and
+// names light_color 光影 and narrative 叙事性 (BuiltIn). A custom 打分项 an
+// administrator gave one of those names keeps its ID and gets 自定义 added to
+// its name, or its ID when that name is taken too, as in version 5.
+const schemaV6 = `
+UPDATE custom_dimensions SET name = CASE
+	WHEN EXISTS (SELECT 1 FROM custom_dimensions AS other WHERE other.name = custom_dimensions.name || '（自定义）')
+		THEN custom_dimensions.name || '（' || custom_dimensions.id || '）'
+	ELSE custom_dimensions.name || '（自定义）'
+END
+WHERE name IN ('主体', '光影', '叙事性');
+`
+
+// schemaV6Down leaves the renamed custom 打分项 their new names, which
+// version 5 accepts as well; it changes nothing.
+const schemaV6Down = `
+UPDATE custom_dimensions SET name = name WHERE 0;
 `
 
 // migrate brings the database to the schema's version, copying it first when
