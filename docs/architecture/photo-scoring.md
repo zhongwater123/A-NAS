@@ -76,7 +76,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 备份与移除
 
-- 每天一次 `VACUUM INTO` 到 `backups/scoring-<日期>.db`，保留 14 份。它们和数据库在同一块数据卷上，只防误操作与文件损坏；要留存的数据靠管理员下载的导出。
+- 每天一次 `VACUUM INTO` 到 `backups/scoring-<日期>.db`，保留 14 份。复制经一个只读连接（`sqlitedb.Copy`），不占模块唯一的连接，复制期间打分照常。它们和数据库在同一块数据卷上，只防误操作与文件损坏；要留存的数据靠管理员下载的导出。
 - 移除按[运行手册](../runbooks/install-and-remove-photo-scoring.md)：导出、运行移除脚本（单元、程序、清单、账号），再删除 `module-scoring` 子卷。Host Agent 不再看到清单后不会重建它。`照片打分` 文件夹里的照片留在共享空间。
 
 ## 验证
