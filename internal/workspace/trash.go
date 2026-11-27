@@ -90,37 +90,44 @@ func (s *Store) PurgePage(ctx context.Context, actor Actor, pageID string) error
 }
 
 // emptyTrash removes the pages deleted more than TrashDays ago. Each one is
-// recorded in the activity of whoever deleted it.
+// recorded in the activity of whoever deleted it. It holds s.writes, so no
+// restore comes between reading them and removing them.
 func (s *Store) emptyTrash(ctx context.Context) error {
 	s.writes.Lock()
 	defer s.writes.Unlock()
-	cutoff := formatTime(s.now().AddDate(0, 0, -TrashDays))
+	expired, err := s.expiredPages(ctx)
+	if err != nil || len(expired) == 0 {
+		return err
+	}
 	return sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, "SELECT id, title, deleted_by FROM pages WHERE deleted_at <> '' AND deleted_at <= ?", cutoff)
-		if err != nil {
-			return err
-		}
-		type expired struct{ id, title, by string }
-		var pages []expired
-		for rows.Next() {
-			var page expired
-			if err := rows.Scan(&page.id, &page.title, &page.by); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			pages = append(pages, page)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		for _, page := range pages {
+		for _, page := range expired {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM pages WHERE id = ?", page.id); err != nil {
 				return err
 			}
-			if err := s.audit(ctx, tx, Actor{AccountID: page.by}, "workspace.page_expired", "page", page.id, page.title); err != nil {
+			if err := s.audit(ctx, tx, Actor{AccountID: page.deletedBy}, "workspace.page_expired", "page", page.id, page.title); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+}
+
+type expiredPage struct{ id, title, deletedBy string }
+
+func (s *Store) expiredPages(ctx context.Context) ([]expiredPage, error) {
+	cutoff := formatTime(s.now().AddDate(0, 0, -TrashDays))
+	rows, err := s.db.QueryContext(ctx, "SELECT id, title, deleted_by FROM pages WHERE deleted_at <> '' AND deleted_at <= ?", cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pages []expiredPage
+	for rows.Next() {
+		var page expiredPage
+		if err := rows.Scan(&page.id, &page.title, &page.deletedBy); err != nil {
+			return nil, err
+		}
+		pages = append(pages, page)
+	}
+	return pages, rows.Err()
 }
