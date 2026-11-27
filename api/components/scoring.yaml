@@ -6,8 +6,8 @@ parameters:
 schemas:
   ScoringDimensionID:
     type: string
-    pattern: "^(overall|composition|light_color|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
-    description: "What a photo is scored on (打分项): one of the built-in ones, overall (总分), composition, light_color, sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning."
+    pattern: "^(overall|composition|light_color|quality|emotion|sharpness|narrative|preference|custom_[1-9][0-9]{0,3})$"
+    description: "What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning."
   ScoringDimension:
     type: object
     additionalProperties: false
@@ -15,7 +15,7 @@ schemas:
     properties:
       id: { $ref: "#/schemas/ScoringDimensionID" }
       name: { type: string, description: "The name raters see, such as 构图." }
-      description: { type: string, description: "What raters look at; empty for the built-in ones and for custom ones made without." }
+      description: { type: string, description: "What raters look at; empty for sharpness, narrative and preference and for custom ones made without." }
       custom: { type: boolean, description: An administrator made it. }
   ScoringDimensions:
     type: array
@@ -44,8 +44,8 @@ schemas:
       rater: { type: boolean, description: An administrator chose the caller as a rater. }
   ScoringScale:
     type: string
-    enum: [hundredths, tenths, whole, three]
-    description: "How a batch is scored, every 打分项 alike: hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好)."
+    enum: [five, hundredths, tenths, whole, three]
+    description: "How a batch is scored, every 打分项 alike: five, the five levels 1 (很差), 2 (较差), 3 (一般), 4 (好) and 5 (很好); hundredths, the number line from 0 to 5 with two decimals; tenths, with one; whole, whole points 0 to 5; three, the three levels 1 (差), 3 (中) and 5 (好)."
   ScoringRaterBatch:
     type: object
     additionalProperties: false
@@ -132,9 +132,10 @@ schemas:
       import:
         type: object
         additionalProperties: false
-        required: [files, imported, skipped, skippedBy]
+        required: [files, imported, skipped, skippedBy, waitingForSpace]
         properties:
           files: { type: integer, minimum: 0, description: "Files found in the folder; 0 until it was scanned." }
+          waitingForSpace: { type: boolean, description: "The import is paused because the data volume is at its reserve; it goes on by itself once space is freed." }
           imported: { type: integer, minimum: 0 }
           skipped: { type: integer, minimum: 0 }
           skippedBy:

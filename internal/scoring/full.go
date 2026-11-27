@@ -43,19 +43,16 @@ type FullView struct {
 // which the window shows at 100%. The original is read again and must still
 // be the photo that was imported.
 func (s *Store) ClaimFull(ctx context.Context, token, rater string) (FullView, error) {
-	var item int64
-	var sha, source string
-	err := s.db.QueryRowContext(ctx, `SELECT i.id, i.sha256, b.source FROM claims c
-		JOIN items i ON i.id = c.item_id JOIN batches b ON b.id = c.batch_id WHERE c.token = ? AND c.rater = ?`,
-		token, rater).Scan(&item, &sha, &source)
-	if errors.Is(err, sql.ErrNoRows) {
-		return FullView{}, ErrNotFound
-	}
+	photo, err := s.claimedPhoto(ctx, token, rater)
 	if err != nil {
 		return FullView{}, err
 	}
+	item, sha, source := photo.item, photo.sha, photo.source
 	if view, ok := s.cachedFull(sha); ok {
 		return view, nil
+	}
+	if err := s.room(fullBytes); err != nil {
+		return FullView{}, err
 	}
 	var paths []string
 	err = each(ctx, s.db, "SELECT path FROM item_paths WHERE item_id = ? ORDER BY path", []any{item}, func(rows *sql.Rows) error {

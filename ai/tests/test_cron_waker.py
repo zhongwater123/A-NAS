@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import patch
 
-SOURCE = Path(__file__).resolve().parents[1] / "assistant-spike" / "cron-waker.py"
+SOURCE = Path(__file__).resolve().parents[1] / "assistant" / "cron-waker.py"
 SPEC = importlib.util.spec_from_file_location("cron_waker", SOURCE)
 waker = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(waker)
@@ -215,6 +215,36 @@ class WakeTests(unittest.TestCase):
         (self.runs / "alice").mkdir(parents=True)
         (self.runs / "alice" / "a1b2c3d4e5f6").touch()
         self.assertTrue(self.starts(["a"], 31))
+
+    def test_a_round_under_way_is_seen_as_running(self):
+        # A oneshot round is activating for as long as it runs and never active, so the unit's
+        # state is read, not the exit status of is-active.
+        for state, expected in [
+            ("activating", True), ("deactivating", True), ("active", True), ("reloading", True),
+            ("inactive", False), ("failed", False), ("", False),
+        ]:
+            with self.subTest(state=state):
+                shown = f"ActiveState={state}\nInvocationID=0123abcd\n" if state else ""
+                done = subprocess.CompletedProcess([], 0, stdout=shown, stderr="")
+                with patch.object(waker.subprocess, "run", return_value=done) as run:
+                    self.assertEqual(waker.running("anas-assistant-cron@alice.service"), expected)
+                    self.assertEqual(waker.unit_state("anas-assistant-cron@alice.service"), (expected, "0123abcd" if state else ""))
+                self.assertEqual(run.call_args.args[0], ["/usr/bin/systemctl", "show", "-p", "ActiveState", "-p", "InvocationID",
+                                                         "anas-assistant-cron@alice.service"])
+
+    def test_nothing_is_started_or_noted_while_a_round_runs(self):
+        (self.runs / "alice").mkdir(parents=True)
+        (self.runs / "alice" / "a1b2c3d4e5f6").touch()
+        with patch.object(waker, "due", return_value=["a"]), \
+             patch.object(waker, "running", return_value=True), \
+             patch.object(waker, "active_account", return_value=True) as active, \
+             patch.object(waker.subprocess, "run") as run:
+            waker.wake("alice")
+        run.assert_not_called()
+        active.assert_not_called()
+        # The round's own note stands: the request waits for the next round,
+        # and the jobs that are due keep the wait they had.
+        self.assertEqual(os.listdir(waker.STATE), ["runs"])
 
     def test_a_round_starts_even_when_it_cannot_be_noted(self):
         blocked = Path(waker.STATE) / "a-file"

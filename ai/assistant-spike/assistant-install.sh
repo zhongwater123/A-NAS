@@ -1,99 +1,77 @@
 #!/usr/bin/env bash
-# Installs the assistant beside existing accounts and spaces, as root: the managed Hermes
-# policy, system skills, the units, the model gateway (or the scripted fake model), the
-# change broker, then assistant-layout.sh prepare for each account. setup.sh runs it on the
-# spike's hand-made layout, ai/assistant-spike/system-test.sh on the real installer's.
+# The spike's stand-in for the a-nas package and the Host Agent (ADR 0024), as root in the
+# disposable systemd container run.sh starts (setup.sh): the assistant's files where the
+# package installs them (/usr/lib/a-nas/assistant, from the checkout at /src), its units,
+# the model (the scripted fake model, or the gateway with a real key), the spike's change
+# broker, then assistant-layout.sh prepare for each account, which writes what the Host Agent
+# would.
 #   assistant-install.sh ACCOUNT...
-# Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT as for
-# run.sh; ASSISTANT_LAYOUT=members to leave the folders on the volume as they are (the
-# trial's update; assistant-layout.sh members); SPIKE_MODEL_GATEWAY=external when the caller runs the model gateway itself (the
-# trial on the Experimental NAS, nas-trial.sh); PRODUCT_USER, the account of the product service, which alone may connect to the
-# broker's product socket; ASSISTANT_GATE=host-agent when the Host Agent's File Broker is the
-# session gate (ADR 0024 decision 10) and the executor of the changes: only root then
-# connects to the instance sockets, the product service gets no token copies, and the spike's
-# change broker does not run. Without it the product service connects to the sockets itself,
-# gets a copy of each token, and the change broker executes (spike and UI prototype).
-# Like assistant-layout.sh, only for the disposable spike and system-test containers; on the
-# Experimental NAS only through nas-trial.sh, once, on fresh state. Running it again replaces
-# the model and the broker.
+# Environment: SPIKE_MODEL, SPIKE_UPSTREAM, SPIKE_CHANNEL, SPIKE_APPROVAL_TIMEOUT and
+# SPIKE_BROKER_NO_RESERVE as for run.sh; PRODUCT_USER, the account of the product service, which alone may connect to the
+# broker's product socket and the instance sockets, and gets a copy of each instance secret.
+# On an A-NAS the a-nas package and the Host Agent do all of this; the system test checks
+# theirs (system-test.sh). Running it again replaces the model and the broker.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-runtime=/opt/a-nas/assistant-runtimes/spike
+src=${ANAS_SOURCE:-/src}
+lib=/usr/lib/a-nas/assistant
 product_user=${PRODUCT_USER:-}
 if [[ -n "$product_user" ]] && ! getent passwd "$product_user" >/dev/null; then
   echo "no account $product_user" >&2
   exit 2
 fi
+[[ -d "$src/ai/assistant" ]] || { echo "no checkout at $src (run.sh mounts it)" >&2; exit 2; }
 
-# Managed Hermes policy: root-owned, read-only inside the sandbox.
-install -d -m 0755 /etc/hermes /run/anas-assistant-gw /run/a-nas-assistant
-# System skills live in a root-owned directory, like the runtime.
-install -d -m 0755 /opt/a-nas/assistant-skills /etc/a-nas-assistant /etc/a-nas-assistant/empty
-: > /etc/a-nas-assistant/empty.env && chmod 0644 /etc/a-nas-assistant/empty.env
-if [[ -f "$runtime/src/SOUL.md" ]]; then
-  install -m 0644 "$runtime/src/SOUL.md" /etc/a-nas-assistant/SOUL.md
-else
-  install -m 0644 /dev/null /etc/a-nas-assistant/SOUL.md  # no runtime: only the probe runs
-fi
-cp -r "$here/skills/." /opt/a-nas/assistant-skills/ && chown -R root:root /opt/a-nas/assistant-skills && chmod -R u=rwX,go=rX /opt/a-nas/assistant-skills
-sed -e "s/spike-model/${SPIKE_MODEL:-spike-model}/" -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
-  "$here/managed-config.yaml" > /etc/hermes/config.yaml
-chmod 0644 /etc/hermes/config.yaml
+# The package's files: scripts, the managed policy (with the spike's model and approval
+# timeout), the system skills, the files the sandbox binds and the runtime's link.
+install -d -m 0755 "$lib/managed" "$lib/empty"
+install -m 0755 "$src"/ai/assistant/*.sh "$src"/ai/assistant/*.py "$lib/"
+install -m 0644 "$src/ai/assistant/member-skill.md" "$lib/"
+rm -rf "$lib/skills" && cp -r "$src/ai/assistant/skills" "$lib/skills" && chmod -R u=rwX,go=rX "$lib/skills"
+sed -e "s/^  default: deepseek-flash$/  default: ${SPIKE_MODEL:-spike-model}/" \
+  -e "s/^  timeout: 86400$/  timeout: ${SPIKE_APPROVAL_TIMEOUT:-86400}/" \
+  "$src/ai/assistant/managed-config.yaml" > "$lib/managed/config.yaml"
+chmod 0644 "$lib/managed/config.yaml"
+install -m 0644 /dev/null "$lib/empty.env"
+# The policy of the planning instance, with the montage center's planning server, and the
+# prompt templates of a planning round, as the package installs them (scripts/build-packages.sh).
+# shellcheck source=../../scripts/lib/assistant-units.sh
+. "$src/scripts/lib/assistant-units.sh"
+install -d -m 0755 "$lib/managed-plan" "$lib/montage-prompts"
+derive_plan_policy "$lib/managed/config.yaml" "$src/ai/assistant/montage-mcp.yaml" "$lib/managed-plan/config.yaml"
+install -m 0644 "$src"/ai/anas_montage/prompts/*.md "$lib/montage-prompts/"
+ln -sfn /opt/a-nas/assistant-runtimes/spike "$lib/runtime"
+[[ -f "$lib/runtime/src/SOUL.md" ]] || { install -d /opt/a-nas/assistant-runtimes/spike/src && : > /opt/a-nas/assistant-runtimes/spike/src/SOUL.md; }
 
-# Mount points for the photo service's assistant socket (#113) and the Product Service's
-# companion socket (#412): empty files on the host, the sockets themselves inside each
-# sandbox (anas-assistant@.service).
-install -d -m 0755 /run/anas-assistant-photos && : > /run/anas-assistant-photos/photos.sock
-install -d -m 0755 /run/anas-assistant-companion && : > /run/anas-assistant-companion/companion.sock
-# serve takes no token any more: it uses Hermes's own login (assistant-start.sh). An
-# install from before that leaves its token unit behind.
-rm -f /etc/systemd/system/anas-assistant-token@.service
-install -m 0644 "$here/anas-assistant@.service" "$here/anas-assistant-net@.service" "$here/anas-assistant-api@.service" \
-  "$here/anas-assistant-api@.socket" /etc/systemd/system/
-if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
-  install -d /etc/systemd/system/anas-assistant@.service.d /etc/systemd/system/anas-assistant-api@.service.d
-  install -m 0644 "$here/api-server-channel/anas-assistant.conf" /etc/systemd/system/anas-assistant@.service.d/channel.conf
-  install -m 0644 "$here/api-server-channel/anas-assistant-api.conf" /etc/systemd/system/anas-assistant-api@.service.d/channel.conf
-fi
-# Hermes's curator, weekly, in the same sandbox, while the member's assistant is not
-# running (anas-assistant-curator@.timer). It needs neither the session token nor the model,
-# nor a window: the companion socket is left out.
-# Hermes's own pruning of its image cache follows it (media-cache.py).
-sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i (spike)#' \
-  -e '\#a-nas-companion-assistant#d' \
-  -e 's#^ExecStart=.*#ExecStart=/usr/bin/tini -- /opt/a-nas/assistant-runtimes/spike/venv/bin/hermes curator run#' \
-  -e '/^ExecStart=/a ExecStartPost=/opt/a-nas/assistant-runtimes/spike/venv/bin/python -P /spike/media-cache.py' \
-  -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
-  -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
-  "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-curator@.service
-install -m 0644 "$here/anas-assistant-curator@.timer" /etc/systemd/system/
-# The member's scheduled tasks (Hermes's cronjob): one round in the same sandbox and the same
-# private network, behind the same bridge to the model: Hermes's gateway for as long as the
-# jobs that are due take (assistant-start.sh, channel cron; cron_round.py), started by
-# anas-assistant-cron-waker.service when a job is due, whether the assistant runs or not. A
-# job may take a while; Hermes's own watchdog ends one that stalls. A task the member asked
-# to run now runs in such a round too (run-requests.sh), never in the instance. No job has a
-# window, so its sandbox has no companion socket and the companion tools answer that no
-# desktop is in use (#412): the Product Service could not tell its calls from those of a
-# conversation, which come from the same UID.
-sed -e 's#^Description=.*#Description=Scheduled tasks of the A-NAS assistant of %i (spike)#' \
-  -e '\#a-nas-companion-assistant#d' \
-  -e '/^ExecStart=/i Environment=ANAS_ASSISTANT_CHANNEL=cron ANAS_ASSISTANT_RUNS=/run/anas-assistant-run-now/%i' \
-  -e '/^ExecStart=/i ExecStartPre=+/bin/bash /spike/run-requests.sh take %i' \
-  -e '/^ExecStart=/a ExecStopPost=+/bin/bash /spike/run-requests.sh done %i' \
-  -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
-  -e 's/^TimeoutStartSec=.*/TimeoutStartSec=1h/' \
-  "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-cron@.service
-install -m 0644 "$here/anas-assistant-cron-waker.service" /etc/systemd/system/
-# The same sandbox with probe.sh in place of Hermes.
+# The mount points of the package's tmpfiles.d.
+install -d -m 0755 /run/a-nas-assistant /run/a-nas-assistant-plan /run/anas-assistant-gw /run/anas-assistant-skills \
+  /run/anas-assistant-photos /run/anas-assistant-companion /run/anas-assistant-montage /run/anas-change-agent
+for file in /run/anas-assistant-photos/photos.sock /run/anas-assistant-companion/companion.sock /run/anas-assistant-montage/montage.sock; do
+  [[ -e "$file" ]] || : > "$file"
+done
+
+# The units, as the package installs them, and the probe in the same sandbox.
+units=/etc/systemd/system
+install -m 0644 "$src"/deploy/systemd/system/anas-assistant{@,-net@,-api@}.service "$src/deploy/systemd/system/anas-assistant-api@.socket" \
+  "$src/deploy/systemd/system/anas-assistant-curator@.timer" "$src/deploy/systemd/system/anas-assistant-cron-waker.service" "$units/"
+# The spike's change broker binds no Host Agent socket; the empty file stands in.
+sed -i 's#^BindReadOnlyPaths=/run/a-nas/assistant-changes.sock:#BindReadOnlyPaths=-/run/a-nas/assistant-changes.sock:#' "$units/anas-assistant@.service"
+# The units run while a key is saved; the spike has none.
+sed -i '/^ConditionPathExists=/d' "$units/anas-assistant@.service" "$units/anas-assistant-net@.service" \
+  "$units/anas-assistant-cron-waker.service"
+derive_assistant_units "$units"
 sed -e 's#^ExecStart=.*#ExecStart=/bin/bash /spike/probe.sh#' -e '/^ExecStartPost=/d' -e 's/^Type=.*/Type=oneshot/' -e '/^StopWhenUnneeded/d' \
-  "$here/anas-assistant@.service" > /etc/systemd/system/anas-assistant-probe@.service
-gate=${ASSISTANT_GATE:-}
-rm -f /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
-if [[ -n "$product_user" && "$gate" != host-agent ]]; then
-  # Without the gate only the product service may connect, as the a-nas user.
-  install -d /etc/systemd/system/anas-assistant-api@.socket.d
-  printf '[Socket]\nSocketUser=%s\nSocketMode=0600\n' "$product_user" > /etc/systemd/system/anas-assistant-api@.socket.d/product.conf
+  "$units/anas-assistant@.service" > "$units/anas-assistant-probe@.service"
+if [[ "${SPIKE_CHANNEL:-serve}" == api_server ]]; then
+  install -d "$units/anas-assistant@.service.d" "$units/anas-assistant-api@.service.d"
+  install -m 0644 "$here/api-server-channel/anas-assistant.conf" "$units/anas-assistant@.service.d/channel.conf"
+  install -m 0644 "$here/api-server-channel/anas-assistant-api.conf" "$units/anas-assistant-api@.service.d/channel.conf"
+fi
+rm -f "$units/anas-assistant-api@.socket.d/product.conf"
+if [[ -n "$product_user" ]]; then
+  # Without the Host Agent's gate only the product service may connect, as its own user.
+  install -d "$units/anas-assistant-api@.socket.d"
+  printf '[Socket]\nSocketUser=%s\nSocketMode=0600\n' "$product_user" > "$units/anas-assistant-api@.socket.d/product.conf"
 fi
 
 # transient UNIT ARGS...: (re)start a transient service, replacing one left by an earlier run.
@@ -102,33 +80,24 @@ transient() {
   systemctl reset-failed "$1" 2>/dev/null || true
   systemd-run --unit "$@"
 }
-if [[ "${SPIKE_MODEL_GATEWAY:-}" == external ]]; then
-  : # the caller's own unit serves /run/anas-assistant-gw/model.sock
-elif [[ -n "${SPIKE_MODEL:-}" ]]; then
-  # Real model: the gateway holds the key; the sandbox cannot see the key file.
-  transient model-gateway --quiet python3 "$here/gateway.py" /run/anas-assistant-gw/model.sock \
-    /var/log/gateway.jsonl "${SPIKE_UPSTREAM:-api.deepseek.com}" /etc/anas-spike/model.key
+if [[ -n "${SPIKE_MODEL:-}" ]]; then
+  # Real model: the gateway holds the key; the sandbox cannot see the key file. The spike's
+  # research logs the messages too.
+  transient model-gateway --quiet -E ANAS_ASSISTANT_KEY_FILE=/etc/anas-spike/model.key \
+    -E ANAS_ASSISTANT_UPSTREAM="https://${SPIKE_UPSTREAM:-api.deepseek.com}" -E GATEWAY_LOG_MESSAGES=1 \
+    python3 "$lib/gateway.py" /run/anas-assistant-gw/model.sock /var/log/gateway.jsonl
 else
   transient fake-model --quiet python3 "$here/fake_model.py" /run/anas-assistant-gw/model.sock /var/log/fake-model.jsonl
 fi
-# The executor of the assistants' changes. With the gate it is the Host Agent's File Broker:
-# the product service reaches it over file-broker.sock with the member's session, and the
-# unit binds its assistant socket (/run/a-nas/assistant-changes.sock) over the empty file
-# here. Otherwise the spike's change broker stands in, with a product socket for the product
-# service and the agent socket for the assistants' MCP tool.
-install -d -m 0755 /run/anas-change-agent
-if [[ "$gate" == host-agent ]]; then
-  systemctl stop change-broker 2>/dev/null || true
-  rm -f /run/anas-change-agent/agent.sock /run/anas-spike-broker/broker.sock
-  # Without the change broker there is no product socket, nor its directory: the probe
-  # (probe.sh) then knows it has nothing there to be refused.
-  rmdir /run/anas-spike-broker 2>/dev/null || true
-  : > /run/anas-change-agent/agent.sock
-else
-  install -d -m 0755 /run/anas-spike-broker
-  transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
-    python3 "$here/change_broker.py" /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
-fi
+# The File Broker's executor of the assistants' changes (broker-spike, which run.sh builds), with
+# the spike's product socket for the product service and the agent socket for the assistants'
+# MCP tool. Its state stays in /var/lib/anas-spike/changes, root's alone. A transient unit
+# gets none of this shell's environment: what the broker reads is passed with -E.
+install -d -m 0755 /run/anas-spike-broker
+transient change-broker --quiet -E SPIKE_PRODUCT_UID="${product_user:+$(id -u "$product_user")}" \
+  -E SPIKE_BROKER_NO_RESERVE="${SPIKE_BROKER_NO_RESERVE:-}" \
+  /spike-broker/broker-spike /srv/a-nas/data /var/lib/anas-spike/changes \
+  /run/anas-spike-broker/broker.sock /run/anas-change-agent/agent.sock
 systemctl daemon-reload
 systemctl enable --now --quiet anas-assistant-cron-waker.service
-PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" "${ASSISTANT_LAYOUT:-prepare}" /srv/a-nas/data "$@"
+PRODUCT_USER=${product_user:-root} bash "$here/assistant-layout.sh" prepare /srv/a-nas/data "$@"

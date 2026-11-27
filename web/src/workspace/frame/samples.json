@@ -1,0 +1,150 @@
+{
+  "fromFrame": [
+    {
+      "name": "the page is ready, with what was blocked",
+      "data": {
+        "type": "anas:ready",
+        "blocked": [{ "uri": "https://cdn.example.com/a.css", "directive": "style-src-elem" }]
+      },
+      "read": {
+        "type": "anas:ready",
+        "blocked": [{ "uri": "https://cdn.example.com/a.css", "directive": "style-src-elem" }]
+      }
+    },
+    {
+      "name": "a blocked image",
+      "data": { "type": "anas:blocked", "uri": "https://img.example.com/x.png", "directive": "img-src", "page": "p" },
+      "read": { "type": "anas:blocked", "uri": "https://img.example.com/x.png", "directive": "img-src" }
+    },
+    {
+      "name": "a script error",
+      "data": { "type": "anas:error", "message": "SecurityError: localStorage is not available" },
+      "read": { "type": "anas:error", "message": "SecurityError: localStorage is not available" }
+    },
+    {
+      "name": "a picked button",
+      "data": {
+        "type": "anas:picked",
+        "at": 4321,
+        "generated": false,
+        "tag": "button",
+        "text": "发出分享",
+        "dom": "<button class=\"btn btn-primary\">发出分享</button>",
+        "rect": { "x": 600.5, "y": 412, "w": 96, "h": 36 },
+        "style": { "font-size": "14px", "padding": "8px 16px" },
+        "rules": [".btn", ".btn-primary"]
+      },
+      "read": {
+        "type": "anas:picked",
+        "at": 4321,
+        "generated": false,
+        "tag": "button",
+        "text": "发出分享",
+        "dom": "<button class=\"btn btn-primary\">发出分享</button>",
+        "rect": { "x": 600.5, "y": 412, "w": 96, "h": 36 },
+        "style": { "font-size": "14px", "padding": "8px 16px" },
+        "rules": [".btn", ".btn-primary"]
+      }
+    },
+    {
+      "name": "an element a script made, under nothing written",
+      "data": {
+        "type": "anas:picked",
+        "at": -1,
+        "generated": true,
+        "tag": "div",
+        "rect": { "x": 0, "y": 0, "w": 10, "h": 10 }
+      },
+      "read": {
+        "type": "anas:picked",
+        "at": -1,
+        "generated": true,
+        "tag": "div",
+        "text": "",
+        "dom": "",
+        "rect": { "x": 0, "y": 0, "w": 10, "h": 10 },
+        "style": {},
+        "rules": []
+      }
+    },
+    {
+      "name": "a pick without a position is not one",
+      "data": { "type": "anas:picked", "generated": false, "tag": "p", "rect": { "x": 0, "y": 0, "w": 1, "h": 1 } },
+      "read": null
+    },
+    {
+      "name": "a pick before the start of the source is not one",
+      "data": {
+        "type": "anas:picked",
+        "at": -2,
+        "generated": false,
+        "tag": "p",
+        "rect": { "x": 0, "y": 0, "w": 1, "h": 1 }
+      },
+      "read": null
+    },
+    {
+      "name": "a pick with a negative size is not one",
+      "data": {
+        "type": "anas:picked",
+        "at": 1,
+        "generated": false,
+        "tag": "p",
+        "rect": { "x": 0, "y": 0, "w": -1, "h": 1 }
+      },
+      "read": null
+    },
+    {
+      "name": "a screenshot",
+      "data": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ" },
+      "read": { "type": "anas:captured", "id": 3, "image": "data:image/jpeg;base64,/9j/4AAQ" }
+    },
+    {
+      "name": "a picture that is not a JPEG is not kept",
+      "data": { "type": "anas:captured", "id": 4, "image": "data:text/html,<script>alert(1)</script>" },
+      "read": { "type": "anas:captured", "id": 4 }
+    },
+    {
+      "name": "a screenshot that failed carries no picture",
+      "data": { "type": "anas:captured", "id": 5 },
+      "read": { "type": "anas:captured", "id": 5 }
+    },
+    {
+      "name": "the reader scrolled",
+      "data": { "type": "anas:scrolled", "y": 812.6 },
+      "read": { "type": "anas:scrolled", "y": 813 }
+    },
+    { "name": "an unknown message", "data": { "type": "anas:navigate", "url": "/" }, "read": null },
+    { "name": "not a message at all", "data": "anas:ready", "read": null }
+  ],
+  "toFrame": [
+    {
+      "name": "start picking",
+      "data": { "type": "anas:pick", "on": true },
+      "read": { "type": "anas:pick", "on": true }
+    },
+    {
+      "name": "stop picking",
+      "data": { "type": "anas:pick", "on": false },
+      "read": { "type": "anas:pick", "on": false }
+    },
+    { "name": "picking needs a yes or no", "data": { "type": "anas:pick" }, "read": null },
+    { "name": "forget the picked element", "data": { "type": "anas:clear" }, "read": { "type": "anas:clear" } },
+    {
+      "name": "a screenshot of a part",
+      "data": { "type": "anas:capture", "id": 1, "rect": { "x": 552, "y": 364, "w": 192, "h": 132 } },
+      "read": { "type": "anas:capture", "id": 1, "rect": { "x": 552, "y": 364, "w": 192, "h": 132 } }
+    },
+    {
+      "name": "a screenshot names its part",
+      "data": { "type": "anas:capture", "id": 2 },
+      "read": null
+    },
+    {
+      "name": "a screenshot with a broken part",
+      "data": { "type": "anas:capture", "id": 3, "rect": { "x": "a" } },
+      "read": null
+    },
+    { "name": "an unknown command", "data": { "type": "anas:eval", "code": "1" }, "read": null }
+  ]
+}

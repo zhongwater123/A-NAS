@@ -107,6 +107,11 @@ func (s *Store) seenHints(ctx context.Context, actor Actor) (map[string]bool, er
 	if err != nil {
 		return nil, err
 	}
+	return hintKeySet(rows)
+}
+
+// hintKeySet reads the hint keys rows return into a set, and closes them.
+func hintKeySet(rows *sql.Rows) (map[string]bool, error) {
 	defer func() { _ = rows.Close() }()
 	seen := map[string]bool{}
 	for rows.Next() {
@@ -119,9 +124,9 @@ func (s *Store) seenHints(ctx context.Context, actor Actor) (map[string]bool, er
 	return seen, rows.Err()
 }
 
-// MarkHintsSeen records that the caller was told, so the desktop does not
-// tell them again.
-func (s *Store) MarkHintsSeen(ctx context.Context, actor Actor, keys []string) error {
+// checkHintKeys bounds the keys a page sends back as told: family hints and
+// to-do reminders alike.
+func checkHintKeys(keys []string) error {
 	if len(keys) > maxHintKeys {
 		return ErrInvalid
 	}
@@ -130,18 +135,32 @@ func (s *Store) MarkHintsSeen(ctx context.Context, actor Actor, keys []string) e
 			return ErrInvalid
 		}
 	}
+	return nil
+}
+
+// markHintsSeen records that the actor was told these keys.
+func (s *Store) markHintsSeen(ctx context.Context, tx *sql.Tx, actor Actor, keys []string) error {
+	now := formatTime(s.now())
+	for _, key := range keys {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO hints_seen(account_id, hint_key, seen_at) VALUES(?, ?, ?)",
+			actor.AccountID, key, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MarkHintsSeen records that the caller was told, so the desktop does not
+// tell them again.
+func (s *Store) MarkHintsSeen(ctx context.Context, actor Actor, keys []string) error {
+	if err := checkHintKeys(keys); err != nil {
+		return err
+	}
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, _, err := s.requireMember(ctx, tx, actor); err != nil {
 			return err
 		}
-		now := formatTime(s.now())
-		for _, key := range keys {
-			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO hints_seen(account_id, hint_key, seen_at) VALUES(?, ?, ?)",
-				actor.AccountID, key, now); err != nil {
-				return err
-			}
-		}
-		return nil
+		return s.markHintsSeen(ctx, tx, actor, keys)
 	})
 }
 

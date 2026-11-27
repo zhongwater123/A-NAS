@@ -35,7 +35,8 @@ func TestConfigResolvesEachModesAdaptersAndRefusesDevelopmentOnesOnANAS(t *testi
 				Mode: ModeAgent, HTTPAddr: "127.0.0.1:8080", StateDir: "/var/lib/a-nas", DataMount: "/srv/a-nas/data",
 				HostAgentSocket: "/run/a-nas/host-agent.sock", FileBrokerSocket: "/run/a-nas/file-broker.sock",
 				PhotosSocket: "/run/a-nas-photos/photos.sock", SharesSocket: "/run/a-nas-shares/shares.sock",
-				ShareFilesSocket: "/run/a-nas-share-files/files.sock", FamilySocket: "/run/a-nas-family/family.sock", ModuleSocketDir: "/run/a-nas-modules", MediaWorker: mediaWorkerSocket,
+				ShareFilesSocket: "/run/a-nas-share-files/files.sock", FamilySocket: "/run/a-nas-family/family.sock", MontageSocket: "/run/a-nas-montage/montage.sock",
+				WorkspaceSocket: "/run/a-nas-workspace/workspace.sock", ModuleSocketDir: "/run/a-nas-modules", MediaWorker: mediaWorkerSocket,
 				Media:      MediaConfig{Socket: "/run/a-nas-ffmpeg/ffmpeg.sock", Slots: "/run/a-nas-ffmpeg/slots"},
 				Containers: containersDisabled, Terminal: "disabled", ScreensaverDirectory: "/var/lib/a-nas/screensavers/current",
 				CompanionDirectory: "/var/lib/a-nas/companion/current",
@@ -241,6 +242,22 @@ func TestPhotoServiceConfigNeedsAPositiveQuietPeriod(t *testing.T) {
 	}
 }
 
+func TestPhotoServiceConfigNeedsAPositiveVectorIdleTimeout(t *testing.T) {
+	config, err := loadPhotoServiceConfig(map[string]string{})
+	if err != nil || config.VectorIdle != 0 {
+		t.Fatalf("without the variable: %+v, %v; want the client's default", config, err)
+	}
+	config, err = loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT": "5s"})
+	if err != nil || config.VectorIdle.Seconds() != 5 {
+		t.Fatalf("loadPhotoServiceConfig() = %+v, %v", config, err)
+	}
+	for _, value := range []string{"0s", "-1s", "soon"} {
+		if _, err := loadPhotoServiceConfig(map[string]string{"ANAS_PHOTOS_VECTOR_IDLE_TIMEOUT": value}); err == nil {
+			t.Errorf("vector idle timeout %q was accepted", value)
+		}
+	}
+}
+
 // The photo and share services name every path that is not absolute, in
 // the same order every time, as the Product Service does (#192).
 func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
@@ -252,7 +269,7 @@ func TestServiceConfigsNameEveryRelativePath(t *testing.T) {
 	}{
 		{"photos", func(e map[string]string) error { _, err := loadPhotoServiceConfig(e); return err },
 			map[string]string{"ANAS_PHOTOS_ROOT": "photos", "ANAS_FFMPEG_SLOTS": "slots", "ANAS_PHOTOS_AI_QUIET_PERIOD": "soon"},
-			"ANAS_FFMPEG_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 5s"},
+			"ANAS_FFMPEG_SLOTS must be an absolute path\nANAS_PHOTOS_ROOT must be an absolute path\nANAS_PHOTOS_AI_QUIET_PERIOD must be a positive duration such as 30s"},
 		{"shares", func(e map[string]string) error { _, err := loadShareServiceConfig(e); return err },
 			map[string]string{"ANAS_SHARES_ROOT": "shares", "ANAS_SHARE_SESSION_SOCKET": "sessions.sock"},
 			"ANAS_SHARES_ROOT must be an absolute path\nANAS_SHARE_SESSION_SOCKET must be an absolute path"},

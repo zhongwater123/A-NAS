@@ -89,6 +89,37 @@
     parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
     responses:
       "200": { description: The updated account, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/User" } } } }
+/api/v1/session/agent-tokens:
+  get:
+    operationId: listAgentTokens
+    description: >-
+      The coding agents the signed-in member connected (ADR 0040), newest first. Tokens nobody used for 90 days are
+      gone; disabling the account or an administrator's password reset removes them all.
+    responses:
+      "200": { description: The member's agent tokens, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/AgentTokenList" } } } }
+  post:
+    operationId: createAgentToken
+    description: >-
+      Connect a coding agent on the member's own computer. The token in the answer is shown once and reaches only the
+      shared workspace's MCP endpoint. An account holds at most 20 tokens (409 agent_token_limit); a name of 1–40
+      characters and a known kind are required (422 validation_failed).
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/AgentTokenRequest" } } } }
+    responses:
+      "201": { description: The new token and its value, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/AgentTokenCreated" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/session/agent-tokens/{tokenId}:
+  delete:
+    operationId: revokeAgentToken
+    description: Disconnect one of the member's own agents; its later calls answer 401.
+    parameters:
+      - { name: tokenId, in: path, required: true, schema: { type: string } }
+      - { $ref: "../components/common.yaml#/parameters/CSRFToken" }
+    responses:
+      "204": { description: Revoked }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/profiles:
   get:
     operationId: listProfiles

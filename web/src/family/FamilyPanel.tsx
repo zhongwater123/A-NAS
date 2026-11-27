@@ -4,6 +4,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 
 import { relativeTime } from "../lib/time";
 import { useDialogs, useToasts } from "../ui/feedback";
+import { Modal } from "../ui/modal";
 import {
   cancelJoin,
   type FamilyCatalog,
@@ -18,7 +19,6 @@ import { BabyAvatar, BabyDialog } from "./BabyDialog";
 import { Channel } from "./Channel";
 import { FamilyContext } from "./context";
 import styles from "./family.module.css";
-import { Modal } from "./parts";
 
 interface Props {
   userId: string;
@@ -214,7 +214,7 @@ export function FamilyPanel({ userId, onShowPhoto, intent, onIntentHandled }: Pr
             />
           )}
           {restoring && (
-            <Modal title="最近删除的宝宝" onClose={() => setRestoring(false)}>
+            <Modal title="最近删除的宝宝" container={root} onClose={() => setRestoring(false)}>
               <p className={styles.fcNote}>删除的频道保留 15 天，恢复后记录、录音和留言都会回来。</p>
               <ul className={styles.fcRows}>
                 {overview.deletedBabies.map((deleted) => (

@@ -21,9 +21,25 @@ import (
 // that dies would.
 type Handler func(aiworker.Request, *os.File) *aiworker.Response
 
+// FilesHandler answers one request with all the descriptors sent with it,
+// in order, up to aiworker.MaxDescribeFrames.
+type FilesHandler func(aiworker.Request, []*os.File) *aiworker.Response
+
 // Serve listens on a fresh Unix socket until the test ends and returns its
 // path.
 func Serve(t testing.TB, handle Handler) string {
+	t.Helper()
+	return ServeFiles(t, func(request aiworker.Request, files []*os.File) *aiworker.Response {
+		var file *os.File
+		if len(files) > 0 {
+			file = files[0]
+		}
+		return handle(request, file)
+	})
+}
+
+// ServeFiles is Serve for a handler that takes every descriptor.
+func ServeFiles(t testing.TB, handle FilesHandler) string {
 	t.Helper()
 	// Unix socket paths are short; t.TempDir can exceed the limit.
 	dir, err := os.MkdirTemp("", "ai")
@@ -49,15 +65,15 @@ func Serve(t testing.TB, handle Handler) string {
 	return socket
 }
 
-func serveOne(conn *net.UnixConn, handle Handler) {
+func serveOne(conn *net.UnixConn, handle FilesHandler) {
 	defer conn.Close()
 	var request aiworker.Request
-	file, err := unixmsg.Read(conn, &request, aiworker.MaxFrame)
+	files, err := unixmsg.ReadFiles(conn, &request, aiworker.MaxFrame, aiworker.MaxDescribeFrames)
 	if err != nil {
 		return
 	}
-	defer unixmsg.CloseFile(file)
-	response := handle(request, file)
+	defer unixmsg.CloseFiles(files)
+	response := handle(request, files)
 	if response == nil {
 		return
 	}

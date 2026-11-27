@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 
 import type { LocalDisplay, Wallpaper, WallpaperStyle } from "../api.generated";
 import { readLocalDisplay, resetWallpaper, updateLocalDisplay, updateWallpaperStyle } from "../desktop/api";
-import { localConsoleScreenSaverIdleMs } from "../desktop/LocalConsoleScreenSaver";
 import { publishWallpaper, useWallpaper, wallpaperPicture } from "../desktop/wallpaper";
+import { localConsoleScreenSaverIdleMs } from "../lib/localConsole";
 import { DesktopPreview } from "./DesktopPreview";
 import { Banner, Group, messageOf, PageHeader, Segmented } from "./parts";
 import styles from "./settings.module.css";

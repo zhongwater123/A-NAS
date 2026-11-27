@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -40,4 +41,11 @@ func TestShellResponsesKeepToTheContract(t *testing.T) {
 	alice.do(http.MethodGet, "/api/v1/wallpaper", "", nil, http.StatusOK)
 	alice.do(http.MethodGet, "/api/v1/local-display", "", nil, http.StatusOK)
 	alice.do(http.MethodGet, "/api/v1/family/hints", "", nil, http.StatusOK)
+	// A to-do long overdue reminds her whatever the time of day.
+	due := time.Now().AddDate(0, 0, -10).Format("2006-01-02")
+	alice.do(http.MethodPost, "/api/v1/todos", `{"title":"交电费","category":"bill","due":"`+due+`"}`, nil, http.StatusCreated)
+	reminders := alice.do(http.MethodGet, "/api/v1/todos/reminders", "", nil, http.StatusOK)
+	if reminders.Body.Len() < len(`{"items":[{}]}`) {
+		t.Fatalf("alice is not reminded of the to-do: %s", reminders.Body.String())
+	}
 }

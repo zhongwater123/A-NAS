@@ -102,6 +102,10 @@ FROM users u WHERE u.id = ?`, userID).Scan(&username, &status, &mustChange, &del
 	if !ok {
 		return errors.New("credential enabler is unavailable")
 	}
+	// A synchronization that read the account as disabled finishes first
+	// (identityMu): it would switch SMB off again after this.
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	switch {
 	case deleting:
 		return ErrDeletionPending

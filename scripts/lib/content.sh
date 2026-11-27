@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # The content a release pins: the AI Worker's models and Python runtime
 # (ADR 0016), web search's runtime (ADR 0030), Qdrant (ADR 0028) and the text
-# reader's llama.cpp. Each is a Debian package of its own whose name carries
+# reader's llama.cpp and the AI assistant's Hermes runtime (ADR 0024). Each is a Debian package of its own whose name carries
 # the content's identity, at version 1 (ADR 0034): a release depends on the
 # names it pins, so apt downloads only content that changed, and the content
 # of an older release stays installed beside a newer one until apt autoremove.
@@ -15,7 +15,8 @@ TARGET_PYTHON=3.13
 
 # Each model role is ROLE:EXTENSION:MANIFEST, the manifest under
 # deploy/models. The AI Worker's unit finds the role's file as
-# /usr/lib/a-nas/ai/ROLE.EXTENSION and its manifest as ROLE.json.
+# /usr/lib/a-nas/ai/ROLE.EXTENSION and its manifest as ROLE.json. A bundle,
+# a tarball whose manifest lists the members to unpack, is a directory there.
 ai_roles=(
   model:litertlm:embeddinggemma-2-740m
   detector:onnx:dfine-m-obj365
@@ -24,6 +25,12 @@ ai_roles=(
   animal-embedder:onnx:dinov2-small
   ocr-model:gguf:qwen3.5-4b-q4_k_m
   ocr-mmproj:gguf:qwen3.5-4b-mmproj-f16
+)
+
+# Linked by the Worker for internal evaluation; excluded from release dependencies and images.
+# shellcheck disable=SC2034 # Used by build-packages.sh, build-content-packages.sh and system-test.sh.
+aesthetic_role=(
+  aesthetic-scorer:bundle:qwen35-4b-aesthetic-scorer
 )
 
 # pin_field FILE KEY: a field of a pin, failing when it is missing.
@@ -51,8 +58,16 @@ model_files() {
 
 # model_link_file MANIFEST: the file in the model's directory that the AI
 # Worker's link points at: the model's file, or its first part, from which
-# llama.cpp finds the others.
-model_link_file() { jq -r '(.parts // [])[0].file // .file' "$1"; }
+# llama.cpp finds the others. Nothing for a bundle, whose link is the
+# directory itself.
+model_link_file() { jq -r 'if .members then "" else (.parts // [])[0].file // .file end' "$1"; }
+
+# model_link MANIFEST: where the AI Worker's link for the model points.
+model_link() {
+  local file
+  file=$(model_link_file "$1")
+  echo "/opt/a-nas/models/$(pin_field "$1" sha256)${file:+/$file}"
+}
 
 # ai_runtime_id REPO: the AI Worker's runtime, named by its lock and Python.
 ai_runtime_id() {
@@ -67,14 +82,41 @@ search_runtime_id() {
     sha256sum | cut -c1-16
 }
 
+# The montage center's music analysis (docs/architecture/montage-music.md):
+# its models, each ROLE:MANIFEST under deploy/models, which the
+# a-nas-montage-music package links as /usr/lib/a-nas/montage-music/ROLE, and
+# its runtime. While allin1's commercial licence is pending, no release
+# depends on them: content_packages leaves them out.
+montage_music_roles=(
+  allin1:allin1-harmonix-all
+  demucs:htdemucs
+)
+
+# montage_music_runtime_id REPO: the music analysis runtime, named by its
+# lock, the sources it compiles and Python.
+montage_music_runtime_id() {
+  { cat "$1/deploy/montage-music/requirements.txt" "$1/deploy/montage-music/sources.json"
+    printf 'python=%s\n' "$TARGET_PYTHON"; } | sha256sum | cut -c1-16
+}
+
+# montage_music_packages REPO: the content packages a-nas-montage-music
+# depends on.
+montage_music_packages() {
+  local role
+  for role in "${montage_music_roles[@]}"; do
+    model_files "$1/deploy/models/${role#*:}.json" | cut -f 1
+  done
+  echo "a-nas-montage-music-runtime-$(montage_music_runtime_id "$1")"
+}
+
 # pinned_package REPO KIND MANIFEST: the package of Qdrant or llama.cpp.
 pinned_package() { echo "a-nas-$2-$(pin_field "$1/$3" sha256 | cut -c1-12)"; }
 qdrant_package() { pinned_package "$1" qdrant deploy/qdrant/qdrant.json; }
 llama_package() { pinned_package "$1" llama deploy/llama/llama.json; }
 
-# assistant_runtime_package REPO: the Hermes runtime of the assistant trial,
-# which a-nas-assistant-trial depends on (ai/assistant-spike/runtime.json).
-assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant-spike/runtime.json; }
+# assistant_runtime_package REPO: the Hermes runtime of the AI assistant
+# (ai/assistant/runtime.json).
+assistant_runtime_package() { pinned_package "$1" assistant-runtime ai/assistant/runtime.json; }
 
 # content_packages REPO: every content package a-nas depends on.
 content_packages() {
@@ -86,6 +128,7 @@ content_packages() {
   echo "a-nas-search-runtime-$(search_runtime_id "$1")"
   qdrant_package "$1"
   llama_package "$1"
+  assistant_runtime_package "$1"
 }
 
 # content_roles REPO: one line per kind of content a release pins: the role,
@@ -100,4 +143,5 @@ content_roles() {
   echo "search-runtime a-nas-search-runtime-$(search_runtime_id "$1")"
   echo "qdrant $(qdrant_package "$1")"
   echo "llama $(llama_package "$1")"
+  echo "assistant-runtime $(assistant_runtime_package "$1")"
 }

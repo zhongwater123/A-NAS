@@ -38,7 +38,7 @@ func TestStartSkipsAPortAnotherProcessTook(t *testing.T) {
 	if picks < 4 {
 		t.Fatalf("Start picked %d ports; want it to start again on others", picks)
 	}
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	if err := client.CreateCollection(context.Background(), vectorindex.Collection{Name: "probe", Dimensions: 3}); err != nil {
 		t.Fatal(err)

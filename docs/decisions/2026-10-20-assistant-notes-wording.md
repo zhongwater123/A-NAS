@@ -10,7 +10,7 @@
 ## 选项
 
 - **保持现状**：承诺与实际不符。
-- **调整 [`anas-files`](../../ai/assistant-spike/skills/anas-files/SKILL.md) 技能的措辞**，让助手不作这个承诺。
+- **调整 [`anas-files`](../../ai/assistant/skills/anas-files/SKILL.md) 技能的措辞**，让助手不作这个承诺。
 
 ## 决定
 

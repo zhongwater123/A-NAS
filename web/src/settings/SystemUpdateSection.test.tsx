@@ -14,7 +14,10 @@ import {
   systemUpdateStatus,
 } from "../test/handlers/systemupdate";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import { SystemUpdateSection } from "./SystemUpdateSection";
+
+fixToday();
 
 const current = "1.0.1-rc.6 开发版 83bb9db1";
 const next = "1.0.1-rc.6 开发版 4e842653";
@@ -176,7 +179,7 @@ describe("Settings → 系统更新", () => {
     expect(await screen.findByRole("heading", { name: `正在回到 ${next}` })).toBeTruthy();
   });
 
-  it("checks again from a rollback that went wrong, which only a passing check clears", async () => {
+  it("sends a check request from the failed rollback card", async () => {
     const sent = serve({
       status: systemUpdateStatus({
         phase: "rolled-back",

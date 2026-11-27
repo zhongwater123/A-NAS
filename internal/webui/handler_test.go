@@ -50,6 +50,56 @@ func TestHandlerServesEmbeddedDesktopAndImmutableAssets(t *testing.T) {
 	}
 }
 
+// A shared page in 共享工作区 runs its scripts in a sandboxed frame, and only
+// this policy keeps it from navigating itself to an outside address: a
+// script setting location, a meta refresh or a link all load the frame
+// anew, and frame-src must allow nothing but the desktop
+// (docs/architecture/shared-workspace.md, 隔离浏览).
+func TestFramesOnlyLoadTheDesktopsOwnPages(t *testing.T) {
+	handler := newHandler(t)
+	// The desktop, and the tab that shows one shared page on its own.
+	for _, path := range []string{"/", "/workspace/page_a"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if frameSource(recorder.Header().Get("Content-Security-Policy")) != "'self'" {
+			t.Errorf("%s Content-Security-Policy = %q, want frame-src 'self'", path, recorder.Header().Get("Content-Security-Policy"))
+		}
+	}
+}
+
+// frameSource is what a policy lets frames load: frame-src, or child-src
+// where it has none.
+func frameSource(policy string) string {
+	for _, want := range []string{"frame-src", "child-src"} {
+		for directive := range strings.SplitSeq(policy, ";") {
+			if name, value, _ := strings.Cut(strings.TrimSpace(directive), " "); name == want {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+// A shared page opens in a browser tab of its own: /workspace/{page} is the
+// tab's page, as uncached and as framed as the desktop; nothing else under
+// /workspace/ is.
+func TestHandlerServesASharedPagesTab(t *testing.T) {
+	handler := newHandler(t)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/workspace/page_a", nil))
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" ||
+		recorder.Header().Get("X-Frame-Options") != "DENY" || !strings.Contains(recorder.Body.String(), "<title>共享工作区") {
+		t.Fatalf("tab = %d %v %s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+	for _, path := range []string{"/workspace/", "/workspace/page_a/more"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Errorf("%s = %d, want 404", path, recorder.Code)
+		}
+	}
+}
+
 // Installed apps are served from other ports of the device's address, which
 // browsers count as the same site, so only the desktop itself may frame its
 // pages (issue #161).

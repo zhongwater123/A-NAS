@@ -1,0 +1,66 @@
+{
+  "architecture": "arm64",
+  "sources": {
+    "debian": {
+      "uri": "https://deb.debian.org/debian"
+    }
+  },
+  "packages": [
+    {
+      "name": "firmware-mediatek",
+      "source": "debian",
+      "version": "20250410-2",
+      "file": "pool/non-free-firmware/f/firmware-nonfree/firmware-mediatek_20250410-2_all.deb",
+      "sizeBytes": 19598740,
+      "sha256": "957f82d72d413f4577f45bfad03237b1dd6f8693eddc226ac452f9c5d4187012"
+    },
+    {
+      "name": "iw",
+      "source": "debian",
+      "version": "6.9-1+b1",
+      "file": "pool/main/i/iw/iw_6.9-1+b1_arm64.deb",
+      "sizeBytes": 102332,
+      "sha256": "dcacc4fb0a002b313effb1f5bb81adf14aca83eed9043bc97acf9e8b437c3d93"
+    },
+    {
+      "name": "libnl-3-200",
+      "source": "debian",
+      "version": "3.7.0-2",
+      "file": "pool/main/libn/libnl3/libnl-3-200_3.7.0-2_arm64.deb",
+      "sizeBytes": 57068,
+      "sha256": "0489548a052d64b1acf7f61b0f08fd2da954b6fd6b9c729a4e740d7d39652d00"
+    },
+    {
+      "name": "libnl-genl-3-200",
+      "source": "debian",
+      "version": "3.7.0-2",
+      "file": "pool/main/libn/libnl3/libnl-genl-3-200_3.7.0-2_arm64.deb",
+      "sizeBytes": 18020,
+      "sha256": "5455099e4ae9a013a44bce245678b50c84b93f9983cd3005f49e6a94d14e30ee"
+    },
+    {
+      "name": "dnsmasq-base",
+      "source": "debian",
+      "version": "2.91-1+deb13u2",
+      "file": "pool/main/d/dnsmasq/dnsmasq-base_2.91-1+deb13u2_arm64.deb",
+      "sizeBytes": 483428,
+      "sha256": "9dd677936f718aeb7afc30d064c7116a7057257f94a522e5ce22f36d1834e5e4"
+    },
+    {
+      "name": "libnl-route-3-200",
+      "source": "debian",
+      "version": "3.7.0-2",
+      "file": "pool/main/libn/libnl3/libnl-route-3-200_3.7.0-2_arm64.deb",
+      "sizeBytes": 167324,
+      "sha256": "86cd5b58c83cd70a834625f112a6c30da249bb842c4ac4daa44fd4c08298b7be"
+    },
+    {
+      "name": "hostapd",
+      "source": "debian",
+      "version": "2:2.10-24",
+      "file": "pool/main/w/wpa/hostapd_2.10-24_arm64.deb",
+      "sizeBytes": 801636,
+      "sha256": "0e36fa2d6fe79ae7fc9718ad5f6531eb4e710418fa337543f17315154dc8ab64"
+    }
+  ]
+}

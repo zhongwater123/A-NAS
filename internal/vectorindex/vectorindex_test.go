@@ -3,6 +3,7 @@ package vectorindex_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
@@ -69,7 +70,7 @@ func TestPointIDIsAStableUUID(t *testing.T) {
 // connection, and a search without a scope finds nothing.
 func TestRequestsAreTyped(t *testing.T) {
 	ctx := context.Background()
-	client := vectorindex.New(filepath.Join(t.TempDir(), "missing.sock"), nil)
+	client := vectorindex.New(filepath.Join(t.TempDir(), "missing.sock"), vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	if hits, err := client.Search(ctx, "c", vectorindex.Query{Vector: []float32{1}, Scope: vectorindex.Scope{Field: "libraries"}, Limit: 10}); err != nil || hits != nil {
 		t.Errorf("Search without scope values = %v, %v; want nothing", hits, err)
@@ -81,6 +82,9 @@ func TestRequestsAreTyped(t *testing.T) {
 		"key as field":  client.CreateCollection(ctx, vectorindex.Collection{Name: "c", Dimensions: 2, Keywords: []string{"key"}}),
 		"no dimensions": client.CreateCollection(ctx, vectorindex.Collection{Name: "c"}),
 		"no limit":      searchErrLimit(client, 0),
+		"unnamed alias": func() error { _, err := client.Alias(ctx, ""); return err }(),
+		"alias to none": func() error { _, err := client.SwitchAlias(ctx, "windows", ""); return err }(),
+		"alias as self": func() error { _, err := client.SwitchAlias(ctx, "windows", "windows"); return err }(),
 		"batch, no limit": func() error {
 			_, err := client.SearchBatch(ctx, "c", []vectorindex.Query{{Vector: []float32{1},
 				Scope: vectorindex.Scope{Field: "libraries", Values: []string{"a"}}}})
@@ -107,7 +111,7 @@ func searchErrLimit(client *vectorindex.Client, limit int) error {
 func TestIndex(t *testing.T) {
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 
 	if client.Warm() {
@@ -116,9 +120,7 @@ func TestIndex(t *testing.T) {
 	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "images", Dimensions: 3, Keywords: []string{"libraries"}}); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() {
-		t.Error("not Warm right after a request")
-	}
+	waitForWarm(t, client)
 	// A vector of another size is refused as such, not as a connection fault.
 	if err := client.Upsert(ctx, "images", []vectorindex.Point{{Key: "short", Vector: []float32{1, 0}}}); !errors.Is(err, vectorindex.ErrRejected) {
 		t.Errorf("Upsert of a 2-d vector into 3-d = %v, want ErrRejected", err)
@@ -204,10 +206,9 @@ func TestIndex(t *testing.T) {
 // An idle client closes its connection, so that on the NAS the proxy exits
 // and the instance stops; the next request connects again.
 func TestIdleConnectionCloses(t *testing.T) {
-	defer vectorindex.SetIdleTimeout(200 * time.Millisecond)()
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{IdleTimeout: 200 * time.Millisecond})
 	defer func() { _ = client.Close() }()
 
 	if _, err := client.Collections(ctx); err != nil {
@@ -231,18 +232,18 @@ func TestIdleConnectionCloses(t *testing.T) {
 // Prepare starts the instance without asking it anything, and keeps an open
 // connection from idling, so that the next search finds the instance running.
 func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
-	defer vectorindex.SetIdleTimeout(400 * time.Millisecond)()
 	instance := vectorindextest.Start(t)
 	ctx := context.Background()
-	client := vectorindex.New(instance.Socket, nil)
+	client := vectorindex.New(instance.Socket, vectorindex.Options{IdleTimeout: 400 * time.Millisecond})
 	defer func() { _ = client.Close() }()
 
 	if err := client.Prepare(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !client.Warm() || instance.Connections() == 0 {
-		t.Fatal("not Warm after Prepare")
+	if instance.Connections() == 0 {
+		t.Fatal("no connection after Prepare")
 	}
+	waitForWarm(t, client)
 	// Preparing again and again for longer than the idle timeout keeps the
 	// connection open.
 	for range 6 {
@@ -253,6 +254,20 @@ func TestPrepareKeepsTheInstanceRunning(t *testing.T) {
 	}
 	if instance.Connections() == 0 {
 		t.Fatal("the connection closed while it was being prepared")
+	}
+}
+
+// gRPC publishes its ready picker before its connectivity state. A successful
+// RPC can therefore return before Warm observes Ready, even with a live
+// connection. Wait for that observation rather than assuming their order.
+func waitForWarm(t *testing.T, client *vectorindex.Client) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !client.Warm() {
+		if time.Now().After(deadline) {
+			t.Fatal("connection did not become Warm")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -306,7 +321,7 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 			held = append(held, conn)
 		}
 	}()
-	client := vectorindex.New(filepath.Join(dir, "hung.sock"), nil)
+	client := vectorindex.New(filepath.Join(dir, "hung.sock"), vectorindex.Options{})
 	defer func() { _ = client.Close() }()
 	started := time.Now()
 	if _, err := client.Collections(context.Background()); err == nil {
@@ -314,5 +329,92 @@ func TestAHungInstanceTimesOut(t *testing.T) {
 	}
 	if took := time.Since(started); took > 5*time.Second {
 		t.Errorf("a hung instance held the call for %s", took)
+	}
+}
+
+// An alias moves from one collection to another in one change, and back;
+// deleting the collection it names takes it along.
+func TestAnAliasSwitchesBetweenCollections(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
+	defer func() { _ = client.Close() }()
+	for i, name := range []string{"old", "new"} {
+		if err := client.CreateCollection(ctx, vectorindex.Collection{Name: name, Dimensions: 2, Keywords: []string{"object"}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Upsert(ctx, name, []vectorindex.Point{{Key: name, Vector: unit(1, float32(i)),
+			Keywords: map[string][]string{"object": {"a"}}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() string {
+		t.Helper()
+		named, err := client.Alias(ctx, "windows")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return named
+	}
+	if named := read(); named != "" {
+		t.Fatalf("Alias() before any = %q", named)
+	}
+	// Switching to the collection it names already moves nothing.
+	for i, name := range []string{"old", "old", "new", "old"} {
+		if moved, err := client.SwitchAlias(ctx, "windows", name); err != nil || moved != (i != 1) {
+			t.Fatalf("SwitchAlias(%s) = %v, %v", name, moved, err)
+		}
+		if named := read(); named != name {
+			t.Fatalf("Alias() after switching to %s = %q", name, named)
+		}
+		// The alias reads as the collection it names.
+		hits, err := client.Search(ctx, "windows", vectorindex.Query{Vector: unit(1, 0),
+			Scope: vectorindex.Scope{Field: "object", Values: []string{"a"}}, Limit: 5, Exact: true})
+		if err != nil || !slices.Equal(hitKeys(hits), []string{name}) {
+			t.Fatalf("search through the alias of %s = %v, %v", name, hits, err)
+		}
+	}
+	// An alias is not a collection of its own.
+	if collections, err := client.Collections(ctx); err != nil || len(collections) != 2 || slices.Contains(collections, "windows") {
+		t.Fatalf("Collections() = %v, %v", collections, err)
+	}
+	if err := client.DeleteCollection(ctx, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if named := read(); named != "" {
+		t.Fatalf("Alias() after its collection went = %q", named)
+	}
+}
+
+// A video's window points go together when the video does: deleting by the
+// object field removes every one of them, and only them.
+func TestDeleteMatchingRemovesEveryPointOfAnObject(t *testing.T) {
+	instance := vectorindextest.Start(t)
+	ctx := context.Background()
+	client := vectorindex.New(instance.Socket, vectorindex.Options{})
+	defer func() { _ = client.Close() }()
+	if err := client.CreateCollection(ctx, vectorindex.Collection{Name: "windows", Dimensions: 3, Keywords: []string{"object", "libraries"}}); err != nil {
+		t.Fatal(err)
+	}
+	var points []vectorindex.Point
+	for i, object := range []string{"video:a", "video:a", "video:a", "video:b"} {
+		points = append(points, vectorindex.Point{Key: fmt.Sprintf("%s#%d", object, i), Vector: unit(1, float32(i), 0),
+			Keywords: map[string][]string{"object": {object}, "libraries": {"shared"}}})
+	}
+	if err := client.Upsert(ctx, "windows", points); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "object", []string{"video:a", "video:none"}); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	if err := client.Scan(ctx, "windows", nil, func(entry vectorindex.Entry) error { left = append(left, entry.Key); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(left, []string{"video:b#3"}) {
+		t.Fatalf("left after deleting video:a = %v", left)
+	}
+	if err := client.DeleteMatching(ctx, "windows", "", []string{"x"}); !errors.Is(err, vectorindex.ErrInvalid) {
+		t.Fatalf("DeleteMatching without a field = %v", err)
 	}
 }

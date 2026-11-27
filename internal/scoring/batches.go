@@ -119,7 +119,7 @@ func (input *BatchInput) normalize() error {
 	}
 	switch {
 	case !input.Scale.valid():
-		return invalid("scale must be hundredths, tenths, whole or three")
+		return invalid("scale must be five, hundredths, tenths, whole or three")
 	case input.HideDecimals && !input.Scale.HasDecimals():
 		return invalid("only a scale with decimals can hide them")
 	}
@@ -155,6 +155,9 @@ type Batch struct {
 	Files, Imported, Skipped int
 	// SkippedBy counts the skipped files by reason.
 	SkippedBy map[string]int
+	// WaitingForSpace marks an importing batch while imports are paused
+	// at the data volume's reserve; they go on once space is freed.
+	WaitingForSpace bool
 	// Photos excludes anchors; Complete have Required raters, Started some.
 	Photos, Anchors, Complete, Started, Flagged int
 	// Answers counts every answer; with one, the dimensions are fixed.
@@ -171,6 +174,10 @@ func (s *Store) CreateBatch(ctx context.Context, by string, input BatchInput) (B
 	}
 	if info, err := os.Stat(filepath.Join(s.photosDir, input.Source)); err != nil || !info.IsDir() {
 		return Batch{}, invalid("folder %q is not in the scoring folder", input.Source)
+	}
+	// An import below the reserve would only wait, so say so now.
+	if err := s.room(previewBytes); err != nil {
+		return Batch{}, err
 	}
 	id := "b" + randomToken(6)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO batches (id, name, source, required, rubric, dimensions, scale, hide_decimals,
@@ -341,11 +348,14 @@ func scanBatch(row interface{ Scan(...any) error }) (Batch, error) {
 	return batch, nil
 }
 
-// skippedBy fills in the batches' skipped files by reason.
+// skippedBy fills in the batches' skipped files by reason and whether their
+// import waits for space.
 func (s *Store) skippedBy(ctx context.Context, batches []Batch) error {
+	paused := s.importPaused.Load()
 	byID := make(map[string]*Batch, len(batches))
 	for i := range batches {
 		byID[batches[i].ID] = &batches[i]
+		batches[i].WaitingForSpace = paused && batches[i].State == "importing"
 	}
 	return each(ctx, s.db, `SELECT batch_id, coalesce(reason, ''), count(*) FROM import_files WHERE status = 'skipped'
 		GROUP BY batch_id, reason`, nil, func(rows *sql.Rows) error {
@@ -446,7 +456,15 @@ func (s *Store) OpenBatches(ctx context.Context, rater string) ([]RaterBatch, er
 		if err != nil {
 			return nil, err
 		}
-		batch.Finished = item == 0
+		if item == 0 {
+			// The photos the rater still holds are left to score, as Claim
+			// says of the same batch.
+			held, err := heldClaims(ctx, s.db, batch.ID, rater, now)
+			if err != nil {
+				return nil, err
+			}
+			batch.Finished = len(held) == 0
+		}
 		result = append(result, batch.RaterBatch)
 	}
 	return result, nil
