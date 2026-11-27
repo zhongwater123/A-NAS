@@ -1095,6 +1095,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/network/phone-hotspot/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save settings for the next time the phone hotspot starts */
+        put: operations["savePhoneHotspotSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/web-search/query": {
         parameters: {
             query?: never;
@@ -6618,12 +6635,23 @@ export interface components {
             /** @enum {string} */
             state: "unavailable" | "off" | "starting" | "on" | "stopping" | "failed";
             /** @enum {string} */
-            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed";
+            reason?: "dependencies_missing" | "no_wired_uplink" | "no_idle_radio" | "ap_failed" | "dhcp_failed" | "web_unavailable" | "tls_unavailable" | "isolation_failed" | "cleanup_failed" | "service_failed" | "invalid_settings";
+            settings?: components["schemas"]["PhoneHotspotSettings"];
+            /** @description The saved settings could not be read. An administrator can replace them by saving new settings. */
+            settingsInvalid?: boolean;
+            /** @description Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected. */
+            devices?: {
+                mac: string;
+                ip?: string;
+                name?: string;
+            }[];
             /** @description Present when the hotspot is on. The response is not cacheable. */
             connection?: {
                 ssid: string;
                 password: string;
                 url: string;
+                /** @description Whether this running hotspot advertises a WebOS portal */
+                portal?: boolean;
             };
         };
         PhoneHotspotRequest: {
@@ -8793,6 +8821,20 @@ export interface components {
             /** Format: int64 */
             capacityBytes?: number;
         };
+        PhoneHotspotSettings: {
+            /** @description Empty selects the device's default hotspot name */
+            ssid: string;
+            passwordConfigured: boolean;
+            portal: boolean;
+        };
+        PhoneHotspotSettingsChange: {
+            /** @description At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name. */
+            ssid?: string;
+            /** @description Omit to retain the saved password. Empty restores a fresh random password on each start. */
+            password?: string;
+            /** @description Advertise the WebOS entry via the mobile system's network sign-in prompt */
+            portal?: boolean;
+        };
         /** @description Set on a device that runs the A-NAS image (ADR 0034 decision 2). */
         SystemUpdateImage: {
             /** @description The base image the device runs, by its release's sequence on main. */
@@ -9785,6 +9827,8 @@ export type AgentTokenList = components['schemas']['AgentTokenList'];
 export type AgentTokenRequest = components['schemas']['AgentTokenRequest'];
 export type AgentTokenCreated = components['schemas']['AgentTokenCreated'];
 export type MissingDisk = components['schemas']['MissingDisk'];
+export type PhoneHotspotSettings = components['schemas']['PhoneHotspotSettings'];
+export type PhoneHotspotSettingsChange = components['schemas']['PhoneHotspotSettingsChange'];
 export type SystemUpdateImage = components['schemas']['SystemUpdateImage'];
 export type FamilyReactionName = components['schemas']['FamilyReactionName'];
 export type FamilyReaction = components['schemas']['FamilyReaction'];
@@ -12100,6 +12144,37 @@ export interface operations {
             400: components["responses"]["ProductError"];
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    savePhoneHotspotSettings: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PhoneHotspotSettingsChange"];
+            };
+        };
+        responses: {
+            /** @description Saved settings without the password */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PhoneHotspotSettings"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

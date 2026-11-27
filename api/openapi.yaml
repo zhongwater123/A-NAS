@@ -82,6 +82,7 @@ paths:
   /api/v1/system-logs: { $ref: "paths/logs.yaml#/~1api~1v1~1system-logs" }
   /api/v1/web-search: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search" }
   /api/v1/network/phone-hotspot: { $ref: "paths/phone-hotspot.yaml#/~1api~1v1~1network~1phone-hotspot" }
+  /api/v1/network/phone-hotspot/settings: { $ref: "paths/phone-hotspot.yaml#/~1api~1v1~1network~1phone-hotspot~1settings" }
   /api/v1/web-search/query: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1query" }
   /api/v1/web-search/thumbnail: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1thumbnail" }
   /api/v1/web-search/license: { $ref: "paths/web-search.yaml#/~1api~1v1~1web-search~1license" }

@@ -103,6 +103,8 @@ type Executor struct {
 	stateOwner int
 	// stateFailures are the records that cannot be used, by path.
 	stateFailures map[string]error
+	// hotspotMu orders updates that read and replace the hotspot settings file.
+	hotspotMu     sync.Mutex
 	spaceRootsMu  sync.RWMutex
 	spaceRoots    map[string]string
 	registryPath  string
