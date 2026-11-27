@@ -1,7 +1,7 @@
 # 剪辑中心首版实施方案
 
-状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](videocut-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来）
-更新时间：2026-11-26
+状态：accepted（2026-11-18 用户批准，同时接受 [ADR 0038](../adr/0038-keep-montage-media-in-the-photo-library.md) 与默认规则；2026-11-17 起草；2026-11-18 按 #514 作者的评审改了配乐、探针与 M9 的先后，又按用户决定改用 allin1 分析配乐，商业版权待议，按 P1 的结果改了“规划”；2026-11-19 按 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 加上出片后的二次编辑；2026-11-20 按用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)把规划改为成员规划进程里的一次对话，重写“规划”一节，交接见[规划会话](videocut-planning-session.md)；首版 M0–M10 已于 2026-11-19 合入并部署到实验 NAS，实机验收的修复见“交付”；实施按 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 的子 issue 分批，见“交付”；2026-11-25 按用户[决定](../decisions/2026-11-25-montage-planning-retries.md)改为规划没有完成时自动重来；2026-11-27 起草 Venus 改版的网页结构，见“网页”一节，[#690](https://github.com/zhongwater123/A-NAS/issues/690)）
+更新时间：2026-11-27
 
 相关文档：
 - 产品行为与验收以[剪辑中心规格](../specs/videocut-center.md)为准；
@@ -781,6 +781,61 @@ videocut/
 - **二次编辑的界面**（#596）：2026-11-24 起按新的交互重新设计，规格随新界面改写；在那之前主线只有服务端，网页没有入口。服务端不依赖界面的布局：规则都在服务端校验，网页只负责显示和发请求，修订号冲突时重新读取修改稿。
 - **提示**：主线没有通用的桌面通知中心，剪辑的提示照 `FamilyNotices` 的做法放在桌面外壳里。
 
+### Venus 改版的网页结构
+
+[#690](https://github.com/zhongwater123/A-NAS/issues/690) 起，网页按 [Venus 规格](../specs/venus.md)改成开始页、准备页、成片页三个页面，仍在 A-NAS 桌面的剪辑中心窗口里，沿用 [#639](https://github.com/zhongwater123/A-NAS/issues/639) 的分层。新外壳接上后删除上面第八版的页面，不两套并存。窗口默认尺寸从 1080×720 改为 PRD 的基准宽度 1200。
+
+```
+web/src/videocut/
+  VideoCutPanel.tsx   外壳：按项目状态选页面
+  screens/            页面层：start/、prepare/、cut/，只管显示，把点击转成调用
+  app/                中间层：能力接口、成片页共享状态、资源工具
+  api/                底层接口：只用 api/openapi.yaml 生成的类型
+  mocks/              MSW 替身，按生成类型写
+  ui/                 公共组件：插槽占位、提示文案表、确认弹窗、覆盖提示条、空态、视觉变量
+  lib/                纯函数：状态到页面的对应、时间轴换算、本机读元数据与首帧
+```
+
+依赖只能向下：`screens/` 用 `app/`、`ui/`、`lib/`；`app/` 用 `api/`、`lib/`。`screens/`、`ui/` 直接 import `api/` 时，由 Oxlint 的 `no-restricted-imports` 拦下。
+
+**外壳**：窗口只记一个路由，在开始页，或者打开了哪个项目。打开项目后进哪个页面、成片页显示哪种状态（生成中、失败、正常、导出中），由服务端的项目状态按[作品状态机](../specs/venus.md#作品状态机)决定，对应关系只写在 `lib/` 的一个纯函数里；页面自己不跳转，只调 `useNav` 的“回开始页”“打开项目”。
+
+**插槽**：三个页面先只有布局，每个功能放一个标 PRD 编号的占位框，开发时只替换自己负责的插槽，不改布局文件。
+
+| 页面 | 区域与插槽 |
+|---|---|
+| 开始页 | 导入面板 M2-1、M2-2；作品卡片 M1-1 至 M1-3 |
+| 准备页 | 顶栏下 M3-1、M3-2；左栏 M3-3、M3-4；右栏 M4-1 至 M4-5 |
+| 成片页 | 顶栏 M6-5、M9-1、M9-3；中区 M6-1，生成中换成 M5-1、M5-3；检查器选中镜头时 M7，未选中时 M8，生成中 M5-2；时间轴 M6-3、M6-4、M6-2；覆盖层 M9-2、M9-4 |
+
+成片页的布局按 PRD M6-6 用容器查询随窗口宽度分 1200、1024、900 三档，不按屏幕宽度，因为桌面窗口能拖大小。
+
+**能力接口**：页面只通过 `app/` 的 hook 拿功能。签名先写死，背后在 MSW 替身上跑通；后端接口合入一个，就去掉对应的替身。
+
+| 接口 | 负责 |
+|---|---|
+| `useNav` | 回开始页、打开项目 |
+| `useWorks`、`useWork` | 项目列表、单个项目的状态与进度、删除；每 5 秒轮询，窗口最小化时停 |
+| `useLocalImport`、`useSelection` | 本机读文件、按天分组、首帧；勾选、星标、横竖重排 |
+| `useSettings`、`useGenerate`、`useUpload` | 配乐、比例、剪辑风格；开始生成、三条进度与重试；把勾选的文件交给上传队列 |
+| `useEditor` | 全部镜头操作与撤销：统一加锁（一次只处理一条），生成中、导出中拒绝，完成后刷新时间线、从改动的那一镜重放、给出提示 |
+| `useCutStore` | 成片页共享的选中镜头、当前段落、播放头、操作锁与页面状态 |
+| `usePlayer`、`useCandidates`、`useAssistant`、`useExport`、`useFeedback` | 预览播放、候选、助手、导出下载、打开桌面的问题反馈 |
+
+时间轴、播放器、检查器、助手互不调用，只读写 `useCutStore`：点镜头卡只写“选中镜头”，播放器和检查器各自跟着变；替换、删除这类改动只走 `useEditor`。页面状态只有外壳能改，来自服务端的项目状态。
+
+**资源分级**（[#689](https://github.com/zhongwater123/A-NAS/issues/689)）：
+
+| 级别 | 什么时候释放 | 放什么 |
+|---|---|---|
+| 桌面级 | 关掉剪辑窗口也还在；关浏览器标签页或刷新时中断，离开前浏览器先确认 | 上传队列（复用 `photos/uploads.tsx` 与传输中心的 `transferStore`，tus 断点续传）、待上传的本机文件、任务通知 |
+| 窗口级 | 关掉剪辑窗口时释放，切换页面时保留 | 数据缓存、当前项目 |
+| 页面级 | 离开页面就释放 | 播放器、悬停预览（全局同时只有一个）、缩略图的 objectURL、快捷键 |
+
+窗口最小化时内容保持挂载（`Desktop.tsx`），轮询和播放按 `shown.ts` 暂停。新增资源先定级别，再写代码。
+
+**接口契约**：Venus 要用的接口先写进 `api/`（作品与状态、只存文件清单的建项目、上传、生成与进度、时间线、候选、镜头操作与撤销、搜索与问答、导出），运行 `make api` 生成类型与校验，再写 MSW 替身。其中删除项目时原片删不删，要等 Venus 规格的[待定](../specs/venus.md#待定)一项定下来。
+
 ## 出片后的二次编辑
 
 确认一版、修改镜头与一句话重剪（[#596](https://github.com/zhongwater123/A-NAS/issues/596)）。为什么这样做见 [ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md)，子 issue 见 ADR 的“交付”。界面 2026-11-24 起按新的交互重新设计，规格随新界面改写，本节记的是已经实现的服务端；新界面的子 issue 随 [#632](https://github.com/zhongwater123/A-NAS/issues/632) 另定。在首版闭环（M10）之后实施。
@@ -961,7 +1016,7 @@ ADR 0038 的“未选择”列出了身份与归属层面的替代方案。实�
   - 本方案的 [0038](../adr/0038-keep-montage-media-in-the-photo-library.md)；
   - 相关的 [0001](../adr/0001-use-go-for-product-services.md)、[0006](../adr/0006-use-a-managed-photo-library.md)、[0011](../adr/0011-run-the-photo-library-as-a-dedicated-service-identity.md)、[0016](../adr/0016-ship-photo-ai-as-a-built-in-offline-capability.md)、[0017](../adr/0017-run-the-media-center-through-the-file-broker.md)、[0024](../adr/0024-run-a-sandboxed-hermes-agent-per-member.md)、[0028](../adr/0028-index-vectors-in-a-rebuildable-qdrant-instance-per-owner.md)、[0029](../adr/0029-keep-the-baby-as-a-profile-and-channel-photos-in-the-shared-library.md)、[0037](../adr/0037-plug-removable-modules-in-as-separate-services.md)。
 - **架构**：[规划会话](videocut-planning-session.md)、[配乐](videocut-music.md)、[总览](OVERVIEW.md)、[家庭中心](family-center.md)、[相册 AI](photo-ai.md)、[OCR 方案](photo-ocr.md)、[向量索引](vector-index.md)。
-- **规格**：[剪辑中心](../specs/videocut-center.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)。
+- **规格**：[剪辑中心](../specs/videocut-center.md)、[Venus](../specs/venus.md)、[相册视频](../specs/photo-video.md)、[AI 助手](../specs/ai-assistant.md)。
 - **代码**：
   - 服务与授权：[`internal/familyservice`](../../internal/familyservice/service.go)、[`internal/photoservice/assistant.go`](../../internal/photoservice/assistant.go)、[`internal/photoservice/gate.go`](../../internal/photoservice/gate.go)、[`internal/photos/jobs.go`](../../internal/photos/jobs.go)；
   - Worker 与协议：[`internal/ffmpegworker`](../../internal/ffmpegworker/protocol.go)、[`internal/unixmsg`](../../internal/unixmsg/unixmsg.go)、[`internal/aiworker`](../../internal/aiworker/client.go)、[`ai/anas_ai/protocol.py`](../../ai/anas_ai/protocol.py)；
