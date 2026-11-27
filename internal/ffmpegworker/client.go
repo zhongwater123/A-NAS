@@ -186,6 +186,9 @@ func call(ctx context.Context, dial dialer, request Request, file *os.File) (io.
 // send is call for any request: message must ask for an acknowledgement.
 // It returns the open body and the response that preceded it.
 func send(ctx context.Context, dial dialer, op string, message any, files []*os.File) (body, Response, error) {
+	if err := ReadOnly(files...); err != nil {
+		return body{}, Response{}, err
+	}
 	conn, release, err := dial(ctx, op)
 	if err != nil {
 		return body{}, Response{}, err
@@ -224,6 +227,26 @@ func send(ctx context.Context, dial dialer, op string, message any, files []*os.
 		return fail(responseError(response))
 	}
 	return body{UnixConn: conn, ctx: ctx, stop: stop, done: done}, response, nil
+}
+
+// ReadOnly refuses an input that could write, as every request does before
+// it takes a slot: ADR 0017 hands the worker read-only descriptors, so a
+// decoder taken over by a malicious file can only read what it was given.
+func ReadOnly(files ...*os.File) error {
+	for _, file := range files {
+		// A nil file has no name for the errors below to print.
+		if file == nil {
+			return errors.New("ffmpeg worker input is missing")
+		}
+		flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFL, 0)
+		if err != nil {
+			return fmt.Errorf("ffmpeg worker input %s: %w", file.Name(), err)
+		}
+		if flags&unix.O_ACCMODE != unix.O_RDONLY {
+			return fmt.Errorf("ffmpeg worker input %s is open for writing", file.Name())
+		}
+	}
+	return nil
 }
 
 // responseError is the error a response that is not OK reports.

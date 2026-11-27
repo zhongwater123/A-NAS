@@ -482,7 +482,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	} else if !ok {
 		return nil, &stepNeeds{reason: NeedStorageFull}
 	}
-	segments, err := os.OpenFile(filepath.Join(dir, segmentsFile), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	segments, err := os.OpenFile(filepath.Join(dir, segmentsFile), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -497,9 +497,13 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 	if err := segments.Sync(); err != nil {
 		return nil, storage(err)
 	}
-	if _, err := segments.Seek(0, io.SeekStart); err != nil {
+	_ = segments.Close()
+	// The worker gets a descriptor of its own that cannot write (ADR 0017).
+	video, err := os.Open(segments.Name())
+	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = video.Close() }()
 	song, err := s.jobMusic.Audio(ctx, run.owner, run.settings.SongID)
 	if errors.Is(err, ErrSongUnusable) {
 		return nil, &stepNeeds{reason: NeedMusic, err: err}
@@ -513,7 +517,7 @@ func (s *Store) renderFilm(ctx context.Context, run *jobRun) (any, error) {
 		created = *latest
 	}
 	result := renderResult{Film: filmFileOf(run.plan), Frames: total, Created: created.UTC().Format(time.RFC3339)}
-	film, err := s.editing.Assemble(ctx, segments, song, ffmpegworker.AssembleRequest{SongStart: run.excerpt.Start, Frames: total, Created: result.Created})
+	film, err := s.editing.Assemble(ctx, video, song, ffmpegworker.AssembleRequest{SongStart: run.excerpt.Start, Frames: total, Created: result.Created})
 	if err != nil {
 		return nil, err
 	}
