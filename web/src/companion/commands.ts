@@ -24,7 +24,7 @@
 // arguments are. A lock a conversation took goes when the product service settles that
 // conversation's turn, and every one goes with the window (releaseCommandLocks).
 
-import { localConsoleCovered } from "../desktop/LocalConsoleScreenSaver";
+import { localConsoleCovered } from "../lib/localConsole";
 import { decideAnim } from "./dsh-pet/host/anim";
 import {
   decideBroadcast,

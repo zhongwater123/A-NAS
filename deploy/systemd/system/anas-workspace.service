@@ -1,0 +1,43 @@
+[Unit]
+Description=A-NAS shared workspace service
+Documentation=https://github.com/zhongwater123/A-NAS
+After=anas-host-agent.service anas-api.service
+Wants=anas-host-agent.service anas-api.service
+
+[Service]
+Type=simple
+User=a-nas-workspace
+Group=a-nas-workspace
+# Shared pages and their versions stay private to this account; members
+# and their agents reach them only through the Product Service, and the
+# service confirms each session or agent token with the Host Agent itself
+# (ADR 0040). It needs no other service's socket.
+ExecStart=/usr/lib/a-nas/anas-api workspace-service
+Environment=ANAS_WORKSPACE_ROOT=/srv/a-nas/data/workspace
+Environment=ANAS_WORKSPACE_SOCKET=/run/a-nas-workspace/workspace.sock
+Environment=ANAS_WORKSPACE_SESSION_SOCKET=/run/a-nas-workspace-sessions/workspace.sock
+RuntimeDirectory=a-nas-workspace
+RuntimeDirectoryMode=0750
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# Mounts can appear after startup; only workspace/ grants this UID access.
+ReadWritePaths=/srv/a-nas/data
+RestrictAddressFamilies=AF_UNIX
+# A page is at most 20 MB; a few at once with their copies fit.
+MemoryMax=512M
+CPUWeight=20
+IOWeight=20
+
+[Install]
+WantedBy=multi-user.target

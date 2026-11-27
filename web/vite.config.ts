@@ -29,6 +29,14 @@ export default defineConfig({
     // .vite/manifest.json says which files each chunk needs; the first-load
     // budget reads it (.size-limit.js).
     manifest: true,
+    rolldownOptions: {
+      // The desktop, and a shared page on its own in a browser tab, which
+      // loads none of the desktop (src/workspace/tab.tsx).
+      input: {
+        index: fileURLToPath(new URL("index.html", import.meta.url)),
+        workspace: fileURLToPath(new URL("workspace.html", import.meta.url)),
+      },
+    },
   },
   server: {
     host: "127.0.0.1",
@@ -43,8 +51,10 @@ export default defineConfig({
     setupFiles: ["./src/test/forms.ts", "./src/test/setup.ts"],
     css: true,
     pool: "threads",
-    fileParallelism: false,
-    maxWorkers: 1,
+    // Four test files at a time. Vitest's own default, a worker for every
+    // core but one, would take a development machine that other sessions'
+    // gates share; VITEST_MAX_WORKERS sets another number for one run.
+    maxWorkers: 4,
     // Development machines share their cores with other sessions' builds and
     // tests; the 5 s default failed tests that only waited for the CPU. A test
     // that never finishes still fails, 20 s later.

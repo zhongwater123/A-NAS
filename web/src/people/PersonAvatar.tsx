@@ -1,8 +1,8 @@
 import { useState } from "react";
 
-import styles from "../desktop/desktop.module.css";
 import { avatarURL } from "./api";
 import { displayName, type Person } from "./people";
+import styles from "./personAvatar.module.css";
 
 // PersonAvatar shows an account's avatar, or the first character of the name
 // it goes by on a disc whose colour follows the account name. className sets

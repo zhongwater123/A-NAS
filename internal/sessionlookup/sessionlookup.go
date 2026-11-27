@@ -154,41 +154,46 @@ func NewClient(socketPath string) *Client {
 // ResolveSessionUser returns accountid.ErrSessionNotFound for tokens that do
 // not name an active, unexpired session.
 func (c *Client) ResolveSessionUser(ctx context.Context, token string) (accountid.SessionUser, error) {
-	return c.lookup(ctx, ResolvePath, resolveRequest{Token: token}, http.StatusUnauthorized, accountid.ErrSessionNotFound)
+	return lookup(ctx, c, ResolvePath, resolveRequest{Token: token}, accountid.ErrSessionNotFound, namesUser)
 }
 
 // ResolveAccountUID returns accountid.ErrUserNotFound for a UID that belongs
 // to no active user.
 func (c *Client) ResolveAccountUID(ctx context.Context, uid int) (accountid.SessionUser, error) {
-	return c.lookup(ctx, AccountUIDPath, accountRequest{UID: uid}, http.StatusUnauthorized, accountid.ErrUserNotFound)
+	return lookup(ctx, c, AccountUIDPath, accountRequest{UID: uid}, accountid.ErrUserNotFound, namesUser)
 }
 
-func (c *Client) lookup(ctx context.Context, path string, query any, missingStatus int, missing error) (accountid.SessionUser, error) {
+func namesUser(user accountid.SessionUser) bool { return user.UserID != "" }
+
+// lookup posts query to path and reads the answer, which valid must accept;
+// 401 is missing.
+func lookup[T any](ctx context.Context, c *Client, path string, query any, missing error, valid func(T) bool) (T, error) {
+	var none T
 	body, err := json.Marshal(query)
 	if err != nil {
-		return accountid.SessionUser{}, err
+		return none, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://host-agent"+path, bytes.NewReader(body))
 	if err != nil {
-		return accountid.SessionUser{}, err
+		return none, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := c.client.Do(request)
 	if err != nil {
-		return accountid.SessionUser{}, fmt.Errorf("reach the session lookup: %w", err)
+		return none, fmt.Errorf("reach the session lookup: %w", err)
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
 	case http.StatusOK:
-		var user accountid.SessionUser
-		if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&user); err != nil || user.UserID == "" {
-			return accountid.SessionUser{}, errors.New("session lookup returned an invalid user")
+		var answer T
+		if err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&answer); err != nil || !valid(answer) {
+			return none, fmt.Errorf("session lookup returned an invalid answer to %s", path)
 		}
-		return user, nil
-	case missingStatus:
-		return accountid.SessionUser{}, missing
+		return answer, nil
+	case http.StatusUnauthorized:
+		return none, missing
 	default:
-		return accountid.SessionUser{}, fmt.Errorf("session lookup answered %s", response.Status)
+		return none, fmt.Errorf("session lookup answered %s to %s", response.Status, path)
 	}
 }
 

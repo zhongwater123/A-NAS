@@ -90,30 +90,53 @@ M2 交付后，成员可以：
 
 AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 EXIF 方向转正、透明区域合成白底，大小有界。这样 Worker 不必解码任意尺寸的原图，也不会因超大图片耗尽内存。步骤 3 比较过 1024 px 输入：同一图片的两种向量余弦相似度平均 0.984，暂不增加专用的 AI 输入派生（[校准报告](../research/photo-ai-label-calibration.md#视觉-token-与输入尺寸)）。物体检测需要更多细节，相册服务为它临时渲染长边 1600 px 的 JPEG，经密封的 `memfd` 传入，不落盘（[检测输入](photo-objects.md#检测输入)）。
 
+### 门控与三类工作
+
+相册服务的 AI 门控（[`photoservice/gate.go`](../../internal/photoservice/gate.go)）按谁在等，把相册里与 AI 有关的工作分成三类。三类工作只在这一节定义，其他文档链接这里；新的 AI 工作先按谁在等归入一类，再写进这里。压力与内存的阈值、模型的加载与卸载见[资源策略](photo-objects.md#资源策略)。
+
+- **前台请求**：成员在页面上等结果的请求。
+  - 现在包括：
+    - 相册 API 上登录成员的请求，如浏览、搜索、以图搜图、上传、下载与播放视频，从开始到结束都算（`Gate.Use`，[`photoservice.Authenticate`](../../internal/photoservice/photoservice.go)）；读取 AI 状态（`GET /api/v1/photos/ai`）不算，窗口可以一直轮询。
+    - 助手套接字上的请求，收到时算一次（`Gate.Touch`，[`assistant.go`](../../internal/photoservice/assistant.go)）。
+    - 剪辑中心二次编辑的文字搜镜头 `searchWindows`：经授权套接字，从开始到结束都算（[ADR 0039](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md) 第 8 项，由 [PR #631](https://github.com/zhongwater123/A-NAS/pull/631) 加入）。授权套接字上的其他请求不算。
+  - 不经过门控，照常加载所需的模型，不做加载前判断。
+  - 前台请求进行中，以及最后一个结束后的 5 分钟（`QuietPeriod`）里，算“有人在用相册”。门控按全机计，不分是谁在用。
+- **成员在等的后台工作**：成员的某个任务在等它做完，成员不必开着页面。
+  - 现在只有剪辑中心的分析：窗口（`montage-windows/v1`）、卡片（`montage-cards/v1`）、画质（`montage-quality/v1`）与卡片描述（`montage-describe/v1`）。
+  - 门控回答它时不看有没有人在用相册（`Gate.OpenForMember`、`ContinueForMember`，[`photos.MemberGate`](../../internal/photos/montagewindows.go)）。开始下一块前，CPU、I/O、内存的压力与内存余量都要允许；正在做的一块每 200 毫秒问一次门控，只在内存不足（低于余量、装不下要加载的模型或内存压力超限）时挂断，CPU、I/O 压力只挡下一块。
+  - 每轮先做它（[`aiRunner.round`](../../internal/photos/airunner.go)）。有人在用相册时，一轮只做这一类，相册自己的后台工作照旧等。
+  - 前台请求不挂断它。AI Worker 一次只服务一个连接（[`worker.py`](../../ai/anas_ai/worker.py)），所以成员这时搜索照片，查询的编码要排在 Worker 手上的这次调用之后：窗口每帧调用一次，和一张照片的向量相当；一张卡片的描述在实验 NAS 上平均 74 秒（[调查](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)）。
+  - 这一类是 2026-11-19 修复[剪辑任务停在“等待分析”](../investigations/2026-11-19-montage-job-stalls-on-the-experimental-nas.md)时加的，此前剪辑中心的分析和相册自己的后台工作一样等相册空闲。2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)保留这种做法。
+- **相册自己的后台工作**：整理照片，没有人在等其中某一项。
+  - 现在包括：照片的向量、物体、人脸、宠物与文字识别，标签与查询文字的编码，人物聚类，以及向量索引的同步，其中也有剪辑中心窗口向量的同步（[向量索引](vector-index.md)）。
+  - 只在没有人在用相册、压力与内存余量都允许时开始（`Gate.Open`）。门控关闭时不领新任务，关闭期间至多每分钟（不长于空闲期）复查一次，因 CPU 或 I/O 压力关闭时每 5 秒复查。
+  - 正在做的检测与读文字每 200 毫秒问一次门控，门控因任何原因关闭都立即取消，退回队列、不计尝试次数；向量推理不能中断，做完为止。
+  - 空闲期默认 5 分钟，系统测试用 `ANAS_PHOTOS_AI_QUIET_PERIOD` 缩短。
+
+门控的其他输入：
+
+- **压力**：`system.slice` 与 `user.slice` 的 CPU、I/O、内存 PSI（`avg10`），经 `prometheus/procfs` 读取。Worker 在自己的 `anas-ai.slice`，它自己的等待不算。内核没有压力信息时只看前台请求与内存。
+- **内存**：系统可用内存低于 1 GiB 余量时门控关闭，并请 Worker 卸载模型；后台工作要加载的模型放不下（加载后不足 1 GiB）时只等待、不卸载。检测队列清空或有人在用相册时只卸载检测会话，CPU 与 I/O 压力只取消、不卸载。
+- **还没有实现的**：Host Agent 在相册会话套接字上提供只读的 `GET /v1/activity`，报告 Web 文件操作（文件代理）、磁盘与网卡吞吐（SMB 传输体现在这里）和 CPU 温度，门控把文件操作与吞吐算作有人在用设备，温度超过上限时关闭。相册服务运行在 `PrivateNetwork` 中，看不到宿主机网卡，因此不自行采样。在此之前，Web 文件与 SMB 只通过系统压力影响门控。
+
 ### 任务与调度
 
 - 复用 M1 的持久任务表：缩略图完成后，在同一事务中为该原图对象排入 `embedding/v1` 与 `objects/v1` 任务（`v1` 是处理流程版本，模型 ID 随结果保存）；后台先做向量、再做检测。向量只依赖原图字节，以对象为键，副本与重复照片共用。缩略图与 AI 任务由两个循环分别领取。
-- 缩略图任务照旧立即执行；AI 任务只在门控允许时领取：
-  - 最近 5 分钟没有前台活动；
-  - 设备上其他工作没被拖住：`system.slice` 与 `user.slice` 的 CPU、I/O、内存 PSI（`avg10`）都低于阈值；Worker 在自己的 `anas-ai.slice`，它自己的等待不算（[资源策略](photo-objects.md#资源策略)）；
-  - CPU 温度低于上限。
-- 前台活动与温度由 Host Agent 提供：它已经知道 Web 文件操作（文件代理）、相册会话查询与磁盘、网卡吞吐（SMB 传输体现在这里），在相册会话套接字上增加只读的 `GET /v1/activity`。相册服务运行在 `PrivateNetwork` 中，看不到宿主机网卡，因此不自行采样。
-- 已实现部分（[`photoservice/gate.go`](../../internal/photoservice/gate.go)）：相册服务自己的请求计入前台活动，但读取 AI 状态不计入，窗口可以一直轮询；CPU、I/O、内存压力经 `prometheus/procfs` 读取，内核没有压力信息时只看活动。Host Agent 的活动信号与温度尚未实现，在此之前 Web 文件与 SMB 只通过系统压力影响门控。
-- 门控关闭时停止领取新任务；正在进行的检测被取消并退回队列、不计尝试次数，无法中断的向量推理允许完成。系统可用内存低于 1 GiB 余量时门控同样关闭，并请 Worker 卸载模型；后台任务要加载的模型放不下（加载后不足 1 GiB）时只等待、不卸载；检测队列清空或有人使用设备时只卸载检测会话，CPU 与 I/O 压力只取消、不卸载（[资源策略](photo-objects.md#资源策略)）。关闭期间至多每分钟（不长于空闲期）复查一次。空闲期默认 5 分钟，系统测试用 `ANAS_PHOTOS_AI_QUIET_PERIOD` 缩短。
+- 缩略图任务照旧立即执行；AI 任务只在门控允许时领取，按[三类工作](#门控与三类工作)。
 - 更换模型后，第一次见到新模型 ID 时把旧模型的向量全部重新排队；旧向量在新向量写入前继续保留。
 - **剪辑中心的分析**（[剪辑中心实施方案](montage-center.md#剪辑分析)的“剪辑分析”）：只为剪辑中心经项目授权请求过的视频排 `montage-windows/v1`，视频仍不进 `inLocalAI`。
   - **入队**：已有当前分析身份的完整窗口就不排；两个授权请求同一个视频只排一次。分析身份是模型 ID、向量维数，加上窗口、取帧与编码的参数。相册服务启动后、AI 运行器还没问过 Worker 时，只有一种身份的完整窗口也算完成，第一轮发现模型不同再重排。
   - **调度**：每轮先做它。先用只读查询确认有到期的剪辑任务，再删掉已没有授权引用的待做任务，然后领一个。一个视频一个任务，每轮只做 30 个窗口（一块），没做完就放回队首、不耗尝试次数，下一轮先问门控；块内每 30 秒续一次租约。
   - **取帧与编码**：用 FFmpeg Worker 的 `frames`（后台优先级），按缩略图的流程转成长边 512、质量 82 的 JPEG，灰度标准差小于 8 记为纯色，再交给 `embed_image`。
-  - **不等相册空闲**（2026-11-19，实验 NAS 验收时发现）：剪辑中心的窗口、卡片、画质与描述是成员的任务在等的工作，门控回答它们时不看前台活动（`Gate.OpenForMember`、`ContinueForMember`，[`photos.MemberGate`](../../internal/photos/montagewindows.go)），CPU、I/O、内存的条件照旧。原因：门控按全机计前台活动，任何成员在用相册，所有人的剪辑任务都等；剪辑中心自己的窗口也读相册（当时主页背景还轮播成员的视频），成员开着窗口等，任务就一直停在“等待分析”。相册在用时，一轮只做剪辑中心的分析，照片自己的 AI 工作照旧等相册空闲 5 分钟。
-  - **挂断**：前台有人用或内存不足时立即挂断（剪辑中心的分析只在内存不足时挂断，见上一条）。门控单独回答这两项（`Gate.Continue`），所以 CPU 压力同时存在也不会掩盖内存不足；CPU、I/O 压力只在块与块之间生效。挂断后本轮结束，和暂停的检测一样按原因卸载模型，照片的 AI 工作也等下一轮；已算完的窗口保留。
+  - **门控**：剪辑中心的窗口、卡片、画质与描述都是[成员在等的后台工作](#门控与三类工作)，不等相册空闲，何时开始、何时挂断见那一节。
+  - **挂断**：门控对正在做的块单独回答内存（`Gate.ContinueForMember`），所以 CPU 压力同时存在也不会掩盖内存不足。挂断后本轮结束，和暂停的检测一样按原因卸载模型，照片的 AI 工作也等下一轮；已算完的窗口保留。
   - **失败**：取帧或解码失败按缩略图的规则分类；AI Worker 自己的错误按照片向量的规则记 `io`，最多试 3 次；超过 6 小时（10,800 个窗口）的视频记 `too_long`，不分析。
   - **结果**：存在 Catalog 的 `video_windows`（migration 18，带回滚），按内容对象复用。写入前确认任务还在，块进行中视频被清除或分析被删除时丢弃这一块。同步进窗口集合见[向量索引](vector-index.md#剪辑中心的窗口集合)。
-  - **交给剪辑中心**：`analysis` 的 JSON 只有状态、身份、窗口数与维数；窗口放在封口的 memfd 里，先是全部向量（小端 float32），再是每个窗口的起止毫秒与标记（各一个小端 uint32），所以应答大小与视频长短无关。`lookup` 一次读出全部资产的分析进度。
+  - **交给剪辑中心**：`lookup` 一次读出全部资产的分析进度；`analysis` 答一个视频的分析，JSON 只有状态、身份与计数，窗口向量与卡片放在封口的只读 memfd 里（[`unixmsg.WriteSealedFile`](../../internal/unixmsg/memfd_linux.go)），所以应答大小与视频长短无关。格式与读取上限以 [`GrantAnalysis`](../../internal/photos/montagewindows.go) 的注释和 `ReadWindows` 为准。只答当前身份的结果：读取期间窗口被重做，只答 `windowsState: queued`；描述被重试或输入变化，`descriptionsState` 改答 `queued`，不给描述。剪辑中心先按 `lookup` 判断四个阶段，读 `analysis` 时再核对一次，有一个不是 `done` 就继续等分析（`waiting(analysis)`），不拿缺了卡片或描述的结果去规划（[`analysisKey`](../../internal/montage/steps.go)，[#584](https://github.com/zhongwater123/A-NAS/issues/584)）。
   - **换模型**：只重排仍被未撤销的授权引用的对象；授权撤销后在 7 天内再次授权的，由入队时的身份判断重排。没有授权引用满 7 天的分析由每小时的维护删除。
   - 窗口完成后排 `montage-cards/v1`，再按卡片逐张排 `montage-quality/v1`。Catalog 第 19 步建 `video_cards`、`video_card_quality` 与 `montage_card_results`，并记录回滚步骤。完成身份包含上游分析身份，也记录零卡片和零画质的成功结果。授权的 `analysis` 返回两项身份，`analyze(retry=true)` 重排失败的任务。
   - **卡片与画质的调度**：每轮先于 AI Worker 的门控做，不问 AI Worker。先用只读查询确认有到期的任务，再删掉已没有授权引用、也没人在做的卡片与画质任务，然后领一个；再次授权并请求分析时补排缺的任务。门控挂断或服务停止时任务退回原位、不耗尝试次数，本轮结束，按原因卸载模型。计算 Worker 或 FFmpeg Worker 连不上时任务等 1 分钟、不耗尝试次数，本轮接着做照片的 AI 工作；每次都结束本轮的话，Worker 不在期间照片的工作会一直等。计算 Worker 执行中失败或超时、读 Catalog 或原始文件出错记 `io`，最多试 3 次；请求被拒绝记 `invalid_result`，原始文件不存在记 `missing_original`，都不再重试。
-  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。相册进入前台或内存不足时中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
+  - 切卡片与量画质使用 `anas-montage-compute.socket` 上的计算 Worker，无需加载相册模型。门控挂断时（[成员在等的后台工作](#门控与三类工作)）中断当轮并归还任务。Worker 在 `anas.slice` 下运行，单实例，使用 AI 运行环境，内存上限 1 GiB。systemd 限制它访问数据卷和 IP 网络。相关实现和验证见 [相册队列](../../internal/photos/montagecards.go)、[Worker](../../ai/anas_montage/worker.py) 与 [系统测试](../../scripts/system-test.sh)。
 - **卡片描述**（`describe_frames`，[`describe.py`](../../ai/anas_ai/describe.py)）：
   - 输入一张卡片的 3–20 张关键帧（每张一个描述符）、每张离卡片开头的秒数（`offsets`）、分组布局（`groups`，从 1 数的节拍）与卡片时长（`duration`）；越界答 `invalid_request`。
   - 提示词、体裁（旅行，`TRAVEL`）与 Schema 固定在 Worker 里，版本 `montage-card/v1`，随回答的 `template` 返回：第八版（提交 `19f2d6db`）的 `PROMPT`、`CAMERAS` 与 Schema 原样搬来，只加一句不要转写画面里的证件号、票号、车牌等号码。
@@ -122,7 +145,7 @@ AI 输入使用已有的缩略图派生 `thumbnail/v1`：长边 512 px、已按 
   - 和 `read_text` 一样在线程里运行、调用方挂断即停；客户端对它的超时是 15 分钟。
 - **相册的 `montage-describe/v1`**（[`montagedescribe.go`](../../internal/photos/montagedescribe.go)）：在画质步骤（`montage-quality/v1`）完成的事务里排队，只描述画质结果 `reasons` 为空的卡片；重新切卡片时一并删掉旧描述。
   - 每轮一张卡片，属于读文字阶段：按 `ocrMemoryBytes` 问准入，通过后释放检测模型；只有读文字模型装不下时，本轮继续处理能运行的相册任务；没描述完的任务放回队首、不耗尝试次数，调用期间每 30 秒续租。
-  - 关键帧由 FFmpeg Worker 的 `frames` 取（宽 512、质量 3，第八版的设置），取帧与描述期间每 200 毫秒检查前台活动和内存压力，触发时挂断，任务退回原位。
+  - 关键帧由 FFmpeg Worker 的 `frames` 取（宽 512、质量 3，第八版的设置），取帧与描述期间每 200 毫秒问一次门控，挂断的条件见[成员在等的后台工作](#门控与三类工作)，挂断时任务退回原位。
   - 存进 `video_card_descriptions`（migration 20，带回滚）之前，用 `textread.MaskNumbers` 把每段文字里的身份证号、银行卡号、手机号与 15 位以上数字串换成 `[身份证号]` 一类标签，相册不保留原文。
   - 超出上下文（`invalid_input`）或回答不合 Schema（`invalid_result`）的卡片只把错误记在这张卡片上，同一段视频的其他卡片照常；Worker 崩溃、超时、取不到关键帧等临时故障按卡片最多尝试三次，之后记录该卡错误并继续；成员重试时重新处理失败卡片。回答的模板与相册认的不一致、号码过滤读不了回答，也只记在这张卡片上。原始文件打不开（不是“不存在”）记 `io`、耗一次尝试，三次后整个任务失败；启动时不重排失败的描述任务（一次尝试最长 15 分钟），相册没见过的读文字模型会重排。每条描述记下写入它的版本（Catalog 第 22 步，带回滚）：在别的版本下失败的卡片与过期的一样补排，所以每个新版本为仍被授权引用的视频、以及重新授权的视频，把失败的卡片各重试一次；描述成功的卡片不动，没有版本号时（开发与 Fake 模式）不重试。
   - 分析身份是读文字模型、`montage-card/v1`、体裁、关键帧设置、号码过滤版本、切卡身份与画质身份。更换读文字模型或在保留期内重新授权并请求分析时，补排缺失或过期的描述。

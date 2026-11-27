@@ -65,11 +65,12 @@ const categoryIcons: Record<ActivityCategory | "other", LucideIcon> = {
   storage: HardDrive,
   photo: Images,
   family: Activity,
+  workspace: Activity,
   system: CircleFadingArrowUp,
   other: Activity,
 };
 
-const categoryOrder: ActivityCategory[] = ["session", "account", "file", "storage", "photo", "family"];
+const categoryOrder: ActivityCategory[] = ["session", "account", "file", "storage", "photo", "family", "workspace"];
 // 系统 holds what administrators alone see, such as system updates.
 const adminCategoryOrder: ActivityCategory[] = [...categoryOrder, "system"];
 
@@ -82,6 +83,7 @@ const unavailableLabels: Record<ActivityCategory, string> = {
   storage: "存储",
   photo: "相册",
   family: "家庭中心",
+  workspace: "共享工作区",
   system: "系统",
 };
 

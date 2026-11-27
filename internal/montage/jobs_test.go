@@ -222,6 +222,18 @@ func (c *compute) Fill(_ context.Context, request montage.FillRequest, vectors [
 	return montage.FillAnswer{Clips: clips}, nil
 }
 
+// Likeness is how many of the dimensions both beats' first windows share.
+func (c *compute) Likeness(_ context.Context, a, b []float32, dimensions int) (float64, error) {
+	if dimensions <= 0 || len(a) < dimensions || len(b) < dimensions {
+		return 0, fmt.Errorf("%w: no windows", montage.ErrWorkerRefused)
+	}
+	var dot float64
+	for d := range dimensions {
+		dot += float64(a[d] * b[d])
+	}
+	return dot, nil
+}
+
 // PlanBrief briefs either step with a schema that wants a non-empty list of
 // parts, each a name of at most the catalog's card ids. As the Worker's
 // plan_brief, it reads each card's beats by their number among the card's
@@ -536,6 +548,10 @@ func TestAJobMakesAFilmAndSavesItOnce(t *testing.T) {
 	}
 	if env.jobFiles(job.ID) {
 		t.Fatal("the job's files outlived it")
+	}
+	// The version keeps the timeline it was made from, for editing it (#596).
+	if n := env.store.Count(t, "SELECT COUNT(*) FROM versions WHERE job_id = ? AND json_array_length(timeline_json, '$.clips') = 2", job.ID); n != 1 {
+		t.Fatalf("%d versions keep their timeline", n)
 	}
 	notices, err := env.store.Notices(ctx, "user:alice")
 	if err != nil || len(notices) != 1 || notices[0].Kind != "saved" || notices[0].FilmID != done.Version.FilmAssetID {
@@ -956,27 +972,35 @@ func TestAGenerateKeyCannotReferToAnotherProject(t *testing.T) {
 	}
 }
 
-func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
-	ctx := t.Context()
-	env := newJobEnv(t)
-	if err := env.store.Close(); err != nil {
+// ownSongs reopens the store with its own songs, decoded by a stand-in FFmpeg
+// worker, and returns how to give the project one.
+func (e *jobEnv) ownSongs(t *testing.T) func(name string) montage.SongDetail {
+	t.Helper()
+	if err := e.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := montage.Open(ctx, env.root, montage.Options{Grants: env.lib, Media: &songMedia{}, JobCompute: env.compute, Editing: env.editing, Planner: env.planner})
+	store, err := montage.Open(t.Context(), e.root, montage.Options{Grants: e.lib, Media: &songMedia{}, JobCompute: e.compute, Editing: e.editing, Planner: e.planner})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	env.store = store
-	put := func(name string) montage.SongDetail {
+	e.store = store
+	return func(name string) montage.SongDetail {
 		t.Helper()
-		song, err := store.PutSong(ctx, "user:alice", env.project.ID, montage.SongSource{Title: name},
+		song, err := store.PutSong(t.Context(), "user:alice", e.project.ID, montage.SongSource{Title: name},
 			strings.NewReader("song 200 "+name))
 		if err != nil {
 			t.Fatal(err)
 		}
 		return song
 	}
+}
+
+func TestReplacingASongKeepsTheActiveJobsCopyUntilCancellation(t *testing.T) {
+	ctx := t.Context()
+	env := newJobEnv(t)
+	put := env.ownSongs(t)
+	store := env.store
 	first := put("original")
 	job := env.generate(t, "first")
 	put("replacement")
@@ -1264,6 +1288,44 @@ func TestVideosWithoutCardsLeaveNothingToCutFrom(t *testing.T) {
 	needs := env.settle(t, env.generate(t, "first").ID)
 	if needs.State != montage.JobNeedsInput || needs.WaitReason != montage.NeedNoFootage || needs.Step != "catalog" || env.planner.picks != 0 {
 		t.Fatalf("job = %+v, picks = %d", needs, env.planner.picks)
+	}
+}
+
+// An analysis that goes stale between the lookup and the read, as when the
+// photo library makes the windows again for a new model, is waited for
+// again: the library leaves out what is no longer current, and planning
+// from what is left would miss the video's cards (#584).
+func TestAnalysisInvalidatedAfterLookupWaits(t *testing.T) {
+	for name, stale := range map[string]func(*photos.GrantAnalysis){
+		"windows": func(analysis *photos.GrantAnalysis) {
+			analysis.Windows, analysis.Identity = photos.AnalysisQueued, ""
+		},
+		"cards": func(analysis *photos.GrantAnalysis) {
+			analysis.Cards, analysis.CardsIdentity, analysis.CardList = photos.AnalysisQueued, "", nil
+		},
+		"quality": func(analysis *photos.GrantAnalysis) {
+			analysis.Quality, analysis.QualityIdentity = photos.AnalysisQueued, ""
+		},
+		"descriptions": func(analysis *photos.GrantAnalysis) {
+			analysis.Described, analysis.DescriptionsIdentity, analysis.Descriptions = photos.AnalysisQueued, "", nil
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := newJobEnv(t)
+			env.lib.set(func() {
+				env.lib.described = func(_ string, analysis *photos.GrantAnalysis) { stale(analysis) }
+			})
+			job := env.generate(t, "first")
+			waiting := env.settle(t, job.ID)
+			if waiting.State != montage.JobWaiting || waiting.WaitReason != montage.WaitAnalysis || waiting.Step == "catalog" || env.planner.picks != 0 {
+				t.Fatalf("job = %+v, picks = %d", waiting, env.planner.picks)
+			}
+			env.lib.set(func() { env.lib.described = nil })
+			env.clock.advance(time.Minute)
+			if done := env.settle(t, job.ID); done.State != montage.JobDone {
+				t.Fatalf("job = %+v", done)
+			}
+		})
 	}
 }
 

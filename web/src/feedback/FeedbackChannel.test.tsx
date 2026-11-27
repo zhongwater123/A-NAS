@@ -84,9 +84,10 @@ afterEach(() => {
   forgetPeople();
 });
 
+// The panel's code loads the first time it opens, so it shows a moment after the click.
 async function openPanel(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /^问题反馈(，\d+ 条待处理)?$/ }));
-  return screen.getByRole("dialog", { name: "问题反馈" });
+  return screen.findByRole("dialog", { name: "问题反馈" });
 }
 
 describe("问题反馈", () => {

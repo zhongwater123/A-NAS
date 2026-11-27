@@ -13,12 +13,14 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 | `styles/` | 全局样式：`index.css` 声明层顺序并引入其余文件；`tokens.css` 是[令牌](#令牌)；`base.css` 是重置；`utilities.css` 是各窗口共用、尚未做成 `ui/` 组件的几个类 |
 | `api/` | `client.ts`：生成客户端的封装，包括请求、`APIError`、CSRF、写入闸门与带进度的上传；`errorMessages.ts`：错误码到文案的表（[规格](../specs/web-errors-and-time.md)） |
 | `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts`，样式在 `desktop.module.css`（开机画面与根错误边界的兜底页也用它） |
-| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`、`todos`（家庭待办，另有外壳上的待办提醒）、`scoring`（可移除模块照片打分，模块未安装时不显示）；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
+| 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`、`todos`（家庭待办，另有外壳上的待办提醒）、`scoring`（可移除模块照片打分，模块未安装时不显示）、`workspace`（共享工作区，管理员加入的成员才显示；隔离框架里的辅助脚本在 `workspace/frame/`，由 `vite.frame.config.ts` 单独构建）；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
 | 领域目录 | 不是窗口的领域：`auth`（登录与会话，登录画面的样式在 `auth.module.css`）、`people`（各账号的名字与头像）、`boot`（开机画面） |
-| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、家庭中心与待办共用的表单对话框（`modal`，挂到调用方给出的容器里）、列表行末的“更多操作”菜单（`RowMenu`）、各功能留在桌面上的提示（`DeskNotice`，桌面把它们上下排开）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
-| `lib/` | 不依赖 React 与接口的函数：容量、时间、纯日期与人民币金额的格式化，文件名与类型、剪贴板、读取拖入的文件、只在窗口的滚动区内滚到某一项（`scroll`） |
+| `ui/` | 不认识任何功能的共享组件、钩子与样式：窗口内的对话框与提示（`feedback`）、家庭中心与待办共用的表单对话框（`modal`，挂到调用方给出的容器里）、列表行末的“更多操作”菜单（`RowMenu`）、各功能留在桌面上的提示（`DeskNotice`，桌面把它们上下排开）、文件查看器的外框（`viewer`）、备份中心与回收站共用的工作区部件（`workspace`）、存进 localStorage 的状态（`useStoredState`）、窗口最小化时停止轮询（`useWindowShown`）、按需加载组件（`lazyCode`）。从功能移来的部件暂时保留原来的类名前缀 |
+| `lib/` | 不依赖 React 与接口的函数：容量、时间、纯日期与人民币金额的格式化，文件名与类型、剪贴板、读取拖入的文件、只在窗口的滚动区内滚到某一项（`scroll`）、页面是否开在本机屏幕上、屏保是否盖住页面（`localConsole`） |
 | `test/` | 测试基础设施：按领域的请求处理器、测试数据与渲染帮助函数 |
 | `assets/` | 静态图片 |
+
+第二个网页入口是 `web/workspace.html`（`src/workspace/tab.tsx`）：共享工作区的一个页面单独占一个浏览器标签页，`internal/webui` 在 `/workspace/{pageId}` 返回它。它只加载这个页面要的代码，不加载桌面，也不计入首屏体积（[共享工作区技术设计](shared-workspace.md#页面的标签页)）。
 
 功能目录内部：
 
@@ -134,7 +136,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 - 计入的文件从 Vite 的 manifest（`.vite/manifest.json`）读出：`index.html` 加载的块、它们导入的块、这些块的样式，以及响应校验函数的块。
 - 响应校验函数是单独的块，页面一开始就在第一个请求旁下载它，所以也计入：第一个请求（设置状态）就要校验。下载失败时，等它的响应失败，下一个响应重新下载。
 - 窗口的代码不计入：首次打开时才加载。
-- 外壳一开始就显示的部件不导入窗口的样式模块，否则整个窗口的样式进入首屏；它们用自己的小模块，例如 `transfers/notices.module.css`、`shares/toasts.module.css`。
+- 外壳一开始就显示的部件不导入窗口的样式模块，否则整个窗口的样式进入首屏；它们用自己的小模块，例如 `transfers/notices.module.css`、`shares/toasts.module.css`。问题反馈在首屏只有按钮（`feedback/feedbackButton.module.css`），面板第一次打开时才加载；屏保只在本机屏幕上加载，桌面与共享页面的标签页都是（`desktop/DeviceScreenSaver.tsx`）。
 - 只有每次访问都需要的内容才能让上限上调，并在 PR 中写明原因。
 - JavaScript 上限 2026-10-30 从 170 kB 放宽到 200 kB，给桌面外壳留出余量（[决定](../decisions/2026-10-30-desktop-js-budget.md)）。
 

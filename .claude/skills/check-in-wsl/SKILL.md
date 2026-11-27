@@ -1,11 +1,11 @@
 ---
 name: check-in-wsl
-description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check 的全部检查）。Go、Node 与 gcc 只装在 WSL 中，而在 /mnt 下的 Windows 盘上跑时 vitest worker 会超时，所以先把检出复制到 WSL 自己的 ext4 目录再运行。Go 代码、构建、CI 或跨模块契约变更后，或用户要求跑 make check 时使用。
+description: 在 Windows 开发机的 WSL 中运行 A-NAS 的完整门禁（make check 的全部检查）。Go、Node 与 gcc 只装在 WSL 中，而在 /mnt 下的 Windows 盘上跑时 vitest worker 会超时，所以先把检出复制到 WSL 自己的 ext4 目录再运行。共享开发服务器连不上，或要在本机复现服务器上的失败时使用；平常用 check-on-shared-server。
 ---
 
 # 在 WSL 的 ext4 副本中运行门禁
 
-什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[Windows 与 WSL 环境](../../../docs/development/environments/windows.md)。
+完整门禁默认在共享开发服务器上跑（[check-on-shared-server](../check-on-shared-server/SKILL.md)），本技能是服务器连不上时的备用。什么变更跑什么检查以 [AGENTS.md](../../../AGENTS.md#验证) 为准；工具链与两台开发机的差异见[Windows 与 WSL 环境](../../../docs/development/environments/windows.md)。
 
 ## 为什么用副本
 
@@ -22,6 +22,7 @@ description: 在 Windows 开发机上运行 A-NAS 的完整门禁（make check �
 - 持有锁的门禁限时 90 分钟，`pip-audit` 限时 10 分钟（它曾因 DNS 卡住 14 小时），一个卡住的门禁不会挡住后面的会话太久。进程结束，锁就释放，不用手动清理。
 - [system-test](../system-test/SKILL.md) 沿用这段脚本，也在同一把锁下排队。单独跑的 `go test -race` 整包测试同样先取锁：把命令放在脚本里取锁那两行之后。
 - 只跑一个 vitest 文件或一个 Go 包时，不用取锁。
+- 一个门禁自己同时跑几个目标（[并行](../../../docs/development/testing.md#并行)）。下面的脚本给 `CHECK_JOBS=2`：WSL 默认只有主机一半的内存，2026-11-25 开发机 B 上同时跑 4 个目标时 WSL 已用内存峰值 7112 MiB（共 7670 MiB），一条平时 3 秒的 Web 用例超过了 20 秒；2 个时峰值 3839 MiB，全程约 4 分钟。
 
 ## 步骤
 
@@ -43,7 +44,7 @@ echo "$(basename "$dst") since $(date +%T)" > ~/anas-check/.gate.holder
 # The vector index tests run the pinned Qdrant (docs/development/testing.md).
 bash scripts/fetch-qdrant.sh >/dev/null
 export ANAS_QDRANT_REQUIRED=1
-if timeout 90m make -k check-steps PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
+if timeout 90m make -k check-steps CHECK_JOBS=2 PIP_AUDIT="timeout 600 pip-audit" > "$dst.log" 2>&1; then echo "PASS (log: $dst.log)"; else tail -n 80 "$dst.log"; echo "FAIL (log: $dst.log)"; exit 1; fi
 EOF
 ```
 
