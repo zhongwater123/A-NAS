@@ -514,7 +514,7 @@ describe("ScoringPanel for a rater", () => {
     // Handlers are tried in order: this one first, falling through until the original is gone.
     server.use(
       http.untyped.get("/api/v1/modules/scoring/claims/:token/full", () =>
-        gone ? new HttpResponse(null, { status: 410 }) : undefined,
+        gone ? HttpResponse.json(apiError("original_changed"), { status: 410 }) : undefined,
       ),
       ...handlers,
     );
@@ -589,7 +589,7 @@ describe("ScoringPanel for an administrator", () => {
           adminBatch({
             name: body.name,
             state: "importing",
-            import: { files: 0, imported: 0, skipped: 0, skippedBy: [] },
+            import: { files: 0, imported: 0, skipped: 0, skippedBy: [], waitingForSpace: false },
             answers: 0,
           }),
         );
@@ -681,6 +681,30 @@ describe("ScoringPanel for an administrator", () => {
     expect(await screen.findByText("正在读取文件夹")).toBeTruthy();
   });
 
+  it("says when an import waits for space on the data volume", async () => {
+    server.use(
+      http.get("/api/v1/modules/scoring/admin/batches", ({ response }) =>
+        response(200).json({
+          items: [
+            adminBatch({
+              state: "importing",
+              import: { files: 160, imported: 40, skipped: 2, skippedBy: [], waitingForSpace: true },
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/v1/modules/scoring/admin/batches/{batchId}/stats", ({ response }) =>
+        response(200).json({ items: [] }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<ScoringPanel userId="user:owner" access={{ admin: true, rater: false }} />);
+    const row = await screen.findByRole("button", { name: /风景第一批/ });
+    expect(row.textContent).toContain("空间不足，导入已暂停");
+    await user.click(row);
+    expect((await screen.findByText(/腾出空间后自动继续/)).textContent).toContain("已处理 42 / 160 个文件");
+  });
+
   it("shows a batch's coverage and each rater's statistics, and closes it", async () => {
     let state: "open" | "closed" = "open";
     server.use(
@@ -697,6 +721,7 @@ describe("ScoringPanel for an administrator", () => {
                   { reason: "too_small", count: 40 },
                   { reason: "unsupported_type", count: 2 },
                 ],
+                waitingForSpace: false,
               },
             }),
           ],
@@ -859,5 +884,46 @@ describe("the stage's outbox", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("says when it waits for space on the data volume, not for the connection", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { Outbox } = await import("./model");
+      const { retryable } = await import("./api");
+      const { APIError } = await import("../api/client");
+      let full = true;
+      const outbox = new Outbox(
+        async () => {
+          if (full) throw new APIError(507, "insufficient_storage");
+          return 1;
+        },
+        retryable,
+        () => undefined,
+      );
+      outbox.push({ token: "a", body: { submission: "aaaaaaaa", kind: "skip", viewMs: 1 } });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(outbox.current()).toMatchObject({ waiting: 1, retrying: true, noSpace: true });
+      full = false;
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(outbox.current()).toMatchObject({ waiting: 0, retrying: false, noSpace: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the 100% view", () => {
+  it("tells why the server refused it", async () => {
+    const { fetchFull } = await import("./api");
+    let refusal: [number, string] = [507, "insufficient_storage"];
+    server.use(
+      http.untyped.get("/api/v1/modules/scoring/claims/:token/full", () =>
+        HttpResponse.json(apiError(refusal[1]), { status: refusal[0] }),
+      ),
+    );
+    await expect(fetchFull("t1")).rejects.toThrow("数据卷剩余空间不足");
+    refusal = [410, "original_changed"];
+    await expect(fetchFull("t1")).rejects.toThrow("原图已不在，或已不是导入时的照片");
   });
 });

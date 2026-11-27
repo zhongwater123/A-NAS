@@ -6,7 +6,7 @@ import { Authentication, AuthMode } from "./auth/Authentication";
 import { currentSession, getSetupStatus, logout } from "./auth/api";
 import { PasswordChange } from "./auth/PasswordChange";
 import { Desktop } from "./desktop/Desktop";
-import { isLocalConsole, LocalConsoleScreenSaver } from "./desktop/LocalConsoleScreenSaver";
+import { DeviceScreenSaver } from "./desktop/DeviceScreenSaver";
 import { transferStore } from "./transfers/store";
 import "./styles/index.css";
 import "./desktop/desktop.module.css";
@@ -80,7 +80,7 @@ export default function App() {
         />
       )}
       {/* The sign-in pages have no screen saver but still go black. */}
-      <LocalConsoleScreenSaver enabled={isLocalConsole()} videos={signedIn} />
+      <DeviceScreenSaver videos={signedIn} />
     </>
   );
 }

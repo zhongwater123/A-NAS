@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Serve the phone hotspot in a private network namespace, without a host route."""
 
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -18,10 +19,14 @@ from pathlib import Path
 
 RUNTIME = Path("/run/anas-phone-hotspot")
 TLS = Path("/etc/a-nas/phone-hotspot")
+PROFILE = Path("/var/lib/a-nas-host/phone-hotspot.json")
 NET = Path("/sys/class/net")
 SUBNET = ipaddress.IPv4Network("192.168.173.0/24")
 ADDRESS = SUBNET[1]
 HTTPS_PORT = 8443
+PORTAL_API = "/__anas_hotspot/capport"
+PORTAL_PAGE = "/__anas_hotspot/welcome"
+MAC_ADDRESS = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 TOOLS = {
     "ip": "/usr/sbin/ip",
     "iw": "/usr/sbin/iw",
@@ -178,11 +183,36 @@ def tls_host():
     return host
 
 
-def configure_radio(name, host, ssid, password):
+def hotspot_url(host):
+    return f"https://{host}:{HTTPS_PORT}"
+
+
+def hotspot_profile(mac):
+    try:
+        profile = json.loads(PROFILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        profile = {}
+    except (OSError, ValueError) as error:
+        raise HotspotError("invalid_settings") from error
+    if not isinstance(profile, dict):
+        raise HotspotError("invalid_settings")
+    ssid, password, portal = profile.get("ssid", ""), profile.get("password", ""), profile.get("portal", False)
+    if not isinstance(ssid, str) or not isinstance(password, str) or not isinstance(portal, bool):
+        raise HotspotError("invalid_settings")
+    return ssid or f"A-NAS-{mac.replace(':', '')[-6:].upper()}", password or secrets.token_hex(10), portal
+
+
+def configure_radio(name, host, ssid, password, portal):
+    portal_url = hotspot_url(host) + PORTAL_API
+    # DHCPv4 can carry no more than 255 octets in the portal option.
+    if portal and len(portal_url) > 255:
+        raise HotspotError("invalid_settings")
+    ssid_bytes = ssid.encode("utf-8")
+    key = hashlib.pbkdf2_hmac("sha1", password.encode("ascii"), ssid_bytes, 4096, dklen=32)
     write("hostapd.conf", f"""interface={name}
 driver=nl80211
 ctrl_interface={RUNTIME}/ctrl
-ssid={ssid}
+ssid2={ssid_bytes.hex()}
 hw_mode=g
 channel=6
 ieee80211n=1
@@ -191,8 +221,9 @@ ap_isolate=1
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
-wpa_passphrase={password}
+wpa_psk={key.hex()}
 """)
+    announcement = f"dhcp-option-force=114,{portal_url}\n" if portal else ""
     write("dnsmasq.conf", f"""interface={name}
 except-interface=lo
 bind-interfaces
@@ -203,12 +234,49 @@ host-record={host},{ADDRESS}
 dhcp-range={SUBNET[20]},{SUBNET[79]},255.255.255.0,1h
 dhcp-option=3
 dhcp-option=option:dns-server,{ADDRESS}
-leasefile-ro
+{announcement}dhcp-leasefile={RUNTIME}/dnsmasq.leases
 pid-file={RUNTIME}/dnsmasq.pid
 """)
 
 
-def configure_proxy(host):
+def portal_config(host):
+    base = hotspot_url(host)
+    status = json.dumps({"captive": True, "user-portal-url": base + PORTAL_PAGE})
+    welcome = f"""<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A-NAS 手机直连</title>
+<style>
+:root {{ color-scheme: light dark; font-family: system-ui, sans-serif; }}
+body {{ margin: 12vh auto 0; padding: 0 24px; max-width: 27rem; line-height: 1.6; }}
+a {{ display: inline-block; padding: 8px 0; font-weight: 600; overflow-wrap: anywhere; }}
+</style>
+<main><h1>A-NAS 手机直连</h1><p>此热点用于访问 NAS 和上传文件。</p>
+<p>请用 Safari 或 Chrome 登录并上传。如果系统窗口没有打开网页，可以复制下方地址。</p>
+<a href="{base}/">打开 WebOS</a>
+<p>{base}/</p></main></html>"""
+    # Caddy treats opening braces as placeholders. These bodies are literals.
+    status = status.replace("{", r"\{")
+    welcome = welcome.replace("{", r"\{")
+    return f"""
+    handle {PORTAL_API} {{
+        header Content-Type application/captive+json
+        header Cache-Control no-store
+        respond <<PORTAL_STATUS
+{status}
+PORTAL_STATUS
+    }}
+    handle {PORTAL_PAGE} {{
+        header Content-Type "text/html; charset=utf-8"
+        header Cache-Control no-store
+        header Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+        respond <<PORTAL_HTML
+{welcome}
+PORTAL_HTML
+    }}
+"""
+
+
+def configure_proxy(host, portal):
     # The existing Caddy system account reads just this instance's config and
     # credentials. The socket is the only way out of the Wi-Fi namespace.
     user = pwd.getpwnam("caddy")
@@ -226,6 +294,7 @@ def configure_proxy(host):
     data = web / "data"
     data.mkdir(mode=0o700)
     os.chown(data, user.pw_uid, user.pw_gid)
+    portal_routes = portal_config(host) if portal else ""
     config = web / "Caddyfile"
     config.write_text(f"""{{
     admin off
@@ -234,9 +303,11 @@ def configure_proxy(host):
 https://{host}:{HTTPS_PORT} {{
     bind {ADDRESS}
     tls {web}/fullchain.pem {web}/privkey.pem
-    reverse_proxy unix/{web}/upstream.sock
+{portal_routes}    handle {{
+        reverse_proxy unix/{web}/upstream.sock
+    }}
 }}
-""", encoding="ascii")
+""", encoding="utf-8")
     os.chown(config, 0, user.pw_gid)
     config.chmod(0o640)
     return web
@@ -247,6 +318,46 @@ def ap_enabled(name, namespace):
         "hostapd_cli", "-p", str(RUNTIME / "ctrl"), "-i", name, "status", namespace=namespace, check=False
     )
     return status.returncode == 0 and "state=ENABLED" in status.stdout.splitlines()
+
+
+def connected_devices(stations, leases, now):
+    # A DHCP lease may remain after disconnecting. Only authenticated stations
+    # from hostapd decide who is online.
+    associated = {}
+    mac = None
+    for line in stations.splitlines():
+        if MAC_ADDRESS.fullmatch(line):
+            mac = line
+        elif mac and line.startswith("flags=") and "[AUTHORIZED]" in line:
+            associated[mac] = {"mac": mac}
+            mac = None
+    for line in leases.splitlines():
+        fields = line.split()
+        if len(fields) != 5:
+            continue
+        expiry, mac, ip, hostname, _ = fields
+        if mac in associated and expiry.isdecimal() and (int(expiry) == 0 or int(expiry) > now):
+            associated[mac]["ip"] = ip
+            if hostname != "*":
+                associated[mac]["name"] = hostname
+    return sorted(associated.values(), key=lambda device: device["mac"])
+
+
+def publish_devices(name, namespace):
+    snapshot = RUNTIME / "devices.json"
+    try:
+        stations = command("hostapd_cli", "-p", str(RUNTIME / "ctrl"), "-i", name, "all_sta", namespace=namespace)
+        if stations.stdout.startswith("FAIL"):
+            snapshot.unlink(missing_ok=True)
+            return
+        leasefile = RUNTIME / "dnsmasq.leases"
+        try:
+            leases = leasefile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            leases = ""
+        write("devices.json", json.dumps(connected_devices(stations.stdout, leases, time.time())))
+    except (OSError, subprocess.SubprocessError):
+        snapshot.unlink(missing_ok=True)
 
 
 def check_web(host):
@@ -281,8 +392,8 @@ def ready():
         notify.sendto(b"READY=1", address)
 
 
-def publish_connection(host, ssid, password):
-    write("connection.json", json.dumps({"ssid": ssid, "password": password, "url": f"https://{host}:{HTTPS_PORT}/"}))
+def publish_connection(host, ssid, password, portal):
+    write("connection.json", json.dumps({"ssid": ssid, "password": password, "url": hotspot_url(host) + "/", "portal": portal}))
 
 
 def start_proxy(web, namespace):
@@ -306,10 +417,9 @@ def serve():
     radio, phy, mac = idle_radio()
     host = tls_host()
     name = radio.name
-    ssid = f"A-NAS-{mac.replace(':', '')[-6:].upper()}"
-    password = secrets.token_hex(10)
-    configure_radio(name, host, ssid, password)
-    web = configure_proxy(host)
+    ssid, password, portal = hotspot_profile(mac)
+    configure_radio(name, host, ssid, password, portal)
+    web = configure_proxy(host, portal)
     if command("dnsmasq", "--test", f"--conf-file={RUNTIME}/dnsmasq.conf", check=False).returncode:
         raise HotspotError("dhcp_failed")
 
@@ -360,7 +470,7 @@ def serve():
     time.sleep(1)
     if dhcp.poll() is not None:
         raise HotspotError("dhcp_failed")
-    publish_connection(host, ssid, password)
+    publish_connection(host, ssid, password, portal)
     ready()
     while True:
         if holder.poll() is not None:
@@ -371,6 +481,7 @@ def serve():
             raise HotspotError("ap_failed")
         if dhcp.poll() is not None:
             raise HotspotError("dhcp_failed")
+        publish_devices(name, namespace)
         time.sleep(2)
 
 
@@ -398,7 +509,7 @@ def cleanup():
     # Always remove connection details and TLS copies even if the USB radio
     # disappears in the middle of a command. Retain failed radio ownership.
     for name in ("connection.json", ".connection.json", "hostapd.conf", ".hostapd.conf", "dnsmasq.conf",
-                 ".dnsmasq.conf", "dnsmasq.pid"):
+                 ".dnsmasq.conf", "dnsmasq.pid", "dnsmasq.leases", "devices.json", ".devices.json"):
         try:
             (RUNTIME / name).unlink(missing_ok=True)
         except OSError as error:

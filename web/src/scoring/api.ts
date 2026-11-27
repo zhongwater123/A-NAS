@@ -1,7 +1,7 @@
 // Client for the photo scoring module (docs/specs/photo-scoring.md), which
 // the Product Service forwards to its own process (ADR 0037). A rater's calls
 // never return another rater's answers; administrators' are under /admin.
-import { APIError, call, client } from "../api/client";
+import { APIError, call, client, failure } from "../api/client";
 import { errorText } from "../api/errorMessages";
 import type {
   ScoringAnchor,
@@ -72,7 +72,10 @@ export async function fetchFull(claimToken: string): Promise<FullView> {
     credentials: "same-origin",
   });
   if (!response.ok) {
-    throw new Error(response.status === 410 ? "原图已不在，或已不是导入时的照片" : "现在看不了 100%");
+    // The server's error says why: the original changed, the data volume is
+    // at its reserve, the claim went back. Without one, the plain failure.
+    const refused = failure(response.status, await response.json().catch(() => undefined));
+    throw new Error(refused.code === "request_failed" ? "现在看不了 100%" : scoringError(refused));
   }
   const orientation = Number(response.headers.get("X-Image-Orientation")) || 1;
   const url = URL.createObjectURL(await response.blob());

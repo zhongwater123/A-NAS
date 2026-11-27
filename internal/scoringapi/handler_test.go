@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +47,8 @@ func (s sessions) ActiveProfiles(context.Context) ([]accounts.Profile, error) {
 type api struct {
 	t       *testing.T
 	handler http.Handler
+	// full stands for a data volume at its reserve.
+	full *atomic.Bool
 }
 
 func (a api) call(token, method, path string, body any) *httptest.ResponseRecorder {
@@ -99,8 +102,13 @@ func setup(t *testing.T) api {
 			t.Fatal(err)
 		}
 	}
-	// The test photos are small; any size will do.
-	store, err := scoring.Open(t.TempDir(), scoring.Options{PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), MinLongEdge: 1})
+	// The test photos are small; any size will do. The data volume is at
+	// its reserve only when a test says so, wherever its folder is.
+	full := &atomic.Bool{}
+	store, err := scoring.Open(t.TempDir(), scoring.Options{
+		PhotosDir: photos, Photos: filesystem.NewRootFileSystem(photos, false), MinLongEdge: 1,
+		Admits: func(string, int64) (bool, error) { return !full.Load(), nil },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +123,7 @@ func setup(t *testing.T) api {
 		"bob-token":   {UserID: "user:bob", Username: "bob", Role: accounts.RoleMember},
 		"carol-token": {UserID: "user:carol", Username: "carol", Role: accounts.RoleMember},
 	}
-	return api{t: t, handler: scoringapi.Start(ctx, store, directory, "test", nil)}
+	return api{t: t, handler: scoringapi.Start(ctx, store, directory, "test", nil), full: full}
 }
 
 type batchList struct {
@@ -289,7 +297,8 @@ func TestDimensionsTheFullViewAndTheExportsColumns(t *testing.T) {
 	if full.Code != http.StatusOK || full.Header().Get("Content-Type") != "image/jpeg" || full.Header().Get("X-Image-Orientation") != "1" {
 		t.Fatalf("full view: %d %v", full.Code, full.Header())
 	}
-	if code := a.call("bob-token", http.MethodGet, path+"/full", nil).Code; code != http.StatusNotFound {
+	// bob is not a rater here, so he is turned away before any claim.
+	if code := a.call("bob-token", http.MethodGet, path+"/full", nil).Code; code != http.StatusForbidden {
 		t.Fatalf("bob's full view of alice's photo: %d", code)
 	}
 	patch := a.call("admin-token", http.MethodPatch, scoringapi.AdminPrefix+"/batches/"+batch, map[string]any{"dimensions": []string{"overall"}})
@@ -382,5 +391,48 @@ func TestBatchesTellRatersTheirScaleAndTakeOnlyItsScores(t *testing.T) {
 	}
 	if code := a.call("admin-token", http.MethodPatch, batches+"/"+batch, map[string]any{"scale": "three"}).Code; code != http.StatusConflict {
 		t.Fatalf("changing the scale of a scored batch: %d", code)
+	}
+}
+
+func TestAtTheReserveRatersAreToldWhyAndARemovedRaterSeesNoPhoto(t *testing.T) {
+	a := setup(t)
+	batch := a.createOpen(map[string]any{"name": "第一批", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"}})
+	if code := a.call("admin-token", http.MethodPut, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("choosing alice: %d", code)
+	}
+	claims := decode[struct {
+		Items []struct{ Token string } `json:"items"`
+	}](t, a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil))
+	if len(claims.Items) == 0 {
+		t.Fatal("alice holds no photo")
+	}
+	token := claims.Items[0].Token
+
+	a.full.Store(true)
+	rating := map[string]any{"submission": "alice-full-1", "kind": "score", "score": 3, "viewMs": 900}
+	for name, call := range map[string]*httptest.ResponseRecorder{
+		"claim":  a.call("alice-token", http.MethodPost, scoringapi.PathPrefix+"/batches/"+batch+"/claims", nil),
+		"rating": a.call("alice-token", http.MethodPut, scoringapi.PathPrefix+"/claims/"+token+"/rating", rating),
+		"batch": a.call("admin-token", http.MethodPost, scoringapi.AdminPrefix+"/batches",
+			map[string]any{"name": "又一批", "source": "第一批", "required": 1, "rubric": "", "dimensions": []string{"overall"}}),
+	} {
+		if call.Code != http.StatusInsufficientStorage || !strings.Contains(call.Body.String(), `"insufficient_storage"`) {
+			t.Fatalf("%s at the reserve: %d %s", name, call.Code, call.Body)
+		}
+	}
+	a.full.Store(false)
+	if code := a.call("alice-token", http.MethodPut, scoringapi.PathPrefix+"/claims/"+token+"/rating", rating).Code; code != http.StatusOK {
+		t.Fatalf("the answer once space is freed: %d", code)
+	}
+
+	// Taken off the raters, alice keeps no way to the photos, not even the
+	// one she answered.
+	if code := a.call("admin-token", http.MethodDelete, scoringapi.AdminPrefix+"/raters/user:alice", nil).Code; code != http.StatusNoContent {
+		t.Fatalf("removing alice: %d", code)
+	}
+	for _, path := range []string{"/image", "/thumbnail", "/full"} {
+		if code := a.call("alice-token", http.MethodGet, scoringapi.PathPrefix+"/claims/"+token+path, nil).Code; code != http.StatusForbidden {
+			t.Fatalf("%s for a removed rater: %d", path, code)
+		}
 	}
 }

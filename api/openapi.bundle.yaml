@@ -1898,6 +1898,36 @@ paths:
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
+  /api/v1/network/phone-hotspot/settings:
+    put:
+      operationId: savePhoneHotspotSettings
+      x-anas-posture: admin
+      summary: Save settings for the next time the phone hotspot starts
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneHotspotSettingsChange'
+      responses:
+        '200':
+          description: Saved settings without the password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneHotspotSettings'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '413':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/web-search/query:
     post:
       operationId: searchWeb
@@ -4075,7 +4105,7 @@ paths:
       - $ref: '#/components/parameters/WorkspacePageID'
     get:
       operationId: getWorkspacePage
-      summary: A page with all its versions, newest first. The desktop reads it every 3 seconds while the page is open, to follow new versions
+      summary: A page with all its versions, newest first, and who has it open. The page's tab reads it every 3 seconds while it can be seen, to follow new versions and who is there
       responses:
         '200':
           description: The page
@@ -4226,7 +4256,7 @@ paths:
   /api/v1/workspace/viewing:
     put:
       operationId: setWorkspaceViewing
-      summary: The page and version the caller's desktop shows, for the caller's agents to read (workspace_context). Kept in memory only
+      summary: 'The page and version one of the caller''s tabs shows: the tab the caller used last is the page their agents read (workspace_context), and every member sees who has a page open (presence). Kept in memory only; a tab says it again every minute while it can be seen and it lapses after 3 minutes without. A report whose seq is not above the tab''s last, its closing included, changes nothing. No tab name or seq is 400 invalid_request'
       parameters:
         - $ref: '#/components/parameters/CSRFToken'
       requestBody:
@@ -4238,9 +4268,39 @@ paths:
       responses:
         '204':
           description: Recorded
+        '400':
+          $ref: '#/components/responses/ProductError'
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/workspace/viewing/{tab}:
+    parameters:
+      - name: tab
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The tab's name as it reported itself
+    delete:
+      operationId: clearWorkspaceViewing
+      summary: This tab of the caller's closed or went to the background; the caller's other tabs stay. A seq not above the tab's last report changes nothing, and a report with a lower seq that arrives later does not open the tab again. No seq is 400 invalid_request
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+        - name: seq
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+          description: The tab's count of its reports, as in WorkspaceViewing
+      responses:
+        '204':
+          description: Forgotten
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
           $ref: '#/components/responses/ProductError'
   /api/v1/workspace/selection:
     put:
@@ -5435,10 +5495,13 @@ paths:
           $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/claims/{token}/image:
     get:
       operationId: getScoringClaimImage
-      summary: The preview behind one of the caller's own claims, answered or not
+      summary: The preview behind one of the caller's own claims while the caller holds it or has an answer for it in force
+      description: 'A claim whose lease ended unanswered went back to the batch: not_found (404). A member no longer chosen as a rater gets not_rater (403) for every claim.'
       parameters:
         - $ref: '#/components/parameters/ScoringClaimToken'
       responses:
@@ -5449,13 +5512,15 @@ paths:
               schema:
                 type: string
                 format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/claims/{token}/full:
     get:
       operationId: getScoringClaimFull
       summary: The photo behind one of the caller's own claims at its full size, which the window shows at 100%
-      description: Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported.
+      description: Decoded from the original and encoded again as a JPEG without any of its metadata, in the original's stored orientation; X-Image-Orientation (1 to 8, EXIF) tells how to turn it upright. original_changed (410) when the original is gone or no longer the photo that was imported. The caller sees it on the same terms as the preview; insufficient_storage (507) when rendering it would take the data volume below its reserve.
       parameters:
         - $ref: '#/components/parameters/ScoringClaimToken'
       responses:
@@ -5473,14 +5538,18 @@ paths:
               schema:
                 type: string
                 format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
           $ref: '#/components/responses/ProductError'
         '410':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/claims/{token}/thumbnail:
     get:
       operationId: getScoringClaimThumbnail
-      summary: A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims
+      summary: A small JPEG, at most 320 px on its longer side, of the photo behind one of the caller's own claims, on the same terms as the preview
       parameters:
         - $ref: '#/components/parameters/ScoringClaimToken'
       responses:
@@ -5491,7 +5560,11 @@ paths:
               schema:
                 type: string
                 format: binary
+        '403':
+          $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/claims/{token}/rating:
     put:
@@ -5529,6 +5602,8 @@ paths:
         '409':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/admin/sources:
     get:
@@ -5656,6 +5731,8 @@ paths:
           $ref: '#/components/responses/ProductError'
         '422':
           $ref: '#/components/responses/ProductError'
+        '507':
+          $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/admin/batches/{batchId}:
     parameters:
       - $ref: '#/components/parameters/ScoringBatchID'
@@ -5747,6 +5824,8 @@ paths:
         '403':
           $ref: '#/components/responses/ProductError'
         '404':
+          $ref: '#/components/responses/ProductError'
+        '507':
           $ref: '#/components/responses/ProductError'
   /api/v1/modules/scoring/admin/batches/{batchId}/export:
     get:
@@ -12707,6 +12786,26 @@ components:
             - isolation_failed
             - cleanup_failed
             - service_failed
+            - invalid_settings
+        settings:
+          $ref: '#/components/schemas/PhoneHotspotSettings'
+        settingsInvalid:
+          type: boolean
+          description: The saved settings could not be read. An administrator can replace them by saving new settings.
+        devices:
+          description: Devices authenticated to the active Wi-Fi network. Omitted when unavailable. An empty list means no devices are connected.
+          type: array
+          items:
+            type: object
+            required:
+              - mac
+            properties:
+              mac:
+                type: string
+              ip:
+                type: string
+              name:
+                type: string
         connection:
           description: Present when the hotspot is on. The response is not cacheable.
           type: object
@@ -12721,6 +12820,9 @@ components:
               type: string
             url:
               type: string
+            portal:
+              type: boolean
+              description: Whether this running hotspot advertises a WebOS portal
     PhoneHotspotRequest:
       type: object
       additionalProperties: false
@@ -14911,11 +15013,15 @@ components:
             - imported
             - skipped
             - skippedBy
+            - waitingForSpace
           properties:
             files:
               type: integer
               minimum: 0
               description: Files found in the folder; 0 until it was scanned.
+            waitingForSpace:
+              type: boolean
+              description: The import is paused because the data volume is at its reserve; it goes on by itself once space is freed.
             imported:
               type: integer
               minimum: 0
@@ -18133,6 +18239,34 @@ components:
           type: integer
           format: int64
           minimum: 0
+    PhoneHotspotSettings:
+      type: object
+      required:
+        - ssid
+        - passwordConfigured
+        - portal
+      properties:
+        ssid:
+          type: string
+          description: Empty selects the device's default hotspot name
+        passwordConfigured:
+          type: boolean
+        portal:
+          type: boolean
+    PhoneHotspotSettingsChange:
+      type: object
+      additionalProperties: false
+      properties:
+        ssid:
+          type: string
+          description: At most 32 UTF-8 bytes, enforced by the server. Nonempty names cannot consist entirely of whitespace or contain Unicode control characters. Empty restores the device's default name.
+        password:
+          type: string
+          description: Omit to retain the saved password. Empty restores a fresh random password on each start.
+          pattern: ^(?:[ -~]{8,63})?$
+        portal:
+          type: boolean
+          description: Advertise the WebOS entry via the mobile system's network sign-in prompt
     SystemUpdateImage:
       type: object
       additionalProperties: false
@@ -18254,6 +18388,66 @@ components:
         savedAt:
           type: string
           format: date-time
+    WorkspaceViewer:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - version
+        - since
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        version:
+          type: integer
+          minimum: 1
+          description: What the member's tab used last shows.
+        since:
+          type: string
+          format: date-time
+          description: When the first of the member's tabs began to show the page.
+    WorkspaceAgentWork:
+      type: object
+      additionalProperties: false
+      required:
+        - member
+        - via
+        - action
+        - version
+        - at
+      description: What one of a member's agents last read or downloaded of the page, for 10 minutes or until it saves the page.
+      properties:
+        member:
+          $ref: '#/components/schemas/WorkspacePerson'
+        via:
+          $ref: '#/components/schemas/WorkspaceVia'
+        action:
+          type: string
+          enum:
+            - read
+            - download
+        version:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+    WorkspacePresence:
+      type: object
+      additionalProperties: false
+      required:
+        - viewers
+        - agents
+      description: Who has the page open now, in the order they opened it, and whose agents are at work on it, newest first. Kept in memory only.
+      properties:
+        viewers:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceViewer'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceAgentWork'
     WorkspacePageSummary:
       type: object
       additionalProperties: false
@@ -18263,6 +18457,7 @@ components:
         - createdBy
         - createdAt
         - latest
+        - presence
       properties:
         id:
           type: string
@@ -18275,6 +18470,8 @@ components:
           format: date-time
         latest:
           $ref: '#/components/schemas/WorkspaceVersion'
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageList:
       type: object
       additionalProperties: false
@@ -18295,6 +18492,7 @@ components:
         - createdAt
         - latest
         - versions
+        - presence
       properties:
         id:
           type: string
@@ -18312,6 +18510,8 @@ components:
           items:
             $ref: '#/components/schemas/WorkspaceVersion'
           description: Newest first
+        presence:
+          $ref: '#/components/schemas/WorkspacePresence'
     WorkspacePageChanged:
       type: object
       additionalProperties: false
@@ -18329,12 +18529,27 @@ components:
       required:
         - pageId
         - version
+        - tab
+        - focused
+        - seq
       properties:
         pageId:
           type: string
         version:
           type: integer
           minimum: 1
+        tab:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,64}$
+          description: A name the tab made for itself when it opened, random.
+        focused:
+          type: boolean
+          description: 'Whether the tab has the focus: the tab focused last is the one the member uses.'
+        seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 'The tab''s count of its reports, its closing included: requests can arrive out of order, and one older than the tab''s last changes nothing.'
     WorkspaceRect:
       type: object
       additionalProperties: false

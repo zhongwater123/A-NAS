@@ -33,6 +33,26 @@ func (e *Executor) hasHotspotTools() (bool, error) {
 }
 
 func (e *Executor) PhoneHotspot(ctx context.Context) (phonehotspot.State, error) {
+	state, err := e.phoneHotspotState(ctx)
+	if err != nil {
+		return state, err
+	}
+	return e.withHotspotSettings(ctx, state), nil
+}
+
+func (e *Executor) withHotspotSettings(ctx context.Context, state phonehotspot.State) phonehotspot.State {
+	profile, err := e.hotspotProfile()
+	if err != nil {
+		e.logger.WarnContext(ctx, "cannot read saved phone hotspot settings", "error", err)
+		state.SettingsInvalid = true
+		return state
+	}
+	settings := profile.Settings()
+	state.Settings = &settings
+	return state
+}
+
+func (e *Executor) phoneHotspotState(ctx context.Context) (phonehotspot.State, error) {
 	out, err := e.runner.Output(ctx, "systemctl", []string{"show", "--property=ActiveState", "--value", phoneHotspotUnit}, "")
 	if err != nil {
 		return phonehotspot.State{}, commandError("read the phone hotspot service", err, out)
@@ -58,12 +78,18 @@ func (e *Executor) PhoneHotspot(ctx context.Context) (phonehotspot.State, error)
 		if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil {
 			return phonehotspot.State{}, errors.New("invalid phone hotspot HTTPS address")
 		}
-		return phonehotspot.State{State: phonehotspot.On, Connection: &connection}, nil
+		state := phonehotspot.State{State: phonehotspot.On, Connection: &connection}
+		var devices []phonehotspot.Device
+		if data, err := os.ReadFile(e.hotspotFile("run", "anas-phone-hotspot", "devices.json")); err == nil &&
+			json.Unmarshal(data, &devices) == nil {
+			state.Devices = devices
+		}
+		return state, nil
 	case "failed":
 		reason, _ := os.ReadFile(e.hotspotFile("run", "anas-phone-hotspot", "reason"))
 		switch code := strings.TrimSpace(string(reason)); code {
 		case "dependencies_missing", "no_wired_uplink", "no_idle_radio", "ap_failed", "dhcp_failed",
-			"web_unavailable", "tls_unavailable", "isolation_failed", "cleanup_failed":
+			"web_unavailable", "tls_unavailable", "isolation_failed", "cleanup_failed", "invalid_settings":
 			return phonehotspot.State{State: phonehotspot.Failed, Reason: code}, nil
 		}
 		return phonehotspot.State{State: phonehotspot.Failed, Reason: "service_failed"}, nil
@@ -79,6 +105,54 @@ func (e *Executor) PhoneHotspot(ctx context.Context) (phonehotspot.State, error)
 	}
 }
 
+func (e *Executor) hotspotProfilePath() string {
+	return e.hotspotFile("var", "lib", stateDirectoryName, "phone-hotspot.json")
+}
+
+func (e *Executor) hotspotProfile() (phonehotspot.Profile, error) {
+	data, err := readStateFile(e.hotspotProfilePath(), e.stateOwner)
+	if errors.Is(err, os.ErrNotExist) {
+		return phonehotspot.Profile{}, nil
+	}
+	if err != nil {
+		return phonehotspot.Profile{}, err
+	}
+	var profile *phonehotspot.Profile
+	if json.Unmarshal(data, &profile) != nil || profile == nil {
+		return phonehotspot.Profile{}, errors.New("invalid saved hotspot settings")
+	}
+	if err := (phonehotspot.SettingsChange{SSID: &profile.SSID, Password: &profile.Password}).Validate(); err != nil {
+		return phonehotspot.Profile{}, fmt.Errorf("invalid saved hotspot settings: %w", err)
+	}
+	return *profile, nil
+}
+
+func (e *Executor) SavePhoneHotspotSettings(ctx context.Context, change phonehotspot.SettingsChange) (phonehotspot.Settings, error) {
+	e.hotspotMu.Lock()
+	defer e.hotspotMu.Unlock()
+	path := e.hotspotProfilePath()
+	if err := ensureStateDirectory(filepath.Dir(path), e.stateOwner); err != nil {
+		return phonehotspot.Settings{}, err
+	}
+	profile, err := e.hotspotProfile()
+	if err != nil {
+		// The failed read returns an empty profile; replace it only on an explicit save.
+		e.logger.WarnContext(ctx, "replacing unreadable phone hotspot settings", "error", err)
+	}
+	if err := profile.Apply(change); err != nil {
+		return phonehotspot.Settings{}, err
+	}
+	//nolint:gosec // G117: this password is written only to the Host Agent's root-only state file, mode 0600.
+	data, err := json.Marshal(profile)
+	if err != nil {
+		return phonehotspot.Settings{}, err
+	}
+	if err := writeAtomic(path, data, 0o600); err != nil {
+		return phonehotspot.Settings{}, err
+	}
+	return profile.Settings(), nil
+}
+
 func (e *Executor) SetPhoneHotspot(ctx context.Context, enabled bool) (phonehotspot.State, error) {
 	action := "stop"
 	state := phonehotspot.Stopping
@@ -88,7 +162,7 @@ func (e *Executor) SetPhoneHotspot(ctx context.Context, enabled bool) (phonehots
 			return phonehotspot.State{}, err
 		}
 		if !installed {
-			return phonehotspot.State{State: phonehotspot.Unavailable, Reason: "dependencies_missing"}, nil
+			return e.withHotspotSettings(ctx, phonehotspot.State{State: phonehotspot.Unavailable, Reason: "dependencies_missing"}), nil
 		}
 		action, state = "start", phonehotspot.Starting
 	}
@@ -97,7 +171,7 @@ func (e *Executor) SetPhoneHotspot(ctx context.Context, enabled bool) (phonehots
 	if out, err := e.runner.Run(ctx, "systemctl", []string{action, "--no-block", phoneHotspotUnit}, ""); err != nil {
 		return phonehotspot.State{}, commandError(action+" the phone hotspot service", err, out)
 	}
-	return phonehotspot.State{State: state}, nil
+	return e.withHotspotSettings(ctx, phonehotspot.State{State: state}), nil
 }
 
 var _ phonehotspot.Switch = (*Executor)(nil)

@@ -67,6 +67,7 @@
 
 ## 边界与失败
 
+- 页面里嵌的框架（例如[共享工作区](shared-workspace.md)的页面）里的输入到不了外面的窗口。外面的窗口只认浏览器的用户激活：在框架里点按、触摸、按键或用触摸滚动算作输入；在框架里只移动鼠标或滚鼠标滚轮不算，三分钟后照常进入屏保。框架发来的消息不算，它出自页面自己的脚本。
 - `local-console=1` 只是显示模式标记，不是权限凭据；产品 API 和 Host Agent 权限边界不变。
 - 两种覆盖层都是 `<body>` 的直接子元素，不在页面根节点内；样式表据此在覆盖期间让其余部分 `content-visibility: hidden`。只盖一层不透明元素时，Chromium 仍会每帧渲染它下面的桌面（[调查](../investigations/2026-10-28-screensaver-video-cpu.md)）。
 - 视频由 Chromium 通过 VA-API 硬件解码，宿主机要装 GPU 的 VA-API 驱动，见[本地控制台运行手册](../runbooks/operate-local-kiosk.md#硬件视频解码)。没有驱动时屏保照常播放，但 1080p 视频在 CPU 上解码，单条约 0.16–0.35 个核。
@@ -90,6 +91,6 @@
 - 架构：[架构总览](../architecture/OVERVIEW.md)
 - ADR：[本地控制台](../adr/0005-use-a-single-application-wayland-kiosk-for-the-local-console.md)、[屏保视频是系统盘上的长期媒体](../adr/0014-keep-screensaver-videos-as-system-disk-media-outside-releases.md)
 - 调查：[本机屏幕播放屏保时占用约 1.4 个核](../investigations/2026-10-28-screensaver-video-cpu.md)
-- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`desktop.module.css`](../../web/src/desktop/desktop.module.css)、[`run-kiosk.sh`](../../scripts/run-kiosk.sh)、[`handler.go`](../../internal/webui/handler.go)、[`install-media-pool.sh`](../../scripts/install-media-pool.sh)、[`remote-stage-media-pool.sh`](../../scripts/remote-stage-media-pool.sh)、[`deploy-media-pool.ps1`](../../scripts/deploy-media-pool.ps1)（旧名 [`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)）、[`anas-api.service`](../../deploy/systemd/system/anas-api.service)
+- 代码：[`LocalConsoleScreenSaver.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.tsx)、[`localConsoleScreenSaver.module.css`](../../web/src/desktop/localConsoleScreenSaver.module.css)、[`localConsole.ts`](../../web/src/lib/localConsole.ts)、[`run-kiosk.sh`](../../scripts/run-kiosk.sh)、[`handler.go`](../../internal/webui/handler.go)、[`install-media-pool.sh`](../../scripts/install-media-pool.sh)、[`remote-stage-media-pool.sh`](../../scripts/remote-stage-media-pool.sh)、[`deploy-media-pool.ps1`](../../scripts/deploy-media-pool.ps1)（旧名 [`install-screensavers.sh`](../../scripts/install-screensavers.sh)、[`remote-stage-screensavers.sh`](../../scripts/remote-stage-screensavers.sh)、[`deploy-screensavers.ps1`](../../scripts/deploy-screensavers.ps1)）、[`anas-api.service`](../../deploy/systemd/system/anas-api.service)
 - 测试：[`App.test.tsx`](../../web/src/App.test.tsx)、[`LocalConsoleScreenSaver.test.tsx`](../../web/src/desktop/LocalConsoleScreenSaver.test.tsx)、[`handler_test.go`](../../internal/webui/handler_test.go)、[`system-test.sh`](../../scripts/system-test.sh)
 - Issue：[#49 不带屏保视频的升级会让本地控制台屏保失效](https://github.com/zhongwater123/A-NAS/issues/49)

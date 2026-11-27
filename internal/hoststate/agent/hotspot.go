@@ -26,3 +26,11 @@ func (c *Client) SetPhoneHotspot(ctx context.Context, enabled bool) (phonehotspo
 }
 
 var _ phonehotspot.Switch = (*Client)(nil)
+
+func (c *Client) SavePhoneHotspotSettings(ctx context.Context, change phonehotspot.SettingsChange) (phonehotspot.Settings, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var settings phonehotspot.Settings
+	err := c.doJSON(ctx, c.operationClient, http.MethodPut, wire.PhoneHotspotSettingsPath, change, &settings)
+	return settings, err
+}

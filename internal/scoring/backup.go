@@ -21,9 +21,22 @@ func (s *Store) StagingDir() string { return filepath.Join(s.dir, "staging") }
 func (s *Store) RunBackups(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+	// Below the reserve the backup waits, said once, as imports do.
+	waiting := false
 	for {
-		if err := s.BackupIfDue(ctx); err != nil && ctx.Err() == nil {
+		err := s.BackupIfDue(ctx)
+		switch {
+		case ctx.Err() != nil:
+		case errors.Is(err, ErrInsufficientSpace):
+			if !waiting {
+				s.logger.WarnContext(ctx, "photo scoring backup waits: the data volume is at its reserve")
+			}
+			waiting = true
+		case err != nil:
 			s.logger.ErrorContext(ctx, "photo scoring backup failed", "error", err)
+		case waiting:
+			s.logger.InfoContext(ctx, "photo scoring backup no longer waits for space")
+			waiting = false
 		}
 		select {
 		case <-ctx.Done():
@@ -70,6 +83,14 @@ func (s *Store) BackupIfDue(ctx context.Context) error {
 // copyTo writes a consistent copy of the database to name, readable by the
 // module's user alone, replacing one that is there.
 func (s *Store) copyTo(ctx context.Context, name string) error {
+	// Include committed pages still in the WAL when budgeting for the copy.
+	var bytes int64
+	if err := s.db.QueryRowContext(ctx, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").Scan(&bytes); err != nil {
+		return err
+	}
+	if err := s.room(bytes); err != nil {
+		return err
+	}
 	partial := name + ".partial"
 	_ = os.Remove(partial)
 	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {

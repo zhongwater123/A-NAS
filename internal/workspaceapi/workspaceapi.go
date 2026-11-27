@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -131,9 +132,10 @@ func New(store *workspace.Store, options Options) http.Handler {
 		"POST /pages/{pageID}/versions": h.saveVersion,
 		"GET /pages/{pageID}/versions/{version}/view": h.view,
 		"GET /pages/{pageID}/versions/{version}/file": h.file,
-		"PUT /viewing":      h.viewing,
-		"PUT /selection":    h.setSelection,
-		"DELETE /selection": h.clearSelection,
+		"PUT /viewing":          h.viewing,
+		"DELETE /viewing/{tab}": h.stopViewing,
+		"PUT /selection":        h.setSelection,
+		"DELETE /selection":     h.clearSelection,
 	}
 	for pattern, serve := range members {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -262,13 +264,37 @@ func (h *handler) access(w http.ResponseWriter, _ *http.Request, caller workspac
 	httpjson.Write(w, http.StatusOK, map[string]any{"admin": caller.Actor.Admin})
 }
 
+// presentSummary and presentPage are a page as the desktop reads it, with
+// who has it open now and whose agents are at work on it.
+type presentSummary struct {
+	workspace.PageSummary
+	Presence workspace.Presence `json:"presence"`
+}
+
+type presentPage struct {
+	workspace.Page
+	Presence workspace.Presence `json:"presence"`
+}
+
+func presenceOf(all map[string]workspace.Presence, pageID string) workspace.Presence {
+	if presence, ok := all[pageID]; ok {
+		return presence
+	}
+	return workspace.Presence{Viewers: []workspace.Viewer{}, Agents: []workspace.AgentWork{}}
+}
+
 func (h *handler) listPages(w http.ResponseWriter, r *http.Request, _ workspace.Caller) {
 	pages, err := h.store.ListPages(r.Context())
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, map[string]any{"items": pages})
+	presence := h.store.Presence()
+	items := make([]presentSummary, 0, len(pages))
+	for _, page := range pages {
+		items = append(items, presentSummary{page, presenceOf(presence, page.ID)})
+	}
+	httpjson.Write(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // readPage reads a page sent as the request body.
@@ -295,7 +321,7 @@ func (h *handler) createPage(w http.ResponseWriter, r *http.Request, caller work
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusCreated, page)
+	httpjson.Write(w, http.StatusCreated, presentPage{page, presenceOf(nil, page.ID)})
 }
 
 func (h *handler) page(w http.ResponseWriter, r *http.Request, _ workspace.Caller) {
@@ -304,7 +330,7 @@ func (h *handler) page(w http.ResponseWriter, r *http.Request, _ workspace.Calle
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, page)
+	httpjson.Write(w, http.StatusOK, presentPage{page, presenceOf(h.store.Presence(), page.ID)})
 }
 
 func (h *handler) renamePage(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
@@ -319,7 +345,7 @@ func (h *handler) renamePage(w http.ResponseWriter, r *http.Request, caller work
 		h.fail(w, r, err)
 		return
 	}
-	httpjson.Write(w, http.StatusOK, page)
+	httpjson.Write(w, http.StatusOK, presentSummary{page, presenceOf(h.store.Presence(), page.ID)})
 }
 
 func (h *handler) deletePage(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
@@ -414,19 +440,47 @@ func serveFile(w http.ResponseWriter, source []byte, summary workspace.PageSumma
 	_, _ = w.Write(source)
 }
 
+// tabName is how a browser tab names itself to the service: random, made
+// once per tab.
+var tabName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
 func (h *handler) viewing(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
 	var request struct {
 		PageID  string `json:"pageId"`
 		Version int    `json:"version"`
+		Tab     string `json:"tab"`
+		Focused bool   `json:"focused"`
+		Seq     int64  `json:"seq"`
 	}
 	if !httpjson.Read(w, r, 4<<10, &request) {
+		return
+	}
+	if !tabName.MatchString(request.Tab) {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give tab, the tab's name: 1–64 letters, digits, - or _")
+		return
+	}
+	if request.Seq < 1 {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give seq, the tab's count of its reports, from 1")
 		return
 	}
 	if _, _, err := h.store.Version(r.Context(), request.PageID, request.Version); err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.store.SetViewing(caller.Actor.AccountID, request.PageID, request.Version)
+	h.store.SetViewing(caller.Actor, workspace.TabReport{
+		Tab: request.Tab, PageID: request.PageID, Version: request.Version, Focused: request.Focused, Seq: request.Seq,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) stopViewing(w http.ResponseWriter, r *http.Request, caller workspace.Caller) {
+	tab := r.PathValue("tab")
+	seq, err := strconv.ParseInt(r.URL.Query().Get("seq"), 10, 64)
+	if !tabName.MatchString(tab) || err != nil || seq < 1 {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "give the tab's name and seq, the tab's count of its reports, from 1")
+		return
+	}
+	h.store.ClearViewing(caller.Actor.AccountID, tab, seq)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -542,6 +596,13 @@ func (h *handler) takeTransfer(w http.ResponseWriter, r *http.Request, direction
 }
 
 func (h *handler) download(w http.ResponseWriter, r *http.Request) {
+	// A GET pattern also matches HEAD; a link checker or `curl -I` must not
+	// spend the link.
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
 	transfer, ok := h.takeTransfer(w, r, workspace.Download)
 	if !ok {
 		return

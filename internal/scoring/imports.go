@@ -47,7 +47,9 @@ func (s *Store) RunImports(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		worked, err := s.ImportStep(ctx)
-		if err != nil && ctx.Err() == nil {
+		// A pause at the reserve is logged once by ImportStep and shown
+		// on the batch; the import goes on once space is freed.
+		if err != nil && !errors.Is(err, ErrInsufficientSpace) && ctx.Err() == nil {
 			s.logger.ErrorContext(ctx, "photo scoring import failed", "error", err)
 		}
 		if worked && err == nil {
@@ -63,17 +65,28 @@ func (s *Store) RunImports(ctx context.Context) {
 }
 
 // ImportStep does one unit of import work: scanning one batch's folder or
-// importing one file. It reports whether there was any.
+// importing one file. It reports whether there was any. While the data
+// volume is at its reserve it does nothing and returns ErrInsufficientSpace.
 func (s *Store) ImportStep(ctx context.Context) (bool, error) {
 	var batchID, source string
 	var scanned bool
 	err := s.db.QueryRowContext(ctx, `SELECT id, source, scanned FROM batches WHERE state = 'importing'
 		ORDER BY created_at, id LIMIT 1`).Scan(&batchID, &source, &scanned)
 	if errors.Is(err, sql.ErrNoRows) {
+		s.importPaused.Store(false)
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if err := s.room(previewBytes); err != nil {
+		if errors.Is(err, ErrInsufficientSpace) && !s.importPaused.Swap(true) {
+			s.logger.WarnContext(ctx, "photo scoring import paused: the data volume is at its reserve")
+		}
+		return false, err
+	}
+	if s.importPaused.Swap(false) {
+		s.logger.InfoContext(ctx, "photo scoring import resumed")
 	}
 	if !scanned {
 		return true, s.scan(ctx, batchID, source)
