@@ -42,6 +42,11 @@ const (
 	// sends is refused (ADR 0040). The service behind the route confirms the
 	// token again with the Host Agent.
 	Agent
+	// Device routes take an e-ink screen's device token as a bearer token
+	// and never a session cookie, and only read; a request a browser sends
+	// is refused. The family service behind them checks the token itself
+	// (docs/specs/eink-screens.md).
+	Device
 )
 
 func (p Posture) String() string {
@@ -56,6 +61,8 @@ func (p Posture) String() string {
 		return "admin"
 	case Agent:
 		return "agent"
+	case Device:
+		return "device"
 	}
 	return "unknown"
 }

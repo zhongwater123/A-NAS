@@ -71,6 +71,13 @@ export const searchEntries: SearchEntry[] = [
     adminOnly: true,
   },
   { section: "web-search", title: "网页搜索开关", anchor: "web-search", keywords: "上网 搜索", adminOnly: true },
+  {
+    section: "eink",
+    title: "墨水屏",
+    anchor: "eink-screens",
+    keywords: "水墨屏 电子墨水 屏幕 配对 令牌",
+    adminOnly: true,
+  },
   { section: "web-search", title: "种子搜索", anchor: "torrents", keywords: "bt 磁力 下载", adminOnly: true },
   { section: "web-search", title: "搜索引擎", anchor: "engines", adminOnly: true },
   { section: "web-search", title: "开源许可", anchor: "license", keywords: "searxng 源码 许可证", adminOnly: true },

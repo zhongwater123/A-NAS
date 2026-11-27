@@ -2325,6 +2325,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/eink/screens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The paired e-ink screens, oldest first, with what each last reported. Administrators only */
+        get: operations["listEinkScreens"];
+        put?: never;
+        /** Pair a screen under a name of 1–6 characters, unique among the screens. The answer carries the screen's device token this once; the NAS keeps only its SHA-256. Administrators only */
+        post: operations["pairEinkScreen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eink/screens/{screenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                screenId: components["parameters"]["ScreenID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unpair a screen; its device token stops working at once. Administrators only */
+        delete: operations["removeEinkScreen"];
+        options?: never;
+        head?: never;
+        /** Rename a paired screen; the name stays unique among the screens. Administrators only */
+        patch: operations["renameEinkScreen"];
+        trace?: never;
+    };
+    "/api/v1/eink/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A paired screen asks whether to redraw (docs/specs/eink-screens.md). It takes the screen's device token as a bearer token and never a session cookie; a request carrying Origin (a browser's) is 403 forbidden, a missing, wrong or revoked token 401, and a client refused 10 times within 10 minutes 429 too_many_attempts until those 10 minutes end. The answer's names are the firmware's and fixed; times are the NAS's local time to the second, without a zone. Malformed report fields are ignored */
+        get: operations["askEinkNext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eink/screen.bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The screen's picture: 800×480 at one bit a pixel, rows top to bottom, pixels left to right, the high bit first, 1 white and 0 black; 48000 bytes, with its key in X-Content-Hash. 503 eink_unavailable when the NAS cannot draw (Noto Sans CJK missing). Device token as for askEinkNext */
+        get: operations["getEinkPicture"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/eink/screen-bar.bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The bar a screen pastes bottom left when it cannot reach the NAS: 592×80 in the picture's format, 5920 bytes, reading 停止更新 · 画面停在 M月D日 HH:MM. 503 eink_unavailable when the NAS cannot draw. Device token as for askEinkNext */
+        get: operations["getEinkBar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspace": {
         parameters: {
             query?: never;
@@ -7358,6 +7447,64 @@ export interface components {
          * @enum {string}
          */
         TodoCategory: "bill" | "medical" | "insurance" | "id_document" | "contract" | "other";
+        EinkScreenName: {
+            /** @description Where the screen hangs, such as 客厅; 1–6 characters after trimming spaces. */
+            name: string;
+        };
+        /** @description What the screen said about itself when it last asked; a field it did not send, or sent malformed, is absent. */
+        EinkScreenReport: {
+            battery?: number;
+            millivolt?: number;
+            charging?: boolean;
+            usb?: boolean;
+            firmware?: string;
+            rssi?: number;
+            awakeMs?: number;
+            wake?: string;
+            reset?: string;
+            /** @description Why the screen's previous wake failed, such as wifi or lowbat. */
+            fail?: string;
+            /** @description The screen's last few wakes as the firmware writes them, such as 0715k-wifi-11. */
+            history?: string;
+        };
+        EinkScreen: {
+            id: string;
+            name: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description When the screen last asked; absent before its first question.
+             */
+            seenAt?: string;
+            /**
+             * Format: date-time
+             * @description When the screen was told to ask again.
+             */
+            nextAt?: string;
+            report?: components["schemas"]["EinkScreenReport"];
+        };
+        EinkPairedScreen: {
+            screen: components["schemas"]["EinkScreen"];
+            /** @description The device token, shown this once; write it into the screen. */
+            token: string;
+        };
+        EinkAnswer: {
+            /** @enum {string} */
+            action: "none" | "full";
+            /** @description Why, for the screen's log, such as 开机 or 内容没变. */
+            reason: string;
+            /** @description The key of the picture the screen should show. */
+            key: string;
+            /** @description Where to fetch the picture; only when action is full. */
+            bin?: string;
+            /** @description Where to fetch the offline bar. */
+            bar: string;
+            /** @description The NAS's local time, YYYY-MM-DDTHH:MM:SS. */
+            server_time: string;
+            /** @description When to ask again, YYYY-MM-DDTHH:MM:SS local time; 07:00:00 at night. */
+            next_at: string;
+        };
         /**
          * @description shared: every active account sees and edits it; private: only the account it belongs to. To-dos added by hand are always shared.
          * @enum {string}
@@ -9545,6 +9692,7 @@ export interface components {
         /** @description The `next` of the previous page. */
         FamilyCursor: string;
         TodoID: string;
+        ScreenID: string;
         ScoringBatchID: string;
         ScoringAnchorID: number;
         ScoringClaimToken: string;
@@ -9724,6 +9872,11 @@ export type FamilyHint = components['schemas']['FamilyHint'];
 export type FamilyCatalog = components['schemas']['FamilyCatalog'];
 export type TodoDate = components['schemas']['TodoDate'];
 export type TodoCategory = components['schemas']['TodoCategory'];
+export type EinkScreenName = components['schemas']['EinkScreenName'];
+export type EinkScreenReport = components['schemas']['EinkScreenReport'];
+export type EinkScreen = components['schemas']['EinkScreen'];
+export type EinkPairedScreen = components['schemas']['EinkPairedScreen'];
+export type EinkAnswer = components['schemas']['EinkAnswer'];
 export type TodoScope = components['schemas']['TodoScope'];
 export type TodoStatus = components['schemas']['TodoStatus'];
 export type TodoStage = components['schemas']['TodoStage'];
@@ -9932,6 +10085,7 @@ export type ParameterFamilyRecordId = components['parameters']['FamilyRecordID']
 export type ParameterFamilyCommentId = components['parameters']['FamilyCommentID'];
 export type ParameterFamilyCursor = components['parameters']['FamilyCursor'];
 export type ParameterTodoId = components['parameters']['TodoID'];
+export type ParameterScreenId = components['parameters']['ScreenID'];
 export type ParameterScoringBatchId = components['parameters']['ScoringBatchID'];
 export type ParameterScoringAnchorId = components['parameters']['ScoringAnchorID'];
 export type ParameterScoringClaimToken = components['parameters']['ScoringClaimToken'];
@@ -14526,6 +14680,221 @@ export interface operations {
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listEinkScreens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The screens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["EinkScreen"][];
+                    };
+                };
+            };
+            403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    pairEinkScreen: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EinkScreenName"];
+            };
+        };
+        responses: {
+            /** @description The screen and its token */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EinkPairedScreen"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    removeEinkScreen: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                screenId: components["parameters"]["ScreenID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    renameEinkScreen: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                screenId: components["parameters"]["ScreenID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EinkScreenName"];
+            };
+        };
+        responses: {
+            /** @description The screen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EinkScreen"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    askEinkNext: {
+        parameters: {
+            query?: {
+                /** @description Key of the picture the screen shows; empty after power-on */
+                shown?: string;
+                /** @description 1 when the screen pasted its own offline bar */
+                dirty?: "0" | "1";
+                /** @description Ignored: the first batch always redraws in full */
+                partial?: "0" | "1";
+                /** @description 手动 when someone pressed the power key */
+                force?: string;
+                bat?: number;
+                mv?: number;
+                chg?: "0" | "1";
+                usb?: "0" | "1";
+                fw?: string;
+                rssi?: number;
+                awake_ms?: number;
+                wake?: string;
+                reset?: string;
+                fail?: string;
+                hist?: string;
+                /** @description Ignored in the first batch */
+                tc?: number;
+                /** @description Ignored in the first batch */
+                rh?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What to do */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EinkAnswer"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getEinkPicture: {
+        parameters: {
+            query?: {
+                /** @description The key askEinkNext gave; only for logs */
+                h?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The picture */
+            200: {
+                headers: {
+                    /** @description The picture's key, without :bw */
+                    "X-Content-Hash"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getEinkBar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bar */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };

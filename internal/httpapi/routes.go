@@ -129,6 +129,12 @@ func (h *productHandler) mounts() []apiroute.Route {
 		for _, prefix := range []string{familyapi.PathPrefix, familyapi.TodosPrefix} {
 			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
 		}
+		// E-ink screens: administrators pair them; the screens themselves
+		// ask with their device tokens (docs/specs/eink-screens.md).
+		mount(familyapi.ScreensPrefix, apiroute.Admin, withUser(h.Family), familyapi.ScreenEndpoints())
+		for _, endpoint := range familyapi.DeviceEndpoints() {
+			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Device, Handler: serve(h.Family)})
+		}
 	}
 	if h.Montage != nil {
 		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.ProductEndpoints())
@@ -211,11 +217,15 @@ func (h *productHandler) register(routes []apiroute.Route) {
 // mounted route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
-	case route.Posture < apiroute.Public || route.Posture > apiroute.Agent:
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Device:
 		return fmt.Errorf("route %s %s has no valid posture (%d)", route.Method, route.Pattern, route.Posture)
 	case route.Posture == apiroute.Agent && route.Method == "":
 		return fmt.Errorf("route %s is mounted for every method as agent; give each agent operation its method", route.Pattern)
 	case route.Posture == apiroute.Agent:
+		return nil
+	case route.Posture == apiroute.Device && route.Method != http.MethodGet:
+		return fmt.Errorf("route %s %s is a device route; devices only read with GET", route.Method, route.Pattern)
+	case route.Posture == apiroute.Device:
 		return nil
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
@@ -241,6 +251,9 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 	}
 	if route.Posture == apiroute.Agent {
 		return h.guardAgent(route)
+	}
+	if route.Posture == apiroute.Device {
+		return h.guardDevice(route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.Accounts == nil {

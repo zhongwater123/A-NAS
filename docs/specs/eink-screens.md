@@ -107,7 +107,7 @@
 
 ## 边界与失败
 
-- **令牌**：令牌错、已移除的屏得到 `401`；令牌对、路径不是这三条的得到 `404`；带 `Origin` 头的得到 `403`。按客户端限流失败的尝试。
+- **令牌**：令牌错、已移除的屏得到 `401`；令牌对、路径不是这三条的得到 `404`；带 `Origin` 头的得到 `403`。同一个客户端 10 分钟内被拒 10 次后，到这 10 分钟结束前一律得到 `429 too_many_attempts`（带 `Retry-After`）；令牌对上一次就清零。屏 15 分钟才来问一次，配对过的屏碰不到这条线。
 - **数据卷离线**：设备接口返回 `503`，屏按连不上处理（隔 5、15、30、60 分钟重试，满 1 小时贴底条）；不在系统盘暂存。
 - **拉图时内容又变了**：`screen.bin` 总是返回此刻的画面和它的编号，屏按响应头里的编号记下自己显示的是哪张，下次来问时对得上。
 - **卡在哪看得见**：管理员在设置页就能看到每块屏上次来问是什么时候、是否“该来没来”、最近几次醒来各停在哪一步（`hist`，例如 `0715k-wifi-11` 是 7:15 短按醒来、Wi-Fi 失败、醒了 11 秒）、最近一次失败的原因（`fail`），不用 root。
@@ -141,4 +141,6 @@
 - 规格：[家庭待办](family-todos.md)、[虚拟伙伴](virtual-companion.md)、[设置](settings.md)、[本地控制台屏幕保护程序](local-console-screensaver.md)
 - 术语：[墨水屏、设备令牌](../../CONTEXT.md)
 - 问题：[#503](https://github.com/zhongwater123/A-NAS/issues/503)、[#630](https://github.com/zhongwater123/A-NAS/issues/630)
-- 代码、测试：实现的 PR 补上
+- 接口契约：[路径](../../api/paths/eink.yaml)、[组件](../../api/components/eink.yaml)
+- 代码：[看板](../../internal/family/eink_board.go)、[屏与设备令牌](../../internal/family/eink_screens.go)、[刷新规则](../../internal/eink/refresh.go)、[出图](../../internal/eink/draw.go)、[设备与管理接口](../../internal/familyapi/eink.go)、[device 姿态](../../internal/httpapi/device.go)、[设置页](../../web/src/settings/EinkSection.tsx)
+- 测试：[看板](../../internal/family/eink_board_test.go)、[屏的存储](../../internal/family/eink_screens_test.go)、[刷新规则](../../internal/eink/refresh_test.go)、[出图](../../internal/eink/draw_test.go)、[接口契约](../../internal/httpapi/eink_test.go)、[设置页](../../web/src/settings/EinkSection.test.tsx)

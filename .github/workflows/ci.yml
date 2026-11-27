@@ -118,6 +118,16 @@ jobs:
             sudo apt-get install -y --no-install-recommends ffmpeg file
           fi
 
+      # E-ink screens draw with Noto Sans CJK, which the a-nas package depends
+      # on; internal/eink's tests fail without it.
+      - name: Install the e-ink screens' font
+        if: ${{ needs.scope.outputs.docs-only != 'true' }}
+        run: |
+          if [ ! -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fi
+
       - name: Set up Node.js
         if: ${{ needs.scope.outputs.docs-only != 'true' }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -230,6 +240,13 @@ jobs:
 
       - name: Fetch the pinned Qdrant server
         run: scripts/fetch-qdrant.sh
+
+      - name: Install the e-ink screens' font
+        run: |
+          if [ ! -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fi
 
       # No Node.js: make race-test leaves out internal/webui, the one package
       # that needs the built Web assets.

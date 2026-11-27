@@ -130,6 +130,8 @@ type productHandler struct {
 	mux   *http.ServeMux
 	// pictures decodes one uploaded avatar or wallpaper at a time.
 	pictures *semaphore.Weighted
+	// devices holds off clients that keep presenting refused device tokens.
+	devices deviceLimiter
 }
 
 func NewProduct(dependencies ProductDependencies) http.Handler {

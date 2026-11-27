@@ -173,6 +173,11 @@ func Run(parent context.Context, config Config) error {
 	// (accountremoval).
 	routes := http.NewServeMux()
 	routes.Handle(accountremoval.Path, served)
+	// E-ink screens ask with device tokens, never a session; the family API
+	// checks the token against the screens it keeps.
+	for _, endpoint := range familyapi.DeviceEndpoints() {
+		routes.Handle(endpoint.Method+" "+endpoint.Pattern, served)
+	}
 	routes.Handle("/", authenticate(config.Sessions, config.Logger, served))
 	server := &http.Server{
 		Handler:           routes,

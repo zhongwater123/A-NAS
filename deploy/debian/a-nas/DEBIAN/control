@@ -4,7 +4,7 @@ Architecture: amd64
 Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
 Section: admin
 Priority: optional
-Depends: a-nas-host (= @VERSION@), systemd (>= 257), python3, @CONTENT@
+Depends: a-nas-host (= @VERSION@), systemd (>= 257), python3, fonts-noto-cjk, @CONTENT@
 Suggests: a-nas-hotspot-radio (= @VERSION@)
 Description: the A-NAS product
  The Host Agent, the Product Service and its photo, share, family, montage

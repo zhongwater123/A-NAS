@@ -20,6 +20,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/photos"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 )
 
 // decode reads a JSON answer into target.
@@ -250,5 +251,7 @@ func familyAPI(t *testing.T, dir string, users *accounts.Service, photoAPI http.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return familyapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	// As development serves it: the family service's headers, such as a
+	// screen's device token, arrive as they would over its socket.
+	return serviceproxy.Local(familyapi.New(store, slog.New(slog.NewTextHandler(io.Discard, nil)), nil))
 }

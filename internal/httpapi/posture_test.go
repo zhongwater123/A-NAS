@@ -8,13 +8,26 @@ import (
 )
 
 func TestInvalidPostureCannotRegisterARoute(t *testing.T) {
-	for _, posture := range []apiroute.Posture{apiroute.Unset, -1, apiroute.Agent + 1} {
+	for _, posture := range []apiroute.Posture{apiroute.Unset, -1, apiroute.Device + 1} {
 		for _, method := range []string{"", http.MethodGet, http.MethodPost} {
 			route := apiroute.Route{Method: method, Pattern: "/test", Posture: posture}
 			if err := checkPosture(route); err == nil {
 				t.Errorf("accepted %s with posture %d", method, posture)
 			}
 		}
+	}
+}
+
+// A device route only reads, one method at a time: a screen's token must
+// never change anything.
+func TestDeviceRoutesOnlyRead(t *testing.T) {
+	for _, method := range []string{"", http.MethodPost, http.MethodPut, http.MethodDelete} {
+		if err := checkPosture(apiroute.Route{Method: method, Pattern: "/test", Posture: apiroute.Device}); err == nil {
+			t.Errorf("accepted a device route for %q", method)
+		}
+	}
+	if err := checkPosture(apiroute.Route{Method: http.MethodGet, Pattern: "/test", Posture: apiroute.Device}); err != nil {
+		t.Errorf("refused a device route that reads: %v", err)
 	}
 }
 

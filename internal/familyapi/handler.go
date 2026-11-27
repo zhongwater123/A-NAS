@@ -101,7 +101,14 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 		method, path, _ := strings.Cut(pattern, " ")
 		h.mux.HandleFunc(method+" "+TodosPrefix+path, h.withActor(serve))
 	}
-	for _, prefix := range []string{PathPrefix, TodosPrefix} {
+	for pattern, serve := range h.screenRoutes() {
+		method, path, _ := strings.Cut(pattern, " ")
+		h.mux.HandleFunc(method+" "+ScreensPrefix+path, h.withActor(serve))
+	}
+	for pattern, serve := range h.deviceRoutes() {
+		h.mux.HandleFunc(pattern, serve)
+	}
+	for _, prefix := range []string{PathPrefix, TodosPrefix, EinkPrefix} {
 		h.mux.HandleFunc(prefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 			httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 		})
@@ -111,9 +118,9 @@ func New(store *family.Store, logger *slog.Logger, media ffmpegworker.Worker) ht
 }
 
 // Endpoints are the operations the family API serves under PathPrefix and
-// TodosPrefix.
+// TodosPrefix; the e-ink screens' are ScreenEndpoints and DeviceEndpoints.
 func Endpoints() []apiroute.Endpoint {
-	return New(nil, nil, nil).(*handler).mux.Endpoints()
+	return append(endpointsUnder(PathPrefix), endpointsUnder(TodosPrefix)...)
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

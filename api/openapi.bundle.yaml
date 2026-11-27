@@ -3,7 +3,7 @@ openapi: 3.1.0
 info:
   title: A-NAS Product API
   version: 1.0.1-rc.1
-  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up to 4 MiB from members'' agents.'
+  description: 'Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots, the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, e-ink screens, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate container agent, and each member''s AI assistant (ADR 0024). Every operation that takes a JSON body bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking feedback resolved. The shared workspace (ADR 0040) takes pages of up to 20 MiB as text/html and MCP requests of up to 4 MiB from members'' agents.'
 jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
 servers:
   - url: http://127.0.0.1:8080
@@ -4034,6 +4034,280 @@ paths:
         '409':
           $ref: '#/components/responses/ProductError'
         '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/eink/screens:
+    get:
+      operationId: listEinkScreens
+      summary: The paired e-ink screens, oldest first, with what each last reported. Administrators only
+      x-anas-posture: admin
+      responses:
+        '200':
+          description: The screens
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EinkScreen'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: pairEinkScreen
+      summary: Pair a screen under a name of 1–6 characters, unique among the screens. The answer carries the screen's device token this once; the NAS keeps only its SHA-256. Administrators only
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EinkScreenName'
+      responses:
+        '201':
+          description: The screen and its token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EinkPairedScreen'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/eink/screens/{screenId}:
+    parameters:
+      - $ref: '#/components/parameters/ScreenID'
+    patch:
+      operationId: renameEinkScreen
+      summary: Rename a paired screen; the name stays unique among the screens. Administrators only
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EinkScreenName'
+      responses:
+        '200':
+          description: The screen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EinkScreen'
+        '400':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+    delete:
+      operationId: removeEinkScreen
+      summary: Unpair a screen; its device token stops working at once. Administrators only
+      x-anas-posture: admin
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Removed
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/eink/next:
+    get:
+      operationId: askEinkNext
+      summary: A paired screen asks whether to redraw (docs/specs/eink-screens.md). It takes the screen's device token as a bearer token and never a session cookie; a request carrying Origin (a browser's) is 403 forbidden, a missing, wrong or revoked token 401, and a client refused 10 times within 10 minutes 429 too_many_attempts until those 10 minutes end. The answer's names are the firmware's and fixed; times are the NAS's local time to the second, without a zone. Malformed report fields are ignored
+      security:
+        - deviceAuth: []
+      x-anas-posture: device
+      parameters:
+        - name: shown
+          in: query
+          schema:
+            type: string
+          description: Key of the picture the screen shows; empty after power-on
+        - name: dirty
+          in: query
+          schema:
+            type: string
+            enum:
+              - '0'
+              - '1'
+          description: 1 when the screen pasted its own offline bar
+        - name: partial
+          in: query
+          schema:
+            type: string
+            enum:
+              - '0'
+              - '1'
+          description: 'Ignored: the first batch always redraws in full'
+        - name: force
+          in: query
+          schema:
+            type: string
+          description: 手动 when someone pressed the power key
+        - name: bat
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+        - name: mv
+          in: query
+          schema:
+            type: integer
+        - name: chg
+          in: query
+          schema:
+            type: string
+            enum:
+              - '0'
+              - '1'
+        - name: usb
+          in: query
+          schema:
+            type: string
+            enum:
+              - '0'
+              - '1'
+        - name: fw
+          in: query
+          schema:
+            type: string
+            maxLength: 31
+        - name: rssi
+          in: query
+          schema:
+            type: integer
+        - name: awake_ms
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: wake
+          in: query
+          schema:
+            type: string
+        - name: reset
+          in: query
+          schema:
+            type: string
+        - name: fail
+          in: query
+          schema:
+            type: string
+            maxLength: 23
+        - name: hist
+          in: query
+          schema:
+            type: string
+            maxLength: 127
+        - name: tc
+          in: query
+          schema:
+            type: integer
+          description: Ignored in the first batch
+        - name: rh
+          in: query
+          schema:
+            type: integer
+          description: Ignored in the first batch
+      responses:
+        '200':
+          description: What to do
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EinkAnswer'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/eink/screen.bin:
+    get:
+      operationId: getEinkPicture
+      summary: 'The screen''s picture: 800×480 at one bit a pixel, rows top to bottom, pixels left to right, the high bit first, 1 white and 0 black; 48000 bytes, with its key in X-Content-Hash. 503 eink_unavailable when the NAS cannot draw (Noto Sans CJK missing). Device token as for askEinkNext'
+      security:
+        - deviceAuth: []
+      x-anas-posture: device
+      parameters:
+        - name: h
+          in: query
+          schema:
+            type: string
+          description: The key askEinkNext gave; only for logs
+      responses:
+        '200':
+          description: The picture
+          headers:
+            X-Content-Hash:
+              schema:
+                type: string
+              description: The picture's key, without :bw
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/eink/screen-bar.bin:
+    get:
+      operationId: getEinkBar
+      summary: 'The bar a screen pastes bottom left when it cannot reach the NAS: 592×80 in the picture''s format, 5920 bytes, reading 停止更新 · 画面停在 M月D日 HH:MM. 503 eink_unavailable when the NAS cannot draw. Device token as for askEinkNext'
+      security:
+        - deviceAuth: []
+      x-anas-posture: device
+      responses:
+        '200':
+          description: The bar
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
           $ref: '#/components/responses/ProductError'
         '503':
           $ref: '#/components/responses/ProductError'
@@ -10183,6 +10457,10 @@ components:
       type: http
       scheme: bearer
       description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
+    deviceAuth:
+      type: http
+      scheme: bearer
+      description: An e-ink screen's device token (docs/specs/eink-screens.md), only on operations marked x-anas-posture device.
   parameters:
     CSRFToken:
       name: X-CSRF-Token
@@ -10390,6 +10668,13 @@ components:
         type: string
     TodoID:
       name: todoId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+    ScreenID:
+      name: screenId
       in: path
       required: true
       schema:
@@ -14562,6 +14847,121 @@ components:
         - contract
         - other
       description: What kind of matter it is; pages name the action from it, such as paying a bill. Shared screens show only the category of a medical one.
+    EinkScreenName:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 6
+          description: Where the screen hangs, such as 客厅; 1–6 characters after trimming spaces.
+    EinkScreenReport:
+      type: object
+      additionalProperties: false
+      description: What the screen said about itself when it last asked; a field it did not send, or sent malformed, is absent.
+      properties:
+        battery:
+          type: integer
+          minimum: 0
+          maximum: 100
+        millivolt:
+          type: integer
+        charging:
+          type: boolean
+        usb:
+          type: boolean
+        firmware:
+          type: string
+        rssi:
+          type: integer
+        awakeMs:
+          type: integer
+          minimum: 0
+        wake:
+          type: string
+        reset:
+          type: string
+        fail:
+          type: string
+          description: Why the screen's previous wake failed, such as wifi or lowbat.
+        history:
+          type: string
+          description: The screen's last few wakes as the firmware writes them, such as 0715k-wifi-11.
+    EinkScreen:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - createdAt
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        seenAt:
+          type: string
+          format: date-time
+          description: When the screen last asked; absent before its first question.
+        nextAt:
+          type: string
+          format: date-time
+          description: When the screen was told to ask again.
+        report:
+          $ref: '#/components/schemas/EinkScreenReport'
+    EinkPairedScreen:
+      type: object
+      additionalProperties: false
+      required:
+        - screen
+        - token
+      properties:
+        screen:
+          $ref: '#/components/schemas/EinkScreen'
+        token:
+          type: string
+          description: The device token, shown this once; write it into the screen.
+    EinkAnswer:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - reason
+        - key
+        - bar
+        - server_time
+        - next_at
+      properties:
+        action:
+          type: string
+          enum:
+            - none
+            - full
+        reason:
+          type: string
+          description: Why, for the screen's log, such as 开机 or 内容没变.
+        key:
+          type: string
+          pattern: ^[0-9a-f]{16}:bw$
+          description: The key of the picture the screen should show.
+        bin:
+          type: string
+          description: Where to fetch the picture; only when action is full.
+        bar:
+          type: string
+          description: Where to fetch the offline bar.
+        server_time:
+          type: string
+          description: The NAS's local time, YYYY-MM-DDTHH:MM:SS.
+        next_at:
+          type: string
+          description: When to ask again, YYYY-MM-DDTHH:MM:SS local time; 07:00:00 at night.
     TodoScope:
       type: string
       enum:

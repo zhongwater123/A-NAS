@@ -285,6 +285,20 @@ CREATE UNIQUE INDEX todos_request ON todos(created_by, request_key) WHERE reques
 `, Down: `
 DROP TABLE todos;
 DELETE FROM hints_seen WHERE hint_key LIKE 'todo:%';
+`}, {Up: `
+CREATE TABLE eink_screens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    shown TEXT NOT NULL DEFAULT '',
+    seen_at TEXT,
+    next_at TEXT,
+    report TEXT NOT NULL DEFAULT '{}'
+);
+`, Down: `
+DROP TABLE eink_screens;
 `}}
 
 func (s *Store) migrate(ctx context.Context) error {
