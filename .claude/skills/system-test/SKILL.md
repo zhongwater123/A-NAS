@@ -10,13 +10,16 @@ description: 运行 A-NAS 的 systemd 系统测试（scripts/system-test.sh）�
 ## 前提
 
 - WSL 中的 Docker；测试只启动并删除自己命名为 `anas-system-test-<PID>` 的容器。本机还运行着与 A-NAS 无关的容器，不要清理它们。
-- 镜像 `anas-systemd:trixie`，其中的 aptly 与 GnuPG 为测试做签名软件源。缺少时，或比构建脚本旧时，重新构建。比较两个时间：`docker image inspect -f '{{.Created}}' anas-systemd:trixie`，以及在检出中运行 `git log -1 --format=%cI -- scripts/build-system-test-image.sh deploy/debian/a-nas-host/DEBIAN/control deploy/upstream/packages.json`（镜像装的是这个包以及 Docker、Caddy 从 Debian 取的依赖）。旧镜像会让后来加进脚本的检查失败，例如助手沙箱报 `rg: not found`。构建命令：
+- 镜像 `anas-systemd:trixie`，其中的 aptly 与 GnuPG 为测试做签名软件源。镜像带 label 记录构建输入（`anas.image.inputs`）、ISO 周与来源提交；`scripts/system-test.sh` 启动前用 `scripts/check-system-test-env.sh` 自动核对：镜像的 inputs 必须与本检出的输入一致，否则失败并提示重建；ISO 周不同只警告（提醒重建以带上 Debian 的安全更新）。共享开发服务器上有管理员构建的镜像，先看 `anas-images`；过渡期可用 `ANAS_SYSTEM_TEST_SKIP_ENV_CHECK=1` 跳过检查。
+
+  缺少镜像或自己改了镜像输入文件时，自行构建，镜像名用自己的仓库名，测试时把它传给脚本，用完删除。`anas-systemd:trixie` 与 `anas-systemd:trixie-<周>-<inputs>` 是共享镜像的标签，不要改、不要删，也不要借用这个前缀：服务器按它清理旧版本。
 
   ```bash
-  scripts/build-system-test-image.sh anas-systemd:trixie <本地任一 Debian 镜像>
+  scripts/build-system-test-image.sh anas-systemd-<你>:<主题> <本地任一 Debian 镜像>
+  scripts/system-test.sh anas-systemd-<你>:<主题>
   ```
 
-  镜像用 debootstrap 从 `deb.debian.org` 组装，不需要 Docker Hub。
+  镜像用 debootstrap 从 `deb.debian.org` 组装，不需要 Docker Hub。`ANAS_SYSTEM_TEST_ALLOW_ENV_MISMATCH=1` 可把不一致降级为警告（不推荐）。
 - 固定版本的 Qdrant 与 llama.cpp 压缩包：在副本中运行 `scripts/fetch-qdrant.sh` 与 `scripts/fetch-llama.sh`。测试自己用 `scripts/fetch-upstream-packages.sh` 取固定版本的 Docker 与 Caddy 软件包（约 92 MB），放在 `build/upstream`，以后重复使用。
 - 软件包 `build/packages`：`make system-test` 会先运行 `packages`，它构建二进制，需要 gcc（cgo SQLite）。外层脚本还用 Go 编译“下一 release”的 `anas-api`（`-tags rollbacktest`）。WSL 中没有 gcc 时，按 [Windows 环境的运行检查](../../../docs/development/environments/windows.md#运行检查)在 `anas-acl-matrix:bookworm` 中构建，再直接运行 `bash scripts/system-test.sh`。
 
