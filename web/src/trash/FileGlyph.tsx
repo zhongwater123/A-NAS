@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
-import type { TrashItem } from "../api.generated";
 import { type FileCategory, fileCategory } from "../lib/fileTypes";
+import type { BinItem } from "./model";
 import styles from "./trash.module.css";
 
 // What each kind of file shows on its page, drawn in the kind's colour.
@@ -42,9 +42,13 @@ const marks: Record<FileCategory, ReactNode> = {
   other: null,
 };
 
+// A shared workspace page is HTML: angle brackets.
+const htmlMark = <path d="M31 36l-6.5 7 6.5 7M41 36l6.5 7-6.5 7" />;
+
 // FileGlyph draws a trash item's icon: a folder, or a page marked with what
-// kind of file it is. It is drawn at twice its shown size.
-export function FileGlyph({ name, kind }: Pick<TrashItem, "name" | "kind">) {
+// kind of file it is, or a shared workspace page. It is drawn at twice its
+// shown size.
+export function FileGlyph({ name, kind }: Pick<BinItem, "name" | "kind">) {
   if (kind === "directory")
     return (
       <svg className={`${styles.trGlyph} ${styles.folder}`} viewBox="0 0 72 72" aria-hidden="true">
@@ -55,12 +59,12 @@ export function FileGlyph({ name, kind }: Pick<TrashItem, "name" | "kind">) {
         <path className={styles.front} d="M8 31a5 5 0 0 1 5-5h46a5 5 0 0 1 5 5v21a6 6 0 0 1-6 6H14a6 6 0 0 1-6-6z" />
       </svg>
     );
-  const category = fileCategory(name);
+  const category = kind === "page" ? "document" : fileCategory(name);
   return (
     <svg className={`${styles.trGlyph} ${styles[category] ?? ""}`} viewBox="0 0 72 72" aria-hidden="true">
       <path className={styles.page} d="M21 7h21.6L57 21.4V60a5 5 0 0 1-5 5H21a5 5 0 0 1-5-5V12a5 5 0 0 1 5-5z" />
       <path className={styles.fold} d="M42.6 7v9.4a5 5 0 0 0 5 5H57z" />
-      <g className={styles.mark}>{marks[category]}</g>
+      <g className={styles.mark}>{kind === "page" ? htmlMark : marks[category]}</g>
     </svg>
   );
 }

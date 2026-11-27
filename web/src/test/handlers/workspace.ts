@@ -126,6 +126,7 @@ export function workspaceHandlers(store: WorkspaceStore) {
           deletedAt,
           purgeAt: new Date(Date.parse(deletedAt) + 30 * 86_400_000).toISOString(),
           versions: page.latest.version,
+          sizeBytes: page.versions.reduce((sum, saved) => sum + saved.size, 0),
         })),
       }),
     ),

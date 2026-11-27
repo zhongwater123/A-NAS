@@ -19,12 +19,15 @@ type TrashedPage struct {
 	PurgeAt time.Time `json:"purgeAt"`
 	// Versions is how many versions come back with the page.
 	Versions int `json:"versions"`
+	// SizeBytes is what its versions take up, which purging frees.
+	SizeBytes int64 `json:"sizeBytes"`
 }
 
 // Trash lists the deleted pages, the most recently deleted first. Everyone
 // who uses the workspace sees them, as they saw the pages before.
 func (s *Store) Trash(ctx context.Context) ([]TrashedPage, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, created_by, created_by_name, deleted_by, deleted_by_name, deleted_at, latest_version
+	rows, err := s.db.QueryContext(ctx, `SELECT id, title, created_by, created_by_name, deleted_by, deleted_by_name, deleted_at, latest_version,
+    (SELECT COALESCE(SUM(size), 0) FROM versions WHERE page_id = pages.id)
 FROM pages WHERE deleted_at <> '' ORDER BY deleted_at DESC, id`)
 	if err != nil {
 		return nil, err
@@ -35,7 +38,7 @@ FROM pages WHERE deleted_at <> '' ORDER BY deleted_at DESC, id`)
 		var page TrashedPage
 		var deletedAt string
 		if err := rows.Scan(&page.ID, &page.Title, &page.CreatedBy.ID, &page.CreatedBy.Name, &page.DeletedBy.ID, &page.DeletedBy.Name,
-			&deletedAt, &page.Versions); err != nil {
+			&deletedAt, &page.Versions, &page.SizeBytes); err != nil {
 			return nil, err
 		}
 		page.DeletedAt = parseTime(deletedAt)

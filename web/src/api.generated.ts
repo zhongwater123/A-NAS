@@ -9009,6 +9009,11 @@ export interface components {
             purgeAt: string;
             /** @description How many versions come back with the page */
             versions: number;
+            /**
+             * Format: int64
+             * @description What the page's versions take up, which purging frees.
+             */
+            sizeBytes: number;
         };
         WorkspaceTrash: {
             /** @description The most recently deleted first */

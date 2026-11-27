@@ -4,6 +4,7 @@ import { ContextMenu, DropdownMenu, Tooltip } from "radix-ui";
 import { type KeyboardEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
+import { errorText } from "../api/errorMessages";
 import type { RestoredEntry, Space, TrashItem } from "../api.generated";
 import { formatShortDay } from "../backup/format";
 import { listEntries, listSpaces } from "../files/api";
@@ -11,10 +12,13 @@ import { formatBytes } from "../lib/bytes";
 import type { TransferLocation } from "../transfers/api";
 import { useToasts } from "../ui/workspace";
 import workspaceStyles from "../ui/workspace.module.css";
+import { listTrash as listPageTrash, purgePage, restorePage } from "../workspace/api";
 import { listTrash, purgeTrash, type RestoreConflict, restoreTrash } from "./api";
 import { ConflictDialog, PurgeDialog, TakenDialog } from "./dialogs";
 import {
   type BatchOutcome,
+  type BinItem,
+  binPages,
   emptyOutcome,
   expiryOf,
   groupItems,
@@ -28,6 +32,8 @@ import {
   sortLabels,
   spaceName,
   type TrashSort,
+  workspaceBin,
+  workspaceName,
 } from "./model";
 import { PurgeStrip } from "./PurgeStrip";
 import { Checkbox, TrashRow } from "./TrashRow";
@@ -36,16 +42,41 @@ import styles from "./trash.module.css";
 const isCode = (caught: unknown, code: string) => caught instanceof APIError && caught.code === code;
 const typing = (target: EventTarget) => target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement;
 
-// TrashPanel lists what the signed-in account deleted: how much the recycle
-// bin holds and when it lets go of it, then the items, each with where it
-// goes back to, its size, when it was deleted and how long it stays
+// readPages reads the trashed shared workspace pages the account uploaded or
+// deleted. The files are listed without them when the workspace cannot be
+// read.
+async function readPages(workspace: boolean, userId: string) {
+  if (!workspace) return { items: [], error: "" };
+  try {
+    return { items: binPages(await listPageTrash(), userId), error: "" };
+  } catch (caught) {
+    return { items: [], error: errorText(caught, "workspace") };
+  }
+}
+
+// TrashPanel lists what the signed-in account deleted, and the shared
+// workspace pages it uploaded or deleted: how much the recycle bin holds and
+// when it lets go of it, then the items, each with where it goes back to,
+// its size, when it was deleted and how long it stays
 // (docs/specs/basic-storage-and-sharing.md). One click restores an item to
 // where it came from; a selection is restored or deleted from the bar that
 // rises at the bottom.
-export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: TransferLocation) => void }) {
-  const [items, setItems] = useState<TrashItem[]>();
+export function TrashPanel({
+  workspace,
+  userId,
+  onShowInFiles,
+  onOpenWorkspace,
+}: {
+  // workspace is whether the account uses 共享工作区.
+  workspace: boolean;
+  userId: string;
+  onShowInFiles: (location: TransferLocation) => void;
+  onOpenWorkspace: () => void;
+}) {
+  const [items, setItems] = useState<BinItem[]>();
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [error, setError] = useState("");
+  const [pageError, setPageError] = useState("");
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<TrashSort>("deleted");
   const [query, setQuery] = useState("");
@@ -56,13 +87,13 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const [restoring, setRestoring] = useState<ReadonlySet<string>>(new Set());
   // taken is the item whose name was found taken where it goes back.
   const [taken, setTaken] = useState<TrashItem>();
-  const [purging, setPurging] = useState<{ items: TrashItem[]; everything: boolean }>();
+  const [purging, setPurging] = useState<{ items: BinItem[]; everything: boolean }>();
   // conflicts are the items of a selection whose name was taken where they
   // go back, waiting for the user to say what to do with them.
   const [conflicts, setConflicts] = useState<{ items: TrashItem[]; outcome: BatchOutcome }>();
   const [progress, setProgress] = useState<{ label: string; done: number; total: number }>();
   // menuItem is the item the right-click menu was opened on.
-  const [menuItem, setMenuItem] = useState<TrashItem>();
+  const [menuItem, setMenuItem] = useState<BinItem>();
   const { toast, element: toasts } = useToasts(styles.trToasts);
   const root = useRef<HTMLDivElement>(null);
   // anchor is the item last picked, where a Shift-click's range starts.
@@ -77,18 +108,20 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
 
   const fetchTrash = useCallback(
     () =>
-      Promise.all([listTrash(), listSpaces()])
-        .then(([next, visible]) => {
+      Promise.all([listTrash(), listSpaces(), readPages(workspace, userId)])
+        .then(([files, visible, pages]) => {
+          const next: BinItem[] = [...files, ...pages.items];
           setItems(next);
           setSpaces(visible);
           setError("");
+          setPageError(pages.error);
           setSelected((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
         })
         .catch((caught: unknown) => {
           setError(messageOf(caught));
         })
         .finally(() => setLoading(false)),
-    [],
+    [workspace, userId],
   );
   const refresh = useCallback(() => {
     setLoading(true);
@@ -105,7 +138,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   }, [conflicts]);
 
   const all = useMemo(() => items ?? [], [items]);
-  const spaceOf = useCallback((item: TrashItem) => spaces.find((space) => space.id === item.spaceId), [spaces]);
+  const spaceOf = useCallback((item: BinItem) => spaces.find((space) => space.id === item.spaceId), [spaces]);
   const schedule = useMemo(() => purgeSchedule(all), [all]);
   // A day whose items are all gone no longer filters.
   const day = purgeDay !== undefined && schedule[purgeDay]?.count ? purgeDay : undefined;
@@ -120,20 +153,26 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   const groups = useMemo(() => groupItems(visible, sort), [visible, sort]);
   const [total, unit] = formatBytes(all.reduce((sum, item) => sum + item.sizeBytes, 0)).split(" ");
   const soon = all.filter((item) => expiryOf(item).tone !== "calm").length;
-  const trashSpaces = spaces.filter((space) => all.some((item) => item.spaceId === space.id));
+  // bins are the spaces, and 共享工作区, that the items came from.
+  const bins = [
+    ...spaces
+      .filter((space) => all.some((item) => item.spaceId === space.id))
+      .map((space) => ({ id: space.id, label: spaceName(space) })),
+    ...(all.some((item) => item.kind === "page") ? [{ id: workspaceBin, label: workspaceName }] : []),
+  ];
   const chosen = visible.filter((item) => selected.has(item.id));
   const allChosen = visible.length > 0 && chosen.length === visible.length;
   const busy = Boolean(progress);
   const filtered = Boolean(query.trim() || spaceFilter || day !== undefined);
 
-  const forget = (gone: TrashItem[]) => {
+  const forget = (gone: BinItem[]) => {
     const ids = new Set(gone.map((item) => item.id));
     setItems((current) => current?.filter((item) => !ids.has(item.id)));
     setSelected((current) => new Set([...current].filter((id) => !ids.has(id))));
   };
   // toggle picks or drops an item; with Shift, it picks every item from the
   // one picked last to this one.
-  const toggle = (item: TrashItem, range = false) => {
+  const toggle = (item: BinItem, range = false) => {
     const from = visible.findIndex((candidate) => candidate.id === anchor.current);
     const to = visible.indexOf(item);
     anchor.current = item.id;
@@ -170,6 +209,8 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     }
     onShowInFiles({ spaceId: space.id, spaceKind: space.kind, folders: trail });
   };
+  const openOrigin = (item: BinItem) =>
+    item.kind === "page" ? onOpenWorkspace() : void showInFiles(spaceOf(item), locationOf(item, spaceOf(item)).folders);
 
   const restoredOne = (item: TrashItem, restored: RestoredEntry, asked: string, choice: RestoreConflict) => {
     const location = locationOf(item, spaceOf(item));
@@ -183,16 +224,21 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   };
 
   // restoreOne puts an item back where it came from at once; only a name
-  // taken there asks what to do.
-  const restoreOne = async (item: TrashItem) => {
+  // taken there asks what to do. A page goes back to 共享工作区, where no
+  // name is taken.
+  const restoreOne = async (item: BinItem) => {
     setRestoring((current) => new Set(current).add(item.id));
     try {
-      restoredOne(item, await restoreTrash(item.id, item.name, "ask"), item.name, "ask");
+      if (item.kind === "page") {
+        await restorePage(item.page.id);
+        forget([item]);
+        toast(`已恢复“${item.name}”到 ${workspaceName}`, "success", { label: "打开共享工作区", run: onOpenWorkspace });
+      } else restoredOne(item, await restoreTrash(item.id, item.name, "ask"), item.name, "ask");
     } catch (caught) {
-      if (isCode(caught, "name_conflict")) setTaken(item);
+      if (item.kind !== "page" && isCode(caught, "name_conflict")) setTaken(item);
       else {
         if (isCode(caught, "not_found")) forget([item]);
-        toast(messageOf(caught), "error");
+        toast(item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught), "error");
       }
     } finally {
       setRestoring((current) => new Set([...current].filter((id) => id !== item.id)));
@@ -202,11 +248,16 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
   // restoreBatch puts each item back where it came from, under its own name.
   // With "ask", the items whose name is taken there are returned for the
   // user to decide; a folder is never replaced and keeps both instead.
-  const restoreBatch = async (batch: TrashItem[], choice: RestoreConflict, outcome: BatchOutcome) => {
+  const restoreBatch = async (batch: BinItem[], choice: RestoreConflict, outcome: BatchOutcome) => {
     const conflicting: TrashItem[] = [];
     for (const [index, item] of batch.entries()) {
       setProgress({ label: "正在恢复", done: index, total: batch.length });
       try {
+        if (item.kind === "page") {
+          await restorePage(item.page.id);
+          outcome.done.push(item);
+          continue;
+        }
         const restored = await restoreTrash(
           item.id,
           item.name,
@@ -216,9 +267,9 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
         if (restored.replaced) outcome.replaced += 1;
         else if (restored.name !== item.name) outcome.renamed += 1;
       } catch (caught) {
-        if (choice === "ask" && isCode(caught, "name_conflict")) conflicting.push(item);
+        if (item.kind !== "page" && choice === "ask" && isCode(caught, "name_conflict")) conflicting.push(item);
         else if (isCode(caught, "not_found")) outcome.gone.push(item);
-        else outcome.failed.push(messageOf(caught));
+        else outcome.failed.push(item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught));
       }
     }
     setProgress(undefined);
@@ -235,7 +286,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     toast(summary.text, summary.tone);
   };
 
-  const restoreItems = async (batch: TrashItem[]) => {
+  const restoreItems = async (batch: BinItem[]) => {
     const outcome = emptyOutcome();
     const conflicting = await restoreBatch(batch, "ask", outcome);
     if (conflicting.length) setConflicts({ items: conflicting, outcome });
@@ -252,18 +303,18 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     finishBatch(outcome);
   };
 
-  const purgeItems = async (batch: TrashItem[]) => {
-    const removed: TrashItem[] = [];
+  const purgeItems = async (batch: BinItem[]) => {
+    const removed: BinItem[] = [];
     let failure = "";
     for (const [index, item] of batch.entries()) {
       setProgress({ label: "正在永久删除", done: index, total: batch.length });
       try {
-        await purgeTrash(item.id);
+        await (item.kind === "page" ? purgePage(item.page.id) : purgeTrash(item.id));
         removed.push(item);
       } catch (caught) {
         if (isCode(caught, "not_found")) removed.push(item);
         else {
-          failure = messageOf(caught);
+          failure = item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught);
           break;
         }
       }
@@ -291,7 +342,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
     setMenuItem(visible.find((item) => item.id === id));
   };
   const menuItems = menuItem && selected.has(menuItem.id) && chosen.length > 1 ? chosen : menuItem ? [menuItem] : [];
-  const menuOrigin = menuItem && !menuItem.originalGone ? menuItem : undefined;
+  const menuOrigin = menuItem && (menuItem.kind === "page" || !menuItem.originalGone) ? menuItem : undefined;
 
   const selecting = chosen.length > 0 || busy;
   return (
@@ -354,22 +405,22 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                       onChange={() => (allChosen ? setSelected(new Set()) : chooseAll())}
                     />
                   )}
-                  {trashSpaces.length > 1 && (
-                    <div className={styles.trTabs} role="radiogroup" aria-label="空间">
+                  {bins.length > 1 && (
+                    <div className={styles.trTabs} role="radiogroup" aria-label="位置">
                       <button type="button" role="radio" aria-checked={!spaceFilter} onClick={() => setSpaceFilter("")}>
                         全部
                         <span aria-hidden="true">{all.length}</span>
                       </button>
-                      {trashSpaces.map((space) => (
+                      {bins.map((bin) => (
                         <button
-                          key={space.id}
+                          key={bin.id}
                           type="button"
                           role="radio"
-                          aria-checked={spaceFilter === space.id}
-                          onClick={() => setSpaceFilter(space.id)}
+                          aria-checked={spaceFilter === bin.id}
+                          onClick={() => setSpaceFilter(bin.id)}
                         >
-                          {spaceName(space)}
-                          <span aria-hidden="true">{all.filter((item) => item.spaceId === space.id).length}</span>
+                          {bin.label}
+                          <span aria-hidden="true">{all.filter((item) => item.spaceId === bin.id).length}</span>
                         </button>
                       ))}
                     </div>
@@ -453,12 +504,21 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                     {error}
                   </p>
                 )}
+                {pageError && (
+                  <p className={styles.trError} role="alert">
+                    无法读取共享工作区的页面：{pageError}
+                  </p>
+                )}
 
                 {all.length === 0 ? (
                   <div className={styles.trEmpty}>
                     <EmptyBin />
                     <strong>回收站是空的</strong>
-                    <p>删除的文件和文件夹会先放在这里，到期前可以恢复。</p>
+                    <p>
+                      {workspace
+                        ? "删除的文件、文件夹和共享工作区的页面会先放在这里，到期前可以恢复。"
+                        : "删除的文件和文件夹会先放在这里，到期前可以恢复。"}
+                    </p>
                   </div>
                 ) : visible.length === 0 ? (
                   <div className={styles.trEmpty}>
@@ -493,9 +553,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                                     onToggle={(range) => toggle(item, range)}
                                     onRestore={() => void restoreOne(item)}
                                     onPurge={() => setPurging({ items: [item], everything: false })}
-                                    onOpenOrigin={() =>
-                                      void showInFiles(spaceOf(item), locationOf(item, spaceOf(item)).folders)
-                                    }
+                                    onOpenOrigin={() => openOrigin(item)}
                                   />
                                 ))}
                               </AnimatePresence>
@@ -529,13 +587,7 @@ export function TrashPanel({ onShowInFiles }: { onShowInFiles: (location: Transf
                                 <ContextMenu.Item
                                   className={styles.trMenuItem}
                                   disabled={!menuOrigin}
-                                  onSelect={() =>
-                                    menuOrigin &&
-                                    void showInFiles(
-                                      spaceOf(menuOrigin),
-                                      locationOf(menuOrigin, spaceOf(menuOrigin)).folders,
-                                    )
-                                  }
+                                  onSelect={() => menuOrigin && openOrigin(menuOrigin)}
                                 >
                                   打开原位置
                                 </ContextMenu.Item>

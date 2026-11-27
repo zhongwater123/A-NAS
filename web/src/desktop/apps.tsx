@@ -208,7 +208,14 @@ const definitions = {
     tone: "trash",
     bounds: { x: 260, y: 76, width: 920, height: 620 },
     launcher: { id: "trash", keywords: "删除 恢复" },
-    render: ({ open }) => <TrashPanel onShowInFiles={(location) => open("files", location)} />,
+    render: ({ open, session, workspace }) => (
+      <TrashPanel
+        workspace={Boolean(workspace)}
+        userId={session.user.id}
+        onShowInFiles={(location) => open("files", location)}
+        onOpenWorkspace={() => open("workspace")}
+      />
+    ),
   },
   settings: {
     title: "设置",

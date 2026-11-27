@@ -73,7 +73,7 @@ schemas:
   WorkspaceTrashedPage:
     type: object
     additionalProperties: false
-    required: [id, title, createdBy, deletedBy, deletedAt, purgeAt, versions]
+    required: [id, title, createdBy, deletedBy, deletedAt, purgeAt, versions, sizeBytes]
     properties:
       id: { type: string }
       title: { type: string }
@@ -82,6 +82,7 @@ schemas:
       deletedAt: { type: string, format: date-time }
       purgeAt: { type: string, format: date-time, description: "When the page and its versions go for good: 30 days after it was deleted." }
       versions: { type: integer, minimum: 1, description: How many versions come back with the page }
+      sizeBytes: { type: integer, format: int64, minimum: 0, description: "What the page's versions take up, which purging frees." }
   WorkspaceTrash:
     type: object
     additionalProperties: false

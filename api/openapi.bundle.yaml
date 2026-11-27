@@ -18581,6 +18581,7 @@ components:
         - deletedAt
         - purgeAt
         - versions
+        - sizeBytes
       properties:
         id:
           type: string
@@ -18601,6 +18602,11 @@ components:
           type: integer
           minimum: 1
           description: How many versions come back with the page
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: What the page's versions take up, which purging frees.
     WorkspaceTrash:
       type: object
       additionalProperties: false

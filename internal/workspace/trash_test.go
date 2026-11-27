@@ -58,6 +58,7 @@ func TestADeletedPageWaitsInTheTrashWithAllItsVersions(t *testing.T) {
 		ID: page.ID, Title: "甲", CreatedBy: workspace.Person{ID: "user:alice", Name: "Alice"},
 		DeletedBy: workspace.Person{ID: "user:alice", Name: "Alice"}, DeletedAt: deletedAt,
 		PurgeAt: deletedAt.AddDate(0, 0, workspace.TrashDays), Versions: 2,
+		SizeBytes: int64(len("<title>甲</title><p>v1") + len("<title>甲</title><p>v2")),
 	}
 	if err != nil || len(trash) != 1 || trash[0] != want {
 		t.Fatalf("Trash() = %+v, %v; want %+v", trash, err, want)

@@ -1,11 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Space, TrashItem } from "../api.generated";
 import { filesHandlers, folder } from "../test/handlers/files";
 import { type Restore, restoredAs, trashHandlers, trashItem } from "../test/handlers/trash";
-import { server } from "../test/server";
+import { other, reader, version, workspaceHandlers, workspacePage, workspaceStore } from "../test/handlers/workspace";
+import { apiError, http, server } from "../test/server";
 import { fixToday } from "../test/today";
 import { expiryOf, groupItems, purgeSchedule, restoredName, sortItems, splitName } from "./model";
 import { TrashPanel } from "./TrashPanel";
@@ -85,6 +87,20 @@ function serve(items: TrashItem[] | (() => TrashItem[]), restore?: Restore) {
   return trash;
 }
 
+// Bin is the recycle bin of alice, who does not use 共享工作区 unless a test
+// says so.
+function Bin(props: Partial<ComponentProps<typeof TrashPanel>>) {
+  return (
+    <TrashPanel
+      workspace={false}
+      userId={reader.id}
+      onShowInFiles={() => undefined}
+      onOpenWorkspace={() => undefined}
+      {...props}
+    />
+  );
+}
+
 const rows = () => screen.getAllByRole("listitem");
 const row = (name: string) => rows().find((element) => element.querySelector("strong")?.textContent === name)!;
 const names = () => rows().map((element) => element.querySelector("strong")?.textContent);
@@ -92,7 +108,7 @@ const names = () => rows().map((element) => element.querySelector("strong")?.tex
 describe("TrashPanel", () => {
   it("says where each item came from, what it holds, when it was deleted and when it goes", async () => {
     serve([plan, photos, orphan]);
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     const card = await screen.findByRole("region", { name: "回收站项目" });
     const totals = screen.getByLabelText("回收站概况");
     expect(totals.textContent).toContain("3.0 GiB");
@@ -140,7 +156,7 @@ describe("TrashPanel", () => {
   it("shows what each coming day deletes, and lists the items of a day", async () => {
     serve([plan, photos, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     const days = within(await screen.findByRole("group", { name: "清理日程" })).getAllByRole("button");
     expect(days).toHaveLength(3);
     const last = days.at(-1)!;
@@ -155,11 +171,11 @@ describe("TrashPanel", () => {
   it("finds items by name and by space", async () => {
     serve([plan, photos, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
-    await user.click(within(screen.getByRole("radiogroup", { name: "空间" })).getByRole("radio", { name: "共享空间" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "位置" })).getByRole("radio", { name: "共享空间" }));
     expect(names()).toEqual(["旅行照片"]);
-    await user.click(within(screen.getByRole("radiogroup", { name: "空间" })).getByRole("radio", { name: "全部" }));
+    await user.click(within(screen.getByRole("radiogroup", { name: "位置" })).getByRole("radio", { name: "全部" }));
     await user.type(screen.getByRole("searchbox", { name: "搜索回收站" }), "笔记");
     expect(names()).toEqual(["笔记.txt"]);
     await user.type(screen.getByRole("searchbox", { name: "搜索回收站" }), "不存在");
@@ -168,11 +184,65 @@ describe("TrashPanel", () => {
     expect(names()).toHaveLength(3);
   });
 
+  it("lists the shared pages alice uploaded or deleted, and restores or deletes them", async () => {
+    serve([plan]);
+    const store = workspaceStore();
+    const mine = workspacePage("page_1", "需求文档", [version(1), version(2, { size: 3000 })]);
+    const theirs = workspacePage("page_2", "别人的页面", [version(1, { savedBy: other })]);
+    const old = workspacePage("page_3", "旧方案", [version(1)]);
+    store.trash = [
+      { page: theirs, deletedBy: other, deletedAt: at(-day) },
+      { page: mine, deletedBy: reader, deletedAt: at(-2 * day) },
+      { page: old, deletedBy: reader, deletedAt: at(-3 * day) },
+    ];
+    server.use(...workspaceHandlers(store));
+    const opened = vi.fn();
+    const user = userEvent.setup();
+    render(<Bin workspace onOpenWorkspace={opened} />);
+    await screen.findByRole("region", { name: "回收站项目" });
+
+    // bob's page, which bob deleted, is in the workspace's own trash only.
+    expect(names()).toEqual(["计划.docx", "需求文档", "旧方案"]);
+    expect(row("需求文档").textContent).toContain("共享工作区 · 2 个版本");
+    expect(row("需求文档").textContent).toContain("4.1 KiB");
+    expect(row("需求文档").textContent).toContain("剩余 28 天");
+    await user.click(
+      within(screen.getByRole("radiogroup", { name: "位置" })).getByRole("radio", { name: "共享工作区" }),
+    );
+    expect(names()).toEqual(["需求文档", "旧方案"]);
+
+    // Restoring puts the page back in the workspace with its versions.
+    await user.click(screen.getByRole("button", { name: "恢复 需求文档" }));
+    expect(await screen.findByText("已恢复“需求文档”到 共享工作区")).toBeTruthy();
+    expect(store.pages.map((page) => page.id)).toEqual(["page_1"]);
+    await user.click(screen.getByRole("button", { name: "打开共享工作区" }));
+    expect(opened).toHaveBeenCalledOnce();
+    await waitFor(() => expect(names()).toEqual(["旧方案"]));
+
+    // Deleting it for good says the versions go with it.
+    await user.click(screen.getByRole("button", { name: "永久删除 旧方案" }));
+    const dialog = await screen.findByRole("dialog", { name: "永久删除？" });
+    expect(dialog.textContent).toContain("这个共享页面及其全部 1 个版本将被立即删除，无法再恢复。");
+    await user.click(within(dialog).getByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(store.trash.map((item) => item.page.id)).toEqual(["page_2"]));
+    expect(await screen.findByText("已永久删除“旧方案”")).toBeTruthy();
+  });
+
+  it("lists the files when the shared pages cannot be read", async () => {
+    serve([plan]);
+    server.use(
+      http.get("/api/v1/workspace/trash", ({ response }) => response(403).json(apiError("workspace_forbidden"))),
+    );
+    render(<Bin workspace />);
+    expect(await screen.findByText("无法读取共享工作区的页面：管理员没有让你使用共享工作区")).toBeTruthy();
+    expect(names()).toEqual(["计划.docx"]);
+  });
+
   it("restores to the original folder at once and shows where it went", async () => {
     const shown = vi.fn();
     const { restores } = serve([plan, photos]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={shown} />);
+    render(<Bin onShowInFiles={shown} />);
     await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
     expect(await screen.findByText("已恢复“计划.docx”到 个人空间 / 文档 / 项目")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -196,7 +266,7 @@ describe("TrashPanel", () => {
         : restoredAs(plan, "计划 (恢复).docx", { parentId: "dir:project", modifiedAt: at(0) }),
     );
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={shown} />);
+    render(<Bin onShowInFiles={shown} />);
     await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
 
     const dialog = await screen.findByRole("dialog", { name: "同名项目" });
@@ -243,7 +313,7 @@ describe("TrashPanel", () => {
       },
     );
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "恢复 计划.docx" }));
     const dialog = await screen.findByRole("dialog", { name: "同名项目" });
     const choices = within(dialog).getByRole("group", { name: "同名项目" });
@@ -282,7 +352,7 @@ describe("TrashPanel", () => {
   it("never offers to replace with a folder", async () => {
     serve([photos], () => "name_conflict");
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "恢复 旅行照片" }));
     const dialog = await screen.findByRole("dialog", { name: "同名项目" });
     expect(within(dialog).getByText("原位置已有同名文件夹")).toBeTruthy();
@@ -296,7 +366,7 @@ describe("TrashPanel", () => {
     const shown = vi.fn();
     serve([plan, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={shown} />);
+    render(<Bin onShowInFiles={shown} />);
     await user.click(await screen.findByRole("button", { name: "在文件管理中打开 个人空间 / 文档 / 项目" }));
     await waitFor(() =>
       expect(shown).toHaveBeenCalledWith({
@@ -312,7 +382,7 @@ describe("TrashPanel", () => {
   it("says beforehand that an item whose folder is gone goes to the space root", async () => {
     serve([orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
     expect(within(row("笔记.txt")).getByTitle("原文件夹已不在，恢复后放在个人空间")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "恢复 笔记.txt" }));
@@ -327,7 +397,7 @@ describe("TrashPanel", () => {
       return restoredAs(orphan, "笔记.txt");
     });
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
     await user.click(screen.getByRole("checkbox", { name: "全选" }));
     const toolbar = screen.getByRole("toolbar", { name: "所选项目的操作" });
@@ -363,7 +433,7 @@ describe("TrashPanel", () => {
         : restoredAs(id === plan.id ? plan : orphan, body.name, { modifiedAt: at(0) }),
     );
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
     await user.click(screen.getByRole("checkbox", { name: "全选" }));
     await user.click(
@@ -385,7 +455,7 @@ describe("TrashPanel", () => {
   it("selects by a click on the row, a range with Shift and everything with Ctrl+A", async () => {
     serve([plan, photos, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
     const checked = () =>
       screen
@@ -412,7 +482,7 @@ describe("TrashPanel", () => {
   it("offers the same from a right-click, for the item or the selection it is part of", async () => {
     const { restores } = serve([plan, photos, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await screen.findByRole("region", { name: "回收站项目" });
     fireEvent.contextMenu(row("笔记.txt"));
     const menu = await screen.findByRole("menu");
@@ -430,7 +500,7 @@ describe("TrashPanel", () => {
   it("asks before deleting for good, one item, a selection or everything", async () => {
     const { purged } = serve([plan, photos, orphan]);
     const user = userEvent.setup();
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     await user.click(await screen.findByRole("button", { name: "永久删除 计划.docx" }));
     let dialog = await screen.findByRole("dialog", { name: "永久删除？" });
     expect(within(dialog).getByText("这个文件将被立即删除，无法再恢复。")).toBeTruthy();
@@ -448,7 +518,7 @@ describe("TrashPanel", () => {
 
   it("is empty with a word on how long items stay", async () => {
     serve([]);
-    render(<TrashPanel onShowInFiles={() => undefined} />);
+    render(<Bin onShowInFiles={() => undefined} />);
     expect(await screen.findByText("回收站是空的")).toBeTruthy();
     expect(screen.queryByText(/保留 30 天/)).toBeNull();
     expect(screen.getByText(/到期前可以恢复/)).toBeTruthy();
