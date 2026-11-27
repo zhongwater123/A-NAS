@@ -1234,6 +1234,8 @@ DESCRIBE_BUSY_WAITS = (5, 10, 20, 40)
 # How long finding the card describer and connecting to it may take: the
 # Worker cannot be stopped before its socket is open.
 DESCRIBE_CONNECT_SECONDS = 15
+# The only hosts a card describer may be reached at over plain http.
+LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 
 
 class _Busy(Exception):
@@ -1262,7 +1264,11 @@ class RemoteDescriber:
         except ValueError as error:
             raise Unavailable(f"the remote card describer's URL: {error}") from error
         if parts.scheme not in ("http", "https") or not parts.hostname or not model:
-            raise Unavailable("a remote card describer needs an http(s) URL and a model name")
+            raise Unavailable("a remote card describer needs an https URL and a model name")
+        # The key frames and the key go over the network: in the clear only
+        # to this machine, as the tests' stand-in does.
+        if parts.scheme != "https" and parts.hostname not in LOOPBACK_HOSTS:
+            raise Unavailable(f"the remote card describer at {parts.hostname} needs https")
         self.host = parts.hostname
         self._connection = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
         self._port = port

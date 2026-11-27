@@ -175,6 +175,13 @@ class RemoteDescriberTest(unittest.TestCase):
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "http://127.0.0.1:port/v1/chat/completions",
                                          "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b"})
         self.assertIsNone(reader.remote, "a URL whose port is no number")
+        worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "http://describer.example/v1/chat/completions",
+                                         "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b", "ANAS_AI_DESCRIBE_KEY": "secret"})
+        self.assertIsNone(reader.remote, "plain http to another machine")
+        worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "https://describer.example/v1/chat/completions",
+                                         "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b"})
+        self.assertEqual(reader.remote.host, "describer.example")
+        reader.remote = None
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": server.url, "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b",
                                          "ANAS_AI_DESCRIBE_KEY": "secret"})
         self.assertEqual(reader.remote.host, "127.0.0.1")
