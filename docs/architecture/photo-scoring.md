@@ -37,11 +37,11 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 ## 数据
 
-`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `schema` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总体；第 3 版加入自定义打分项，并让总体可以排在第一项以外（见下面的 `rating_scores`）；第 4 版给批次加上打分方式，之前的批次都是两位小数的数轴；第 5 版重建 `batches` 让它收五档，并给与新内置项同名的自定义项改名（见下面的 `batches`）。
+`scoring.db` 由 [`sqlitedb`](../../internal/sqlitedb/sqlitedb.go) 打开：WAL、`synchronous=FULL`、外键、一个连接。`PRAGMA user_version` 是已执行的迁移数，[`store.go`](../../internal/scoring/store.go) 的 `schema` 逐个执行；第 2 版加入打分项，第 1 版的批次升级后只打总体；第 3 版加入自定义打分项，并让总体可以排在第一项以外（见下面的 `rating_scores`）；第 4 版给批次加上打分方式，之前的批次都是两位小数的数轴；第 5 版重建 `batches` 让它收五档，并给与新内置项同名的自定义项改名（见下面的 `batches`）；第 6 版同样给与新名称同名的自定义项改名。
 
 第 5 版起迁移用项目共用的 `sqlitedb.Schema`：每一步带反向步骤，以后的版本留下的数据库，本版本按存下的反向步骤退回。第 4 版及以前的版本是手写的迁移，遇到更新的数据库拒绝启动，不会执行反向步骤；所以模块升级已有的数据库之前，先把它复制成 `backups/scoring-<日期>-v<原版本>.db`（`store.go` 的 `migrate`），复制不成功就不升级。回到这些版本时恢复这份副本（[运行手册](../runbooks/install-and-remove-photo-scoring.md#回滚或恢复)）。副本与每天的备份一起计数，保留最近 14 份。
 
-- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按打分顺序以逗号连接的 ID，即管理员点选的先后；第 1 版留下的空值是 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。内置打分项在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改，名称与说明可以改（`overall` 由总分改名为总体，打分手册的五项有说明）。打分项的名称在内置与自定义之间不重复：第 5 版把名为总体、画质或情绪的自定义项改名为“原名（自定义）”，这个名称也被占用时改为“原名（ID）”，ID 不变；新建自定义项也不能用内置项以前的名称“总分”。目录的顺序就是新建批次时的顺序。三档与五档的档名跟着打分项走：`emotion` 的三档是 1 平静、3 中间、5 激烈，五档是 1 很平静到 5 激烈，其余用 1 差到 5 好与 1 很差到 5 很好，导出的列说明（`scales.go` 的 `describe`）与网页（`model.ts` 的 `levelsFor`）一致。情绪在数轴上也从 1 开始：提交时 `answers` 拒绝情绪低于 1.00 的分，网页的 `lowestScore` 让数轴、按键与输入都从 1 开始，导出的列说明写“1 到 5”。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
+- `batches`：名称、来源文件夹、每张人数、打分标准、打分项（`dimensions`，按打分顺序以逗号连接的 ID，即管理员点选的先后；第 1 版留下的空值是 `overall`）、状态（`importing`、`open`、`closed`）、是否已扫描。内置打分项在 [`dimensions.go`](../../internal/scoring/dimensions.go)：ID 写进数据库与导出，所以只增不改，名称与说明可以改（`overall` 由总分改名为总体，`light_color` 由光影色彩改名为光影，`narrative` 由叙事意境改名为叙事性；打分手册的五项与手册以前的画质、情绪有说明）。打分项的名称在内置与自定义之间不重复：第 5 版把名为总体、画质或情绪的自定义项、第 6 版把名为主体、光影或叙事性的自定义项改名为“原名（自定义）”，这个名称也被占用时改为“原名（ID）”，ID 不变；新建自定义项也不能用内置项以前的名称“总分”“光影色彩”“叙事意境”。目录的顺序就是新建批次时的顺序。三档与五档的档名跟着打分项走：`emotion` 的三档是 1 平静、3 中间、5 激烈，五档是 1 很平静到 5 激烈，其余用 1 差到 5 好与 1 很差到 5 很好，导出的列说明（`scales.go` 的 `describe`）与网页（`model.ts` 的 `levelsFor`）一致。情绪在数轴上也从 1 开始：提交时 `answers` 拒绝情绪低于 1.00 的分，网页的 `lowestScore` 让数轴、按键与输入都从 1 开始，导出的列说明写“1 到 5”。批次一有回答，改打分项的 `UPDATE` 在同一条语句里核对“没有回答”，避免第一条回答恰好插在检查与修改之间。
 - `batches.scale` 与 `batches.hide_decimals`：打分方式（`five`、`hundredths`、`tenths`、`whole`、`three`，见 [`scales.go`](../../internal/scoring/scales.go)）与是否不给打分人看分数；表上的约束保证只有两种带小数的方式能不给看。提交时每个分数都要是批次打分方式中的一个（一位小数是 10 的倍数、整数是 100 的倍数、三档是 100、300、500，五档是 100 到 500 中 100 的倍数）。第 5 版加五档：SQLite 改不了列上的约束，迁移在关闭外键的连接上重建 `batches` 表（`sqlitedb.Schema`）。它的反向步骤把五档的批次改为整数（整数包含五档的全部分数），但只有用 `sqlitedb.Schema` 且步数更少的版本才会执行，现在没有这样的版本，见上一段。它们与打分项一起在第一条回答时固定，改动用同一条带“没有回答”核对的 `UPDATE`。
 - `custom_dimensions`：管理员自定义的打分项（`custom_<n>`、名称、说明）。编号只增不复用，名称在全部打分项中唯一；没有改名与删除，所以一个 ID 在每个批次、每次导出里都是同一个意思。
 - `import_files`：来源文件夹中的每个文件与处理结果（`pending`、`done`、`skipped` 及原因）。导入一次处理一个文件，重启后从 `pending` 继续。
@@ -72,7 +72,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 
 多个打分项共用一条数轴：网页为每张照片保存一组百分之一分，新照片从空的一组开始，数轴按正在打的项取分数排列缩略图，打完的照片落到第一项的分数处。只打总体的批次不显示项名，其余都写出正在打的项和自定义项的说明。打分项的目录（内置与自定义）只在管理员接口 `/admin/dimensions` 中；打分人从自己的批次里拿到这一批的打分项与打分方式。数轴按打分方式画成细刻度、整数的六个圆点、三档的三块或五档的五块；同一个分数的缩略图在整数与分档上并排，不叠在一点。不给打分人看分数时窗口不画任何分数，但接口照样返回本人的分数，所以这只是界面上的约定，不是保密手段。点选后进入下一项、最后一项后提交，都由一个 0.35 秒的计时完成，按下数轴或任意键就取消。“上一张”只能回到刚提交的一张，因为模块只允许替换本人最近一次的回答（`rating_locked`）；回去前网页把这一张已打的分数和所在的项暂存，改完提交或按 Esc 后恢复。全屏用浏览器的 Fullscreen API，作用在带 `data-scoring-window` 的打分窗口上，让窗口的提示一起留在屏幕上。100% 查看（[`Loupe.tsx`](../../web/src/scoring/Loupe.tsx)）把原图按设备像素比缩到一个原图像素对一个屏幕像素，用 `orientationMatrix` 转正，平移到鼠标所指的点不动；右下角的小窗用已经加载的预览图，不再多读一次；原图用对象 URL 保存，换照片时释放。
 
-打开批次时窗口依次显示新手教程（[`Tutorial.tsx`](../../web/src/scoring/Tutorial.tsx)，每次都有）、校准页（本浏览器第一次）和打分页。教程的文字与 15 张示例照片随前端打包（[`handbook.ts`](../../web/src/scoring/handbook.ts) 与 `tutorial/`），按打分项 ID 与批次的打分项对上，不经过模块的接口，所以手册改了要改前端。示例照片只在打开窗口后按需加载，不计入桌面首屏的体积；试打的选择只在页面里，不提交也不保存。
+打开批次时窗口直接显示打分页；本浏览器第一次打开某个批次时（`localStorage` 的 `a-nas.scoring.coach.<用户>.<批次>`），打分页先放一张练习照片，用气泡带着打（[`Coach.tsx`](../../web/src/scoring/Coach.tsx)）。练习照片在 `Stage` 里排在所有照片之前，用同一套打分、换项与按键，但它的回答不进发件箱、不计数、不落到数轴上，也不能看 100% 或回到上一张，用指针选分后不自动跳到下一项，要按 Enter；气泡是 `src/ui/` 里的 [`CoachMark`](../../web/src/ui/CoachMark.tsx)（Radix Popover），按 `data-coach` 找到它说的元素放在旁边，那个元素加一圈高亮；气泡不拿走焦点，打分的按键照常可用，焦点在气泡的按钮上时 Enter 按那个按钮。从打分标准重新看引导时，正在打的照片的分数与看的时间按“上一张”同样的办法暂存，练习结束后恢复。打分标准（[`Guide.tsx`](../../web/src/scoring/Guide.tsx)）在批次的说明与锚点图下面接着手册的要点（[`HandbookContent.tsx`](../../web/src/scoring/HandbookContent.tsx)）。手册的文字与 15 张示例照片随前端打包（[`handbook.ts`](../../web/src/scoring/handbook.ts) 与 `tutorial/`），按打分项 ID 与批次的打分项对上，不经过模块的接口，所以手册改了要改前端。示例照片只在打开窗口后按需加载，不计入桌面首屏的体积；试打的选择只在页面里，不提交也不保存。
 
 ## 备份与移除
 
@@ -87,7 +87,7 @@ Host Agent ── 按 /etc/a-nas/modules/scoring.json 建 module-scoring 子卷�
 - [`internal/modules/modules_test.go`](../../internal/modules/modules_test.go)：清单校验、未安装 404、未运行 503、转发只带会话令牌。
 - [`internal/httpapi/routes_test.go`](../../internal/httpapi/routes_test.go)：每个接口都在契约中并按姿态守卫。
 - [系统测试](../../scripts/system-test.sh)：安装脚本、存储归属、套接字权限、单元内只看到存储与 `照片打分`、写不进共享空间、跳过太小的照片、沙箱内重读原图的 100% 查看、按全部打分项提交、移除脚本。
-- [`web/src/scoring`](../../web/src/scoring/ScoringPanel.test.tsx)：键盘打分、改分、悬停缩略图并排对照、新照片没有分数、逐项打分与自动进入下一项和下一张、撤销一步与改上一张、两侧箭头、单击与按住 Z 的 100% 查看、管理员的批次缩略图、按原因的跳过、按项的打分人统计与提醒、导出对话框、打分人开关、每次打开批次的新手教程与试打；[`model.test.ts`](../../web/src/scoring/model.test.ts)：计时、八种 EXIF 方向的转正矩阵、导出的列序。
+- [`web/src/scoring`](../../web/src/scoring/ScoringPanel.test.tsx)：键盘打分、改分、悬停缩略图并排对照、新照片没有分数、逐项打分与自动进入下一项和下一张、撤销一步与改上一张、两侧箭头、单击与按住 Z 的 100% 查看、管理员的批次缩略图、按原因的跳过、按项的打分人统计与提醒、导出对话框、打分人开关、第一次打开批次时练习照片上的引导、跳过与重新看，打分标准里的手册要点与试打；[`model.test.ts`](../../web/src/scoring/model.test.ts)：计时、八种 EXIF 方向的转正矩阵、导出的列序。
 
 ## 关联
 

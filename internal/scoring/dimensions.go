@@ -12,8 +12,9 @@ import (
 
 // Dimension is something raters score a photo on, a 打分项: one of the
 // built-in ones, or one an administrator made, which every later batch can
-// choose too. Description tells raters what to look at; the scoring
-// handbook's built-in ones have one, the three older ones none.
+// choose too. Description tells raters what to look at; the built-in ones
+// of the scoring handbook have one, and so do 画质 and 情绪, which it had
+// before; the two older ones have none.
 type Dimension struct {
 	ID          string
 	Name        string
@@ -21,7 +22,7 @@ type Dimension struct {
 	Custom      bool
 }
 
-// Overall is 总体, which was named 总分 before.
+// Overall is 总体, which was named 总分 before. The handbook scores it last.
 const Overall = "overall"
 
 // Sharpness is 清晰度.
@@ -35,23 +36,25 @@ const Emotion = "emotion"
 const lowestEmotion = 100
 
 // BuiltIn lists the 打分项 every module has, in the order a new batch offers
-// them: the scoring handbook's five, then the older three. Their IDs are
-// stored and exported, so an ID never changes meaning; a new one is added,
-// not renamed, though a name may change.
+// them: the scoring handbook's five, 总体 last; then 画质 and 情绪, which the
+// handbook had before; then the older two. Their IDs are stored and
+// exported, so an ID never changes meaning; a new one is added, not renamed,
+// though a name may change: narrative was 叙事意境, light_color 光影色彩.
 var BuiltIn = []Dimension{
-	{ID: Overall, Name: "总体", Description: "整体拍得好不好，有没有让人想多看一会儿的感觉"},
-	{ID: "composition", Name: "构图", Description: "画面安排得好不好，主体清不清楚"},
-	{ID: "light_color", Name: "光影色彩", Description: "光线和颜色好不好看"},
+	{ID: "composition", Name: "构图", Description: "画面安排得好不好：层次、引导，边缘干不干净"},
+	{ID: "light_color", Name: "光影", Description: "光线和颜色好不好看"},
+	{ID: "narrative", Name: "叙事性", Description: "有没有在讲一件事，看完说得出它讲什么"},
+	{ID: "subject", Name: "主体", Description: "有没有一眼就看到的主体，和背景分不分得开"},
+	{ID: Overall, Name: "总体", Description: "看完各项，有多想多看一会儿；不是各项的平均"},
 	{ID: "quality", Name: "画质", Description: "按正常大小看有没有抖动、虚焦、噪点，不用 100% 查看"},
 	{ID: Emotion, Name: "情绪", Description: "平静还是激烈，只看感觉不看好坏：1 平静，5 激烈"},
 	{ID: Sharpness, Name: "清晰度"},
-	{ID: "narrative", Name: "叙事意境"},
 	{ID: "preference", Name: "喜好程度"},
 }
 
 // formerNames are names built-in 打分项 had before. Older batches, exports
-// and raters still know overall as 总分, so no custom 打分项 takes it.
-var formerNames = []string{"总分"}
+// and raters still know them, overall as 总分, so no custom 打分项 takes one.
+var formerNames = []string{"总分", "光影色彩", "叙事意境"}
 
 const (
 	// MaxBatchDimensions is how many 打分项 a batch scores at most.

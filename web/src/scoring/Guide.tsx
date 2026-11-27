@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Spinner } from "../ui/workspace";
 import { anchorImageURL, listAnchors, type ScoringAnchor, type ScoringRaterBatch, scoringError } from "./api";
+import { HandbookContent } from "./HandbookContent";
 import { formatScore, isLevels, overall, snapScore } from "./model";
 import styles from "./scoring.module.css";
 
@@ -77,8 +78,8 @@ function Picking({ scale, hidden, dimensions }: Pick<ScoringRaterBatch, "scale" 
   );
 }
 
-// GuideContent is what raters see before scoring a batch and whenever they
-// look again: the administrator's scoring guide, the batch's 打分项, how to
+// GuideContent is what raters see whenever they open the scoring guide: the
+// administrator's scoring guide, the batch's 打分项, how to
 // score on the batch's scale, and the reference photos, lowest score first,
 // each with its score as the scale writes it, or none while the batch hides
 // scores from raters.
@@ -203,8 +204,18 @@ export function GuideContent({
   );
 }
 
-// Guide shows GuideContent over the stage; Escape or the button closes it.
-export function Guide({ batch, onClose }: { batch: ScoringRaterBatch; onClose: () => void }) {
+// Guide shows GuideContent over the stage with the scoring handbook under
+// it; Escape or the button closes it. onReplay, where given, walks the rater
+// through the guide on the practice photo again.
+export function Guide({
+  batch,
+  onClose,
+  onReplay,
+}: {
+  batch: ScoringRaterBatch;
+  onClose: () => void;
+  onReplay?: () => void;
+}) {
   const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     close.current?.focus();
@@ -214,11 +225,17 @@ export function Guide({ batch, onClose }: { batch: ScoringRaterBatch; onClose: (
       <div className={styles.scGuideSheet}>
         <header>
           <h2>{batch.name}</h2>
+          {onReplay && (
+            <button type="button" className={styles.scQuiet} onClick={onReplay}>
+              重新看引导
+            </button>
+          )}
           <button ref={close} type="button" className={styles.scIconButton} aria-label="关闭" onClick={onClose}>
             <X />
           </button>
         </header>
         <GuideContent batch={batch} />
+        <HandbookContent batch={batch} />
       </div>
     </div>
   );
