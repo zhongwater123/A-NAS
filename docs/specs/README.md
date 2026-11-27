@@ -47,6 +47,7 @@
 - [照片打分](photo-scoring.md)（draft；可移除模块，实验 NAS 待安装）
 - [硬盘用途与数据卷冗余](disk-roles-and-redundancy.md)（M1 implemented；M2、M3 draft）
 - [家庭待办](family-todos.md)（implemented）
+- [墨水屏（第一批：配对、客厅待办屏、纸条）](eink-screens.md)（draft）
 - [剪辑中心](montage-center.md)（首版 implemented；二次编辑见 ADR 0039）
 - [共享工作区](shared-workspace.md)（draft；第一步：共享页面与 agent 修改）
 
