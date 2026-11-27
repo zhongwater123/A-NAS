@@ -1936,128 +1936,147 @@ button.net-rates {
   height: min(100vh, calc(100vw * 3 / 4));
 }
 
+/* A narrow computer screen; a phone has its own layout below. */
 @media (max-width: 900px) {
-  .desktop-grid {
+  .desktop-shell:not([data-phone]) .desktop-grid {
     grid-template-columns: repeat(2, 88px);
     width: 215px;
   }
-  .status-bar {
+  .desktop-shell:not([data-phone]) .status-bar {
     right: 14px;
     top: 14px;
     gap: 10px;
     padding-right: 14px;
   }
-  .gauge,
-  .gauge svg {
+  .desktop-shell:not([data-phone]) .gauge,
+  .desktop-shell:not([data-phone]) .gauge svg {
     width: 64px;
   }
-  .gauge svg {
+  .desktop-shell:not([data-phone]) .gauge svg {
     height: 45px;
   }
-  .gauge-caption small {
+  .desktop-shell:not([data-phone]) .gauge-caption small {
     display: none;
   }
-  .status-time strong {
+  .desktop-shell:not([data-phone]) .status-time strong {
     font-size: 22px;
   }
-  .app-window {
+  .desktop-shell:not([data-phone]) .app-window {
     max-width: calc(100vw - 112px);
   }
 }
-@media (max-width: 620px) {
-  .desktop-shell {
-    min-width: 0;
-    min-height: 0;
-  }
-  .system-rail {
-    left: 8px;
-    right: 8px;
-    top: auto;
-    bottom: 8px;
-    width: auto;
-    height: 58px;
-    flex-direction: row;
-    padding: 0 8px;
-    border-radius: 20px;
-  }
-  .rail-group {
-    display: flex;
-  }
-  .rail-button::before {
-    left: 50%;
-    top: auto;
-    bottom: -7px;
-    width: 18px;
-    height: 3px;
-    border-radius: 3px 3px 0 0;
-    transform: translateX(-50%) scaleX(0.2);
-  }
-  .rail-button.on::before {
-    transform: translateX(-50%) scaleX(1);
-  }
-  .rail-tip {
-    display: none;
-  }
-  .launcher,
-  .account-popover {
-    left: 8px;
-    right: 8px;
-    top: auto;
-    bottom: 74px;
-    width: auto;
-    transform-origin: 50% 100%;
-    animation-name: rail-sheet-in;
-  }
-  .launcher {
-    max-height: calc(100% - 150px);
-  }
-  .account-popover {
-    left: auto;
-    width: min(272px, calc(100% - 16px));
-    transform-origin: 100% 100%;
-  }
-  .launcher-footer {
-    display: none;
-  }
-  .desktop-grid {
-    left: 18px;
-    right: 18px;
-    top: 96px;
-    bottom: 78px;
-    width: auto;
-    grid-template-columns: repeat(3, 1fr);
-    justify-items: center;
-  }
-  .status-bar {
-    top: 10px;
-    left: 10px;
-    right: 10px;
-    gap: 8px;
-    padding: 6px 12px 6px 6px;
-    justify-content: space-between;
-  }
-  /* Still 4px inside the bar's smaller padding. */
-  .status-gauges-open {
-    inset: -2px -6px -2px -2px;
-  }
-  .status-meta .source-badge {
-    display: none;
-  }
-  .status-time strong {
-    font-size: 20px;
-  }
-  .app-window,
-  .app-window.maximized {
-    inset: 8px 8px 75px !important;
-    width: auto !important;
-    height: auto !important;
-    min-width: 0;
-    min-height: 0;
-    border-radius: 14px;
-  }
-  .task-shelf {
-    display: none;
-  }
+
+/* Phones: upright, or on their side, where the screen is too short for the
+   desktop's 600px minimum and would be cut off at the bottom (as would a
+   browser window that short on a computer). The desktop marks its <main> with
+   data-phone (ui/usePhoneLayout.ts). */
+.desktop-shell[data-phone] {
+  min-width: 0;
+  min-height: 0;
+}
+.desktop-shell[data-phone] .system-rail {
+  left: 8px;
+  right: 8px;
+  top: auto;
+  bottom: 8px;
+  width: auto;
+  height: 58px;
+  flex-direction: row;
+  padding: 0 8px;
+  border-radius: 20px;
+}
+.desktop-shell[data-phone] .rail-group {
+  display: flex;
+}
+.desktop-shell[data-phone] .rail-button::before {
+  left: 50%;
+  top: auto;
+  bottom: -7px;
+  width: 18px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  transform: translateX(-50%) scaleX(0.2);
+}
+.desktop-shell[data-phone] .rail-button.on::before {
+  transform: translateX(-50%) scaleX(1);
+}
+.desktop-shell[data-phone] .rail-tip {
+  display: none;
+}
+.desktop-shell[data-phone] .launcher,
+.desktop-shell[data-phone] .account-popover {
+  left: 8px;
+  right: 8px;
+  top: auto;
+  bottom: 74px;
+  width: auto;
+  transform-origin: 50% 100%;
+  animation-name: rail-sheet-in;
+}
+.desktop-shell[data-phone] .launcher {
+  max-height: calc(100% - 150px);
+}
+.desktop-shell[data-phone] .account-popover {
+  left: auto;
+  width: min(272px, calc(100% - 16px));
+  transform-origin: 100% 100%;
+}
+.desktop-shell[data-phone] .launcher-footer {
+  display: none;
+}
+.desktop-shell[data-phone] .desktop-grid {
+  left: 18px;
+  right: 18px;
+  top: 96px;
+  bottom: 78px;
+  width: auto;
+  grid-template-columns: repeat(3, 1fr);
+  justify-items: center;
+}
+.desktop-shell[data-phone] .status-bar {
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  justify-content: space-between;
+}
+.desktop-shell[data-phone] .gauge,
+.desktop-shell[data-phone] .gauge svg {
+  width: 64px;
+}
+.desktop-shell[data-phone] .gauge svg {
+  height: 45px;
+}
+.desktop-shell[data-phone] .gauge-caption small {
+  display: none;
+}
+/* Still 4px inside the bar's smaller padding. */
+.desktop-shell[data-phone] .status-gauges-open {
+  inset: -2px -6px -2px -2px;
+}
+.desktop-shell[data-phone] .status-meta .source-badge {
+  display: none;
+}
+.desktop-shell[data-phone] .status-time strong {
+  font-size: 20px;
+}
+.desktop-shell[data-phone] .app-window,
+.desktop-shell[data-phone] .app-window.maximized {
+  inset: 8px 8px 75px !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 14px;
+}
+.desktop-shell[data-phone] .task-shelf {
+  display: none;
+}
+/* A window always fills the screen, so it cannot be maximized or resized. */
+.desktop-shell[data-phone] .window-actions .window-maximize,
+.desktop-shell[data-phone] .resize-handle {
+  display: none;
 }
 
 /* Account notices and Administrative Viewing Mode */

@@ -1,5 +1,6 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo } from "react";
 
+import { chooseFiles } from "../lib/pickedFiles";
 import type { useToasts } from "../ui/feedback";
 import type { PhotoLibrary } from "./api";
 import { type Caller, canEditAlbum, libraryName, libraryOf, liveVideoHint, type Place, placeLibrary } from "./model";
@@ -75,15 +76,16 @@ export function usePlaceUploads({ place, caller, mine, viewingLibrary, toast, se
     if (place?.kind !== "timeline" && uploadItems.some((item) => item.state === "done")) pruneUploads();
   }, [uploadItems, place, pruneUploads]);
   const pickFiles = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept =
-      "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,video/*,.mov,.mp4,.m4v,.3gp,.mkv,.webm,.avi,.mts,.m2ts";
-    input.multiple = true;
-    input.onchange = () => {
-      if (uploadTarget && input.files?.length) uploads.add(Array.from(input.files), uploadTarget);
-    };
-    input.click();
+    chooseFiles(
+      {
+        accept:
+          "image/jpeg,image/png,image/heic,image/heif,.heic,.heif,video/*,.mov,.mp4,.m4v,.3gp,.mkv,.webm,.avi,.mts,.m2ts",
+        multiple: true,
+      },
+      (files) => {
+        if (uploadTarget) uploads.add(files, uploadTarget);
+      },
+    );
   };
 
   return { uploadTarget, uploads, pending, pickFiles };

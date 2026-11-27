@@ -13,6 +13,7 @@ import type { FileEntry, Space } from "../api.generated";
 import { VersionsDialog } from "../backup/VersionsDialog";
 import { nameProblem } from "../lib/fileNames";
 import { carriesFiles, PickedFile, pickedFromDrop } from "../lib/pickedFiles";
+import { lastPointerWasTouch, touchScreen } from "../lib/touch";
 import { displayName, usePeople } from "../people/people";
 import { endViewing } from "../settings/api";
 import { useShares } from "../shares/SharesProvider";
@@ -100,6 +101,10 @@ export function FilePanel({
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const [selectedItemID, setSelectedItemID] = useState("");
   const [selectedItemIDs, setSelectedItemIDs] = useState<string[]>([]);
+  // On a touch screen a long press starts choosing several items; taps then
+  // add to or take from the selection until nothing is left selected.
+  const [longPressed, setLongPressed] = useState(false);
+  const picking = longPressed && selectedItemIDs.length > 0;
   const [collapsedSpaceIDs, setCollapsedSpaceIDs] = useState<string[]>([]);
   const [clipboard, setClipboard] = useState<FileClipboard>();
   const [activity, setActivity] = useState("");
@@ -171,9 +176,10 @@ export function FilePanel({
   const selectedSpace = spaces.find((space) => space.id === spaceID);
   const viewing = selectedSpace?.viewing;
   const showResources = selectedSpace?.kind === "private" && !viewing && trail.length === 0;
+  const opens = touchScreen() ? "点按" : "双击";
   const browserItems: FileBrowserItem[] = [
     ...(showResources ? personalFileResources : []),
-    ...entries.map(browserItem),
+    ...entries.map((entry) => browserItem(entry, opens)),
   ];
   const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   const orderedItems = sortFiles(browserItems, order);
@@ -278,6 +284,7 @@ export function FilePanel({
       .catch((caught) => setError(messageOf(caught)));
   };
   const showViewer = (entry: FileEntry) => {
+    setLongPressed(false);
     setViewingID(entry.id);
     setSelectedItemIDs([entry.id]);
     setSelectedItemID(entry.id);
@@ -293,6 +300,15 @@ export function FilePanel({
     else if (item.entry?.kind === "file") download([item.entry]);
     else if (item.resource) openResource(item.resource);
   };
+  const toggleItem = (item: FileBrowserItem) => {
+    setSelectedItemIDs((current) =>
+      current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
+    );
+    setSelectedItemID(item.id);
+  };
+  // A tap opens, as a double click does; while choosing several items after
+  // a long press, it adds to or takes from the selection instead.
+  const tapItem = (item: FileBrowserItem) => (picking ? toggleItem(item) : openItem(item));
   const selectItem = (item: FileBrowserItem, event?: Pick<ReactMouseEvent, "ctrlKey" | "metaKey" | "shiftKey">) => {
     if (event?.shiftKey && selectedItemID) {
       const anchor = visibleItems.findIndex((candidate) => candidate.id === selectedItemID);
@@ -307,10 +323,7 @@ export function FilePanel({
       }
     }
     if (event?.ctrlKey || event?.metaKey) {
-      setSelectedItemIDs((current) =>
-        current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id],
-      );
-      setSelectedItemID(item.id);
+      toggleItem(item);
       return;
     }
     setSelectedItemIDs([item.id]);
@@ -325,6 +338,7 @@ export function FilePanel({
     event.preventDefault();
     event.stopPropagation();
     if (item && !selectedItemIDs.includes(item.id)) selectItem(item);
+    if (item) setLongPressed(lastPointerWasTouch());
     const bounds = managerRef.current?.getBoundingClientRect();
     if (!bounds) return;
     const width = 178;
@@ -606,7 +620,7 @@ export function FilePanel({
           onSort={changeSort}
           onSelect={selectItem}
           onBoxSelect={selectBox}
-          onOpen={openItem}
+          onOpen={tapItem}
           onContextMenu={showContextMenu}
           onClearQuery={() => setQuery("")}
         />

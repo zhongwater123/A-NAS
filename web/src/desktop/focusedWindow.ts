@@ -1,3 +1,4 @@
+import { phoneLayout } from "../ui/usePhoneLayout";
 import { WINDOW_ID } from "./windowSnapshot";
 import { MAXIMIZED_INSET, type WindowModel } from "./windows";
 
@@ -65,20 +66,17 @@ export function subscribeFocusedWindow(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-/** On a page this narrow or narrower the system rail lies along the bottom (desktop.module.css). */
-const NARROW_PAGE = 620;
-/** What the rail takes at the bottom of a narrow page, as windows leave it there. */
+/** What the rail takes at the bottom of a page in the phone layout, as windows leave it there. */
 const NARROW_RAIL = 75;
 /** Between what floats over the windows and the page's edges. */
 const EDGE = 8;
 
 /**
  * Where on a page this large what floats over the windows may sit: not under the system rail, which is
- * drawn above it, on the left of a wide page (where a maximized window starts) or along the bottom of a
- * narrow one.
+ * drawn above it, on the left of a wide page (where a maximized window starts) or along the bottom in
+ * the phone layout.
  */
-export function floatingArea(page: { width: number; height: number }): PageBox {
-  if (page.width <= NARROW_PAGE)
-    return { left: EDGE, top: EDGE, right: page.width - EDGE, bottom: page.height - NARROW_RAIL };
+export function floatingArea(page: { width: number; height: number }, phone = phoneLayout()): PageBox {
+  if (phone) return { left: EDGE, top: EDGE, right: page.width - EDGE, bottom: page.height - NARROW_RAIL };
   return { left: MAXIMIZED_INSET.left, top: EDGE, right: page.width - EDGE, bottom: page.height - EDGE };
 }

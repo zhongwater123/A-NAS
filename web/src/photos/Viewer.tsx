@@ -15,6 +15,7 @@ import {
 import { KeyboardEvent, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ReactZoomPanPinchContentRef, TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
+import { type SwipeStart, swipeEnd, swipeStart } from "../lib/swipe";
 import { displayURL, getPhoto, motionURL, type PhotoAsset, previewURL, thumbnailURL } from "./api";
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { type DetailsActions, PhotoDetails } from "./PhotoDetails";
@@ -111,6 +112,8 @@ export function Viewer({
   const [livePlaying, setLivePlaying] = useState(false);
   const [liveError, setLiveError] = useState(false);
   const [zoomed, setZoomed] = useState(false);
+  // Where a one-finger swipe across the photo began.
+  const swipe = useRef<SwipeStart | undefined>(undefined);
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
@@ -400,7 +403,22 @@ export function Viewer({
           </div>
         </header>
 
-        <div ref={stage} className={`${styles.phViewerStage}${video ? ` ${styles.video}` : ""}`}>
+        <div
+          ref={stage}
+          className={`${styles.phViewerStage}${video ? ` ${styles.video}` : ""}`}
+          // A finger swiped sideways steps to the next or previous photo, as
+          // in a phone's gallery; a zoomed photo pans instead, and the
+          // video's controls keep their own drags.
+          onTouchStart={(event) => {
+            const onControl = Boolean((event.target as HTMLElement).closest("button, input, [role=slider]"));
+            swipe.current = swipeStart(event.touches, event.timeStamp, zoomed || onControl);
+          }}
+          onTouchEnd={(event) => {
+            const step = zoomed ? 0 : swipeEnd(swipe.current, event.changedTouches[0], event.timeStamp);
+            swipe.current = undefined;
+            if (step) go(step);
+          }}
+        >
           {video ? (
             <VideoPlayer
               key={asset.id}

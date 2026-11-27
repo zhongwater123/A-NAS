@@ -3639,6 +3639,19 @@ button.ov-fact:hover .ov-fact-head svg {
   .temp-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* A phone keeps the disk's name readable: the nominal size stays in the
+     tooltip and the badges move under the name. */
+  .disk-end .disk-nominal {
+    display: none;
+  }
+  .set-row-text > .disk-name {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .set-row-text > .disk-name strong {
+    flex-shrink: 0;
+    max-width: 100%;
+  }
   .temp-row:nth-child(2) {
     border-top: 1px solid var(--set-line);
   }

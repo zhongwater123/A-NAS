@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setSession } from "../api/client";
 import type { PhotoAsset, PhotoLibrary, PhotoSearchResults, PhotoText, PhotoTextChange } from "../api.generated";
+import { installTouchInput } from "../lib/touch";
 import { session } from "../test/fixtures";
 import { familyBaby, familyOverview, familyRecord } from "../test/handlers/family";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../test/handlers/photos";
 import { scrolls, sizedScrollers } from "../test/layout";
 import { apiError, formOf, http, pathOf, server } from "../test/server";
+import { phoneLayoutQuery } from "../ui/usePhoneLayout";
 import { PhotosPanel } from "./PhotosPanel";
 
 // jsdom decodes no images: the image searched by is the file as it came.
@@ -621,6 +623,30 @@ describe("PhotosPanel selection", () => {
     screen.getByRole("button", { name: "查看 photo:1.jpg" }).focus();
     await user.keyboard("{Control>}a{/Control}");
     expect(screen.getByText("已选 4 张")).toBeTruthy();
+  });
+
+  it("selects with a long press on a phone, then with taps, and leaves the right button to a mouse", async () => {
+    const uninstall = installTouchInput();
+    try {
+      serve({ timelines: mine(photos) });
+      const user = userEvent.setup();
+      render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+      const tile = async (name: string) => screen.findByRole("button", { name: `查看 ${name}` });
+
+      // A right click is the browser's own.
+      await user.pointer({ keys: "[MouseRight]", target: await tile("photo:1.jpg") });
+      expect(screen.queryByRole("toolbar", { name: "所选照片的操作" })).toBeNull();
+
+      // A long press arrives as contextmenu, with no click after it.
+      fireEvent.pointerDown(await tile("photo:2.jpg"), { pointerType: "touch" });
+      expect(fireEvent.contextMenu(await tile("photo:2.jpg"))).toBe(false);
+      expect(screen.getByRole("toolbar", { name: "所选照片的操作" }).textContent).toContain("已选 1 张");
+      await user.pointer({ keys: "[TouchA]", target: await tile("photo:3.jpg") });
+      expect(screen.getByText("已选 2 张")).toBeTruthy();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    } finally {
+      uninstall();
+    }
   });
 
   it("selects a whole day from its header and moves it to the trash", async () => {
@@ -1983,5 +2009,45 @@ describe("PhotosPanel motion photos", () => {
     await user.click(screen.getByRole("button", { name: "播放动态照片" }));
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
     expect(document.querySelector("video")).toBeNull();
+  });
+});
+
+describe("PhotosPanel on a phone", () => {
+  it("puts the sidebar's places in a row under the toolbar", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === phoneLayoutQuery }));
+    try {
+      serve(
+        { timelines: mine(() => [asset("photo:a")]), albums: { [privateLibrary.id]: () => [trip] } },
+        http.get("/api/v1/photos/albums/{albumId}/assets", ({ response }) =>
+          response(200).json({ items: [asset("photo:a")] }),
+        ),
+      );
+      const user = userEvent.setup();
+      render(<PhotosPanel userId="user:alice" userName="alice" isAdmin={false} />);
+      const nav = await screen.findByRole("navigation", { name: "相册导航" });
+      expect(screen.queryByRole("button", { name: /侧栏/ })).toBeNull();
+      expect(screen.getByRole("button", { name: /上传/ })).toBeTruthy();
+      const place = (name: string) => within(nav).getByRole("button", { name });
+      expect(place("图库").getAttribute("aria-current")).toBe("page");
+      expect(within(nav).getByRole("tab", { name: "我的" }).getAttribute("aria-selected")).toBe("true");
+
+      await user.click(place("相册"));
+      expect(await screen.findByText("新建相册")).toBeTruthy();
+      await user.click(await screen.findByRole("button", { name: /旅行/ }));
+      // An album's own page still counts as 相册, with a way back.
+      expect(await screen.findByRole("button", { name: "返回" })).toBeTruthy();
+      expect(place("相册").getAttribute("aria-current")).toBe("page");
+
+      await user.click(place("AI 聚合"));
+      await waitFor(() => expect(place("AI 聚合").getAttribute("aria-current")).toBe("page"));
+      await user.click(place("回收站"));
+      await waitFor(() => expect(place("回收站").getAttribute("aria-current")).toBe("page"));
+      await user.click(within(nav).getByRole("tab", { name: "共享" }));
+      await waitFor(() =>
+        expect(within(nav).getByRole("tab", { name: "共享" }).getAttribute("aria-selected")).toBe("true"),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

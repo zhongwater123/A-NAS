@@ -3,6 +3,7 @@ import { AnimatePresence, motion, type PanInfo } from "motion/react";
 import { Dialog } from "radix-ui";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
+import { swipeStep } from "../lib/swipe";
 import { displayURL, downloadURL, getPhoto, type PhotoAsset, thumbnailURL } from "../photos/api";
 import { VideoPlayer } from "../photos/VideoPlayer";
 import { useFamily } from "./context";
@@ -126,8 +127,8 @@ function Viewer({
     return () => document.removeEventListener("keydown", listen);
   }, []);
   const swiped = (_: unknown, info: PanInfo) => {
-    if (info.offset.x < -80 || info.velocity.x < -500) go(1);
-    else if (info.offset.x > 80 || info.velocity.x > 500) go(-1);
+    const step = swipeStep(info.offset.x, info.velocity.x);
+    if (step) go(step);
   };
 
   const ratio = asset?.width && asset.height ? asset.width / asset.height : index === start ? aspect : undefined;
