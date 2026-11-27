@@ -11,8 +11,11 @@ const SLOP = 10;
 
 export function installLongPress({ mouse = false }: { mouse?: boolean } = {}) {
   const stop = new AbortController();
-  const listen = <E extends Event>(type: string, listener: (event: E) => void, passive = false) =>
-    document.addEventListener(type, listener as EventListener, { capture: true, passive, signal: stop.signal });
+  const listen = <Type extends keyof DocumentEventMap>(
+    type: Type,
+    listener: (event: DocumentEventMap[Type]) => void,
+    passive = false,
+  ) => document.addEventListener(type, listener, { capture: true, passive, signal: stop.signal });
 
   // One press at a time: where it began, and whether it opened a menu.
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -46,7 +49,7 @@ export function installLongPress({ mouse = false }: { mouse?: boolean } = {}) {
     if (Math.hypot(x - start.x, y - start.y) > SLOP) cancel();
   };
 
-  listen<TouchEvent>(
+  listen(
     "touchstart",
     (event) => {
       if (event.touches.length === 1) press(event.target, event.touches[0].clientX, event.touches[0].clientY);
@@ -57,7 +60,7 @@ export function installLongPress({ mouse = false }: { mouse?: boolean } = {}) {
     },
     true,
   );
-  listen<TouchEvent>(
+  listen(
     "touchmove",
     (event) => {
       const touch = event.touches[0];
@@ -65,19 +68,19 @@ export function installLongPress({ mouse = false }: { mouse?: boolean } = {}) {
     },
     true,
   );
-  listen<TouchEvent>("touchend", (event) => {
+  listen("touchend", (event) => {
     cancel();
     if (opened && event.cancelable) event.preventDefault();
   });
   listen("touchcancel", cancel);
   if (mouse) {
-    listen<PointerEvent>("pointerdown", (event) => {
+    listen("pointerdown", (event) => {
       if (event.pointerType === "mouse" && event.button === 0) press(event.target, event.clientX, event.clientY);
     });
-    listen<PointerEvent>("pointermove", (event) => moved(event.clientX, event.clientY));
+    listen("pointermove", (event) => moved(event.clientX, event.clientY));
     listen("pointerup", cancel);
   }
-  listen<MouseEvent>("click", (event) => {
+  listen("click", (event) => {
     if (!opened) return;
     opened = false;
     event.preventDefault();

@@ -42,8 +42,11 @@ describe("touch input", () => {
     press(item, "touch");
     item.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
     expect(lastPointerWasTouch()).toBe(false);
+    // Uninstalling forgets the last press too, so the next test starts clean.
+    press(item, "touch");
     uninstall();
     expect(touchScreen()).toBe(false);
+    expect(lastPointerWasTouch()).toBe(false);
   });
 
   it("leaves a computer unmarked", () => {
@@ -75,22 +78,37 @@ describe("long press", () => {
     expect(click).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves a short tap, a scroll and a two-finger press alone", () => {
+  // Each press is left to run its full time after it ends, so only the end of
+  // that press, not the next touchstart, can be what cancelled it.
+  it("leaves a short tap alone", () => {
     uninstall = installLongPress();
     const menu = vi.fn();
     item.addEventListener("contextmenu", menu);
-
     touch("touchstart", item);
     vi.advanceTimersByTime(200);
     expect(touch("touchend", item).defaultPrevented).toBe(false);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(menu).not.toHaveBeenCalled();
+  });
 
+  it("leaves a scroll alone", () => {
+    uninstall = installLongPress();
+    const menu = vi.fn();
+    item.addEventListener("contextmenu", menu);
     touch("touchstart", item);
     touch("touchmove", item, { x: 20, y: 60 });
     vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(menu).not.toHaveBeenCalled();
+  });
 
+  it("leaves a second finger, as for a pinch, alone", () => {
+    uninstall = installLongPress();
+    const menu = vi.fn();
+    item.addEventListener("contextmenu", menu);
+    touch("touchstart", item);
+    vi.advanceTimersByTime(100);
     touch("touchstart", item, undefined, 2);
     vi.advanceTimersByTime(LONG_PRESS_MS);
-
     expect(menu).not.toHaveBeenCalled();
   });
 
@@ -103,6 +121,59 @@ describe("long press", () => {
     touch("touchend", item);
     item.click();
     expect(click).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("on iOS", () => {
+  // jsdom's navigator has no maxTouchPoints; both are set on the object and
+  // deleted after, which brings back what its prototype says.
+  const agent = (userAgent: string, maxTouchPoints: number) => {
+    Object.defineProperty(navigator, "userAgent", { value: userAgent, configurable: true });
+    Object.defineProperty(navigator, "maxTouchPoints", { value: maxTouchPoints, configurable: true });
+  };
+  let viewport: HTMLMetaElement;
+  beforeEach(() => {
+    viewport = document.createElement("meta");
+    viewport.name = "viewport";
+    viewport.content = "width=device-width, initial-scale=1.0";
+    document.head.append(viewport);
+  });
+  afterEach(() => {
+    viewport.remove();
+    Reflect.deleteProperty(navigator, "userAgent");
+    Reflect.deleteProperty(navigator, "maxTouchPoints");
+  });
+
+  const longPressOpensMenu = async () => {
+    await vi.dynamicImportSettled();
+    const menu = vi.fn((event: MouseEvent) => event.preventDefault());
+    item.addEventListener("contextmenu", menu);
+    touch("touchstart", item);
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    touch("touchend", item);
+    return menu.mock.calls.length > 0;
+  };
+
+  it.each([
+    ["an iPhone", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148", 5],
+    ["an iPad, which calls itself a Mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", 5],
+  ])("on %s, stops the focus zoom once and loads the long press", async (_, userAgent, points) => {
+    agent(userAgent, points);
+    installTouchInput()();
+    uninstall = installTouchInput();
+    expect(viewport.content).toBe("width=device-width, initial-scale=1.0, maximum-scale=1");
+    expect(await longPressOpensMenu()).toBe(true);
+    // Gone with the rest when uninstalled.
+    uninstall();
+    uninstall = () => {};
+    expect(await longPressOpensMenu()).toBe(false);
+  });
+
+  it("leaves a Mac and other computers as they are", async () => {
+    agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", 0);
+    uninstall = installTouchInput();
+    expect(viewport.content).toBe("width=device-width, initial-scale=1.0");
+    expect(await longPressOpensMenu()).toBe(false);
   });
 });
 

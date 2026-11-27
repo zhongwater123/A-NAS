@@ -43,7 +43,10 @@ export function installTouchInput() {
   const mark = () => root.toggleAttribute("data-touch", screens?.matches === true);
   mark();
   screens?.addEventListener?.("change", mark, { signal });
-  signal.addEventListener("abort", () => root.removeAttribute("data-touch"));
+  signal.addEventListener("abort", () => {
+    root.removeAttribute("data-touch");
+    recordPointer("");
+  });
 
   document.addEventListener("pointerdown", (event) => recordPointer(event.pointerType), { capture: true, signal });
   // A key press is not a tap: Enter or Space on a focused item selects it.
@@ -55,9 +58,27 @@ export function installTouchInput() {
     // maximum scale stops that zoom; people can still pinch to zoom on iOS.
     const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
     if (viewport && !viewport.content.includes("maximum-scale")) viewport.content += ", maximum-scale=1";
-    void import("./longPress").then(({ installLongPress }) => {
-      if (!signal.aborted) signal.addEventListener("abort", installLongPress());
-    });
+    // The long press is how people choose files and photos and open a row's
+    // menu on a phone. It comes as its own chunk; if the network drops it,
+    // the next touch asks again.
+    let loading = false;
+    let loaded = false;
+    const loadLongPress = () => {
+      if (loading || loaded || signal.aborted) return;
+      loading = true;
+      import("./longPress").then(
+        ({ installLongPress }) => {
+          loaded = true;
+          if (!signal.aborted) signal.addEventListener("abort", installLongPress());
+        },
+        (error: unknown) => {
+          loading = false;
+          console.warn("A-NAS long press did not load; the next touch tries again", error);
+        },
+      );
+    };
+    loadLongPress();
+    document.addEventListener("touchstart", loadLongPress, { capture: true, passive: true, signal });
   }
   return () => stop.abort();
 }
