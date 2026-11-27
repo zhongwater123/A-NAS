@@ -70,6 +70,7 @@ func scanVersion(scan func(...any) error, extra ...any) (VersionInfo, error) {
 func (s *Store) ListPages(ctx context.Context) ([]PageSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+versionColumns+`, p.id, p.title, p.created_by, p.created_by_name, p.created_at
 FROM pages p JOIN versions v ON v.page_id = p.id AND v.version = p.latest_version
+WHERE p.deleted_at = ''
 ORDER BY p.updated_at DESC, p.id`)
 	if err != nil {
 		return nil, err
@@ -98,7 +99,7 @@ func (s *Store) page(ctx context.Context, q queryer, id string) (Page, error) {
 	var page Page
 	var createdAt string
 	var latest int
-	err := q.QueryRowContext(ctx, "SELECT id, title, created_by, created_by_name, created_at, latest_version FROM pages WHERE id = ?", id).
+	err := q.QueryRowContext(ctx, "SELECT id, title, created_by, created_by_name, created_at, latest_version FROM pages WHERE id = ? AND deleted_at = ''", id).
 		Scan(&page.ID, &page.Title, &page.CreatedBy.ID, &page.CreatedBy.Name, &createdAt, &latest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Page{}, ErrNotFound
@@ -154,7 +155,7 @@ func (s *Store) describe(ctx context.Context, pageID string, version int, conten
 		columns += ", v.content"
 		targets = append(targets, content)
 	}
-	query := "SELECT " + columns + " FROM pages p JOIN versions v ON v.page_id = p.id WHERE p.id = ? AND v.version = "
+	query := "SELECT " + columns + " FROM pages p JOIN versions v ON v.page_id = p.id WHERE p.id = ? AND p.deleted_at = '' AND v.version = "
 	arguments := []any{pageID}
 	if version > 0 {
 		query += "?"
@@ -420,7 +421,7 @@ func (s *Store) RenamePage(ctx context.Context, actor Actor, pageID, title strin
 	defer s.writes.Unlock()
 	var page Page
 	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
-		result, err := tx.ExecContext(ctx, "UPDATE pages SET title = ? WHERE id = ?", title, pageID)
+		result, err := tx.ExecContext(ctx, "UPDATE pages SET title = ? WHERE id = ? AND deleted_at = ''", title, pageID)
 		if err != nil {
 			return err
 		}
@@ -439,24 +440,19 @@ func (s *Store) RenamePage(ctx context.Context, actor Actor, pageID, title strin
 	return page.PageSummary, nil
 }
 
-// DeletePage removes a page and all its versions. Only the account that
+// DeletePage moves a page with all its versions to the trash, where it can
+// be brought back for TrashDays (RestorePage). Only the account that
 // uploaded it and administrators may.
 func (s *Store) DeletePage(ctx context.Context, actor Actor, pageID string) error {
 	s.writes.Lock()
 	defer s.writes.Unlock()
 	err := sqlitedb.WithTx(ctx, s.db, func(tx *sql.Tx) error {
-		var createdBy, title string
-		err := tx.QueryRowContext(ctx, "SELECT created_by, title FROM pages WHERE id = ?", pageID).Scan(&createdBy, &title)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
+		title, err := s.mayManage(ctx, tx, actor, pageID, false)
 		if err != nil {
 			return err
 		}
-		if createdBy != actor.AccountID && !actor.Admin {
-			return ErrForbidden
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM pages WHERE id = ?", pageID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE pages SET deleted_at = ?, deleted_by = ?, deleted_by_name = ? WHERE id = ?",
+			formatTime(s.now()), actor.AccountID, actor.Name, pageID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM transfers WHERE page_id = ?", pageID); err != nil {
@@ -469,6 +465,23 @@ func (s *Store) DeletePage(ctx context.Context, actor Actor, pageID string) erro
 	}
 	s.live.forgetPage(pageID)
 	return nil
+}
+
+// mayManage returns the title of a page in the list, or in the trash when
+// trashed is true, if actor uploaded it or is an administrator.
+func (s *Store) mayManage(ctx context.Context, q queryer, actor Actor, pageID string, trashed bool) (string, error) {
+	var createdBy, title, deletedAt string
+	err := q.QueryRowContext(ctx, "SELECT created_by, title, deleted_at FROM pages WHERE id = ?", pageID).Scan(&createdBy, &title, &deletedAt)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (deletedAt != "") != trashed {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if createdBy != actor.AccountID && !actor.Admin {
+		return "", ErrForbidden
+	}
+	return title, nil
 }
 
 func checkContent(content []byte) error {

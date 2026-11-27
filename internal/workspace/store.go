@@ -30,6 +30,10 @@ const (
 	MaxEdits      = 50
 	// AuditDays bounds the workspace's audit trail.
 	AuditDays = 180
+	// TrashDays is how long a deleted page can be brought back.
+	TrashDays = 30
+	// BackupsKept is how many daily copies of workspace.db stay.
+	BackupsKept = 14
 )
 
 var (
@@ -202,6 +206,22 @@ DROP TABLE transfers;
 DROP TABLE members;
 DROP TABLE versions;
 DROP TABLE pages;
+`,
+}, {
+	// A deleted page waits in the trash for TrashDays with its versions.
+	// Going back to a build without the trash brings its pages back to the
+	// list rather than losing them.
+	Up: `
+ALTER TABLE pages ADD COLUMN deleted_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE pages ADD COLUMN deleted_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE pages ADD COLUMN deleted_by_name TEXT NOT NULL DEFAULT '';
+CREATE INDEX pages_deleted ON pages(deleted_at) WHERE deleted_at <> '';
+`,
+	Down: `
+DROP INDEX pages_deleted;
+ALTER TABLE pages DROP COLUMN deleted_by_name;
+ALTER TABLE pages DROP COLUMN deleted_by;
+ALTER TABLE pages DROP COLUMN deleted_at;
 `,
 }}}
 

@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/zhongwater123/A-NAS/internal/activity"
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
@@ -110,12 +111,11 @@ func (s *Store) Activity(ctx context.Context, actor Actor, q activity.Query) ([]
 	return activity.Table{DB: s.db}.List(ctx, q)
 }
 
-// Upkeep removes expired transfer links and audit events past AuditDays.
+// Upkeep removes expired transfer links, audit events past AuditDays and
+// pages in the trash past TrashDays, and writes the day's backup.
 func (s *Store) Upkeep(ctx context.Context) error {
 	now := s.now()
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM transfers WHERE expires_at <= ?", formatTime(now)); err != nil {
-		return err
-	}
-	_, err := s.db.ExecContext(ctx, "DELETE FROM audit_events WHERE occurred_at < ?", formatTime(now.AddDate(0, 0, -AuditDays)))
-	return err
+	_, transfers := s.db.ExecContext(ctx, "DELETE FROM transfers WHERE expires_at <= ?", formatTime(now))
+	_, audit := s.db.ExecContext(ctx, "DELETE FROM audit_events WHERE occurred_at < ?", formatTime(now.AddDate(0, 0, -AuditDays)))
+	return errors.Join(transfers, audit, s.emptyTrash(ctx), s.BackupIfDue(ctx))
 }
