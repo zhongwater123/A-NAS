@@ -397,26 +397,7 @@
   font-weight: 600;
 }
 
-/* The guide: before the first photo, and over the stage. */
-.sc-calibration {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  width: 100%;
-  overflow: auto;
-  padding: 28px 36px;
-}
-.sc-calibration-foot {
-  position: sticky;
-  bottom: -28px;
-  display: flex;
-  justify-content: flex-end;
-  margin: 0 -36px -28px;
-  padding: 14px 36px;
-  border-top: 1px solid var(--sc-line);
-  background: rgba(21, 21, 21, 0.92);
-  backdrop-filter: blur(8px);
-}
+/* The guide over the stage. */
 .sc-guide {
   display: flex;
   flex-direction: column;
@@ -745,11 +726,57 @@
 .sc-guide-sheet > header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
 }
 .sc-guide-sheet h2 {
+  flex: 1;
   font-size: 18px;
   font-weight: 650;
+}
+
+/* The guide on the practice photo: a bubble beside what it is about, and a
+   ring around that. The bubble sits under the sheets over the stage. */
+.sc-coach {
+  z-index: 12;
+  width: min(300px, var(--radix-popover-content-available-width, 300px));
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: #222;
+  box-shadow:
+    inset 0 0 0 1px var(--sc-accent-line),
+    0 24px 60px rgba(0, 0, 0, 0.6);
+  color: var(--sc-ink);
+  font-size: 14px;
+  line-height: 1.6;
+  user-select: text;
+  animation: sc-fade 0.2s var(--sc-ease);
+}
+.sc-coach p {
+  margin: 0;
+}
+.sc-coach footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.sc-coach footer span {
+  margin-inline-end: auto;
+  color: var(--sc-ink-3);
+  font: 500 11px / 1 var(--sc-mono);
+}
+.sc-coach footer button {
+  height: 30px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.sc-stage[data-coach-ring="item"] [data-coach="item"],
+.sc-stage[data-coach-ring="scale"] [data-coach="scale"],
+.sc-stage[data-coach-ring="acts"] [data-coach="acts"],
+.sc-stage[data-coach-ring="guide"] [data-coach="guide"],
+.sc-stage[data-coach-ring="confirm"] [data-coach="confirm"] {
+  outline: 2px solid var(--sc-accent);
+  outline-offset: 4px;
 }
 .sc-rest {
   display: flex;

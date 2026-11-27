@@ -189,6 +189,13 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The setup prompt has a Codex send one request to see it is connected
+	// (web/src/workspace/agentPrompt.ts); the connect dialog then sees the
+	// token used.
+	checkConnection(t, product.URL, token)
+	if tokens, err := users.AgentTokens(ctx, alice); err != nil || len(tokens) != 1 || tokens[0].LastUsedAt == nil {
+		t.Fatalf("the connection check left the token unused: %+v %v", tokens, err)
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-code-test", Version: "1"}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: product.URL + "/api/v1/workspace/mcp", HTTPClient: &http.Client{Transport: bearer{token}}, DisableStandaloneSSE: true,
@@ -262,6 +269,44 @@ func TestAMembersAgentChangesWhatTheMemberPicked(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("a removed member's agent: %d", response.StatusCode)
+	}
+}
+
+// checkConnection sends the request in the setup prompt's connection check,
+// read from the sample the web's test reads too
+// (internal/workspacemcp/testdata/connection-check.json).
+func checkConnection(t *testing.T, base, token string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "workspacemcp", "testdata", "connection-check.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var check struct {
+		Body      string            `json:"body"`
+		Headers   map[string]string `json:"headers"`
+		AnswerHas string            `json:"answerHas"`
+	}
+	if err := json.Unmarshal(raw, &check); err != nil {
+		t.Fatal(err)
+	}
+	request, err := http.NewRequest(http.MethodPost, base+"/api/v1/workspace/mcp", strings.NewReader(check.Body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range check.Headers {
+		request.Header.Set(name, value)
+	}
+	response, err := (&http.Client{Transport: bearer{token}}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	answer, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(answer), check.AnswerHas) {
+		t.Fatalf("the connection check: %d %s", response.StatusCode, answer)
 	}
 }
 

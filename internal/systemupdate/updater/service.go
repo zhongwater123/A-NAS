@@ -208,6 +208,18 @@ func (s *Service) recordCheckFailed(state *State, problem *Problem) {
 	state.Record(Record{At: s.now(), Kind: RecordCheckFailed, By: ByAutomatic, Problem: problem})
 }
 
+// A newer candidate replaces an ordinary rollback warning. A rollback that
+// failed must pass the device's health check before either backend clears it.
+func keepRollbackWarning(ctx context.Context, state *State, newer bool, health func(context.Context) *Problem) bool {
+	if state.Phase != PhaseRolledBack {
+		return false
+	}
+	if state.Problem != nil && state.Problem.Code == ProblemRollback {
+		return health(ctx) != nil
+	}
+	return !newer
+}
+
 // check reads the source's signed index and finds the candidate.
 func (s *Service) check(ctx context.Context, state *State, takePush bool) error {
 	if state.Phase.Busy() {
@@ -245,14 +257,11 @@ func (s *Service) check(ctx context.Context, state *State, takePush bool) error 
 	if candidate != "" && !slices.Contains(state.Rejected, candidate) {
 		newer = s.newer(ctx, candidate, current)
 	}
-	if !newer {
+	keepWarning := keepRollbackWarning(ctx, state, newer, s.checkInstalled)
+	if !newer || keepWarning {
 		state.LastCheckProblem = nil
 		state.Candidate, state.DownloadBytes, state.DownloadedBytes = "", 0, 0
-		// A rollback stays on the page, with its reason, until a newer
-		// version replaces it; one that left the device failing its check,
-		// until the check passes again, as after a repair by the runbook.
-		if state.Phase != PhaseRolledBack ||
-			(state.Problem != nil && state.Problem.Code == ProblemRollback && s.checkInstalled(ctx) == nil) {
+		if !keepWarning {
 			state.Phase, state.Problem = PhaseUpToDate, nil
 		}
 		return nil

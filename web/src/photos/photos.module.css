@@ -808,6 +808,21 @@
 .ph-check:hover {
   background: rgba(255, 255, 255, 0.35);
 }
+/* A touch screen (lib/touch.ts) has no hover: the circle shows only while
+   choosing, and an unseen one does not catch taps meant for the photo. It is
+   bigger to hit. */
+:global(:root[data-touch]) .ph-tile:not(.selecting) .ph-check {
+  pointer-events: none;
+}
+:global(:root[data-touch]) .ph-tile:hover:not(.selecting) .ph-check {
+  opacity: 0;
+}
+:global(:root[data-touch]) .ph-check {
+  top: 4px;
+  left: 4px;
+  width: 28px;
+  height: 28px;
+}
 .ph-tile.selected .ph-check {
   border-color: #fff;
   color: #fff;
@@ -3265,7 +3280,81 @@ button.ph-face-name:hover {
 .ph-app.narrow .ph-title small {
   display: none;
 }
-.ph-app.narrow .ph-button:global(.primary) span,
+/* Phone width: the search box gets the second row, so the title, the photo
+   size and 上传 stay on the first and in sight. */
+.ph-app.compact .ph-toolbar-row:not(.ph-selection-row) {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.ph-app.compact .ph-toolbar-row:not(.ph-selection-row) > .ph-search {
+  order: 1;
+  flex: 1 1 calc(100% - 74px);
+}
+/* The photo size follows the search box on the second row; a page without
+   the search box gives it a row of its own at the end. */
+.ph-app.compact .ph-toolbar-row:not(.ph-selection-row) > .ph-zoom {
+  order: 2;
+}
+.ph-app.compact .ph-toolbar-row > .ph-button:not(:global(.primary)) span {
+  display: none;
+}
+.ph-app.compact .ph-title {
+  min-width: 0;
+}
+/* A phone: no sidebar. Its places are a row under the toolbar (PlacesBar).
+   上传 keeps its word as on a computer (.narrow:not(.phone) below). */
+.ph-places {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  margin: 0 -14px -10px -12px;
+  padding: 0 14px 0 12px;
+  scrollbar-width: none;
+}
+.ph-places::-webkit-scrollbar {
+  display: none;
+}
+.ph-places .ph-libraries {
+  flex: none;
+  margin: 0;
+  padding: 2px;
+}
+.ph-places .ph-libraries button {
+  flex: none;
+  height: 28px;
+  padding: 0 12px;
+}
+.ph-place-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+}
+.ph-place-tabs button {
+  position: relative;
+  height: 40px;
+  border: 0;
+  padding: 0 10px;
+  color: var(--ph-muted);
+  background: transparent;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ph-place-tabs button.active {
+  color: var(--ph-ink);
+}
+.ph-place-tabs button.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ph-accent);
+}
+.ph-app.narrow:not(.phone) .ph-button:global(.primary) span,
 .ph-app.narrow .ph-selection-hint,
 .ph-app.narrow .ph-selection-row > button span {
   display: none;

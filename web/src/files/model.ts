@@ -57,13 +57,14 @@ export const personalFileResources: FileBrowserItem[] = [
   },
 ];
 
-export function browserItem(entry: FileEntry): FileBrowserItem {
+// opens is how a file opens: "双击" with a mouse, "点按" on a touch screen.
+export function browserItem(entry: FileEntry, opens: "双击" | "点按" = "双击"): FileBrowserItem {
   return {
     id: entry.id,
     name: entry.name,
     kind: entry.kind,
     type: entry.kind === "directory" ? "文件夹" : fileTypeLabel(entry.name),
-    detail: entry.kind === "directory" ? "文件夹" : isViewable(entry.name) ? "双击预览" : "双击下载",
+    detail: entry.kind === "directory" ? "文件夹" : `${opens}${isViewable(entry.name) ? "预览" : "下载"}`,
     modifiedAt: entry.modifiedAt,
     sizeBytes: entry.sizeBytes,
     entry,

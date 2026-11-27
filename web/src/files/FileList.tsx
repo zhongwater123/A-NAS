@@ -2,6 +2,7 @@ import { ChevronDown, Clock3, FolderClosed, FolderPlus, Pin, Search } from "luci
 import { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useRef, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
+import { rowGestures } from "../ui/rowGestures";
 import { FileArtwork } from "./FileIcon";
 import styles from "./files.module.css";
 import { FileBrowserItem, FileView, formatFileDate } from "./model";
@@ -58,7 +59,12 @@ export function FileList({
   const [selectionRect, setSelectionRect] = useState<SelectionRect>();
   const { sortBy, direction } = order;
   const beginBoxSelection = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest("[data-file-item], button, a, input, select"))
+    // A finger on empty space scrolls the list; a selection box is for a mouse.
+    if (
+      event.button !== 0 ||
+      event.pointerType === "touch" ||
+      (event.target as HTMLElement).closest("[data-file-item], button, a, input, select")
+    )
       return;
     const shell = shellRef.current;
     if (!shell) return;
@@ -95,13 +101,19 @@ export function FileList({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
   };
-  const itemProps = (item: FileBrowserItem) => ({
-    "data-file-item": item.id,
-    ...dragProps(item),
-    onClick: (event: ReactMouseEvent) => onSelect(item, event),
-    onDoubleClick: () => onOpen(item),
-    onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
-  });
+  const itemProps = (item: FileBrowserItem) => {
+    const drag = dragProps(item);
+    return {
+      "data-file-item": item.id,
+      ...drag,
+      ...rowGestures({
+        open: () => onOpen(item),
+        select: (event: ReactMouseEvent) => onSelect(item, event),
+        draggable: drag.draggable,
+      }),
+      onContextMenu: (event: ReactMouseEvent) => onContextMenu(event, item),
+    };
+  };
   const pinBadge = (item: FileBrowserItem) =>
     isPinned(item, order) && <Pin className={styles.filePinBadge} aria-label="已置顶" />;
 

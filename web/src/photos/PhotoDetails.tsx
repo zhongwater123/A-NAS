@@ -2,6 +2,7 @@ import { Baby, CircleDot, Copy, Film, FolderPlus, Pencil, Plus, X } from "lucide
 import { FormEvent, useState } from "react";
 
 import { formatBytes } from "../lib/bytes";
+import { chooseFiles } from "../lib/pickedFiles";
 import { addPhotoTag, type PhotoAlbum, type PhotoAsset, type PhotoLibrary, removePhotoTag } from "./api";
 import {
   type Caller,
@@ -86,16 +87,10 @@ export function PhotoDetails({ asset, details, caller, actions, onChanged }: Pro
     void run(() => addPhotoTag(asset.id, name));
   };
   const pickLiveVideo = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".mov,video/quicktime";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
+    chooseFiles({ accept: ".mov,video/quicktime" }, ([file]) => {
       setAttaching(true);
       void actions.attachLiveVideo(current, file).finally(() => setAttaching(false));
-    };
-    input.click();
+    });
   };
   const megapixels = (current.width * current.height) / 1e6;
   const video = current.video;

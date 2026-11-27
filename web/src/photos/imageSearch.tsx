@@ -2,6 +2,7 @@ import { Camera } from "lucide-react";
 import type { ClipboardEvent, DragEvent } from "react";
 
 import { APIError } from "../api/client";
+import { chooseFiles } from "../lib/pickedFiles";
 import { createImageSearch, listImageSearchResults, type PhotoPage } from "./api";
 import styles from "./photos.module.css";
 
@@ -24,19 +25,15 @@ export type ImageResult = { error?: string } | undefined;
 const queryEdge = 1600;
 let queries = 0;
 
-export const imageFile = (files?: FileList | null) =>
+export const imageFile = (files?: FileList | File[] | null) =>
   Array.from(files ?? []).find((file) => file.type.startsWith("image/"));
 
 // pickImage lets the member choose one image to search by.
 export function pickImage(onImage: (file: File) => void) {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.onchange = () => {
-    const file = imageFile(input.files);
+  chooseFiles({ accept: "image/*" }, (files) => {
+    const file = imageFile(files);
     if (file) onImage(file);
-  };
-  input.click();
+  });
 }
 
 // prepareImageQuery decodes any image the browser can show, turns it upright,

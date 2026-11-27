@@ -12,6 +12,7 @@ import {
   useRef,
 } from "react";
 
+import { touchScreen } from "../lib/touch";
 import { getPhoto, type PhotoAsset } from "./api";
 import type { Box, Entry } from "./layout";
 import type { ScrollerHandle } from "./PhotoScroller";
@@ -65,7 +66,8 @@ export function useTileRenderer(grid: GridProps, badge?: (asset: PhotoAsset) => 
     gridRef.current.scroller.current?.beginSwipe(asset.id, event, swipe);
   }, []);
   const onDragIds = useCallback((asset: PhotoAsset) => gridRef.current.onDragIds?.(asset) ?? [asset.id], []);
-  const draggable = Boolean(grid.onDragIds);
+  // A long press selects on a touch screen; dragging would take it.
+  const draggable = Boolean(grid.onDragIds) && !touchScreen();
   return useCallback(
     (box: Box<PhotoAsset>) => (
       <Tile

@@ -1,6 +1,7 @@
 import { Check, CircleAlert, Copy, Film, Play, RotateCcw } from "lucide-react";
 import { DragEvent, MouseEvent, memo, PointerEvent, ReactNode, useRef } from "react";
 
+import { lastPointerWasTouch } from "../lib/touch";
 import { displayURL, type PhotoAsset, previewURL } from "./api";
 import type { Box, PendingPhoto } from "./layout";
 import { clock } from "./model";
@@ -66,6 +67,13 @@ export const Tile = memo(function Tile({
         onClick={(event) => {
           if (selecting || event.shiftKey || event.ctrlKey || event.metaKey) onToggle(asset, event);
           else onOpen(asset, event.currentTarget.querySelector("img"));
+        }}
+        // On a phone a long press selects the photo, as in the phone's own
+        // gallery; taps then add to the selection.
+        onContextMenu={(event) => {
+          if (!lastPointerWasTouch()) return;
+          event.preventDefault();
+          if (!selected) onToggle(asset, event);
         }}
       >
         <img

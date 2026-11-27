@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { coarsePointer, installTouchInput } from "../lib/touch";
 import { SharesProvider } from "../shares/SharesProvider";
 import {
   downloads,
@@ -394,6 +395,70 @@ describe("file manager", () => {
     await waitFor(() => expect(click).toHaveBeenCalledTimes(3));
     expect(screen.queryByRole("dialog", { name: /^预览/ })).toBeNull();
     expect(asked.sent).toEqual([["file:cat"], ["file:beach"], ["file:archive"]]);
+  });
+
+  it("opens a file on a tap on a touch screen, and a long press selects it for more", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === coarsePointer }));
+    const uninstall = installTouchInput();
+    try {
+      const entries = [
+        entry("beach.jpg", { id: "file:beach", spaceId: ownSpace.id }),
+        entry("cat.png", { id: "file:cat", spaceId: ownSpace.id }),
+        entry("notes.txt", { id: "file:notes", spaceId: ownSpace.id }),
+        entry("plan.txt", { id: "file:plan", spaceId: ownSpace.id }),
+      ];
+      serve({ spaces: [ownSpace], entries });
+      const user = userEvent.setup();
+      renderFiles();
+      await screen.findByRole("row", { name: /plan\.txt/ });
+      const row = (name: string) => screen.getAllByRole("row").find((item) => item.textContent?.includes(name))!;
+      expect(row("beach.jpg").textContent).toContain("点按预览");
+      expect(row("beach.jpg").getAttribute("draggable")).toBe("false");
+
+      await user.pointer({ keys: "[TouchA]", target: row("beach.jpg") });
+      expect(await screen.findByRole("dialog", { name: "预览 beach.jpg" })).toBeTruthy();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /^预览/ })).toBeNull());
+      // The file viewed stays selected, and the next tap still opens.
+      await user.pointer({ keys: "[TouchA]", target: row("cat.png") });
+      expect(await screen.findByRole("dialog", { name: "预览 cat.png" })).toBeTruthy();
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /^预览/ })).toBeNull());
+
+      // A long press arrives as contextmenu: it selects the file and shows its
+      // menu; taps then add to the selection instead of opening.
+      // No click follows it, as on a phone.
+      fireEvent.pointerDown(row("notes.txt"), { pointerType: "touch" });
+      fireEvent.contextMenu(row("notes.txt"));
+      expect(await screen.findByRole("menu", { name: "文件操作" })).toBeTruthy();
+      await user.keyboard("{Escape}");
+      await user.pointer({ keys: "[TouchA]", target: row("plan.txt") });
+      await waitFor(() =>
+        expect(
+          screen
+            .getAllByRole("row")
+            .filter((item) => item.getAttribute("aria-selected") === "true")
+            .map((item) => item.textContent?.match(/\w+\.txt/)?.[0]),
+        ).toEqual(["notes.txt", "plan.txt"]),
+      );
+      expect(screen.queryByRole("dialog", { name: /^预览/ })).toBeNull();
+      // Taking both out ends the choosing: a tap opens again. plan.txt was
+      // tapped a moment ago, and a second tap on it this soon would be one
+      // double tap (ui/rowGestures.ts), so it waits that out.
+      await user.pointer({ keys: "[TouchA]", target: row("notes.txt") });
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      await user.pointer({ keys: "[TouchA]", target: row("plan.txt") });
+      await waitFor(() =>
+        expect(screen.getAllByRole("row").filter((item) => item.getAttribute("aria-selected") === "true")).toHaveLength(
+          0,
+        ),
+      );
+      await user.pointer({ keys: "[TouchA]", target: row("beach.jpg") });
+      expect(await screen.findByRole("dialog", { name: "预览 beach.jpg" })).toBeTruthy();
+    } finally {
+      uninstall();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("uploads picked and dropped files through the transfer center without blocking the folder", async () => {

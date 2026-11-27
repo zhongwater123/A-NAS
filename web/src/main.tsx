@@ -5,8 +5,15 @@ import { ErrorBoundary } from "react-error-boundary";
 import App from "./App";
 import { BootSplash } from "./boot/BootSplash";
 import styles from "./desktop/desktop.module.css";
+import { installTouchInput } from "./lib/touch";
 
 const container = document.getElementById("root")!;
+
+installTouchInput();
+// The phone simulator (phone.html) opens the desktop with ?touch, so a mouse
+// acts as a finger. A device's build leaves the module out.
+if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("touch"))
+  void import("./lib/touchSimulator").then(({ simulateTouch }) => simulateTouch());
 
 // The desktop's last resort: a window, a part of the desktop or the boot
 // splash that fails has its own boundary, so this shows only when the desktop

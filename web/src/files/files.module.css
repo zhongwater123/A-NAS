@@ -1543,6 +1543,15 @@
   background: #2876c8;
 }
 
+/* A finger (lib/touch.ts) needs a taller target; the bar has no room to make
+   them wider. */
+:global(:root[data-touch]) .file-manager .file-command-button {
+  height: 36px;
+}
+:global(:root[data-touch]) .file-icon-button {
+  width: 32px;
+  height: 34px;
+}
 @container filebrowser (max-width: 680px) {
   .file-list {
     min-width: 330px;

@@ -626,7 +626,7 @@ function DiskRow({ disk, member }: { disk: Disk; member: boolean }) {
     <div className={styles.setRow}>
       <IconTile tone={disk.rotational ? "hdd" : "ssd"} icon={HardDrive} size="lg" />
       <div className={styles.setRowText}>
-        <span>
+        <span className={styles.diskName}>
           <strong>{disk.model || "未识别设备"}</strong>
           <Pill tone={role.tone} outline={spare}>
             {role.label}
