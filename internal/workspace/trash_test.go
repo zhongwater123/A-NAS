@@ -197,11 +197,25 @@ func TestEachDayKeepsACompressedCopyOfThePages(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// What a backup cut short by a power cut left goes first, even on a day
+	// with no room for a copy.
+	backups := filepath.Join(dir, "backups")
+	plant := func(names ...string) {
+		t.Helper()
+		if err := os.MkdirAll(backups, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range names {
+			if err := os.WriteFile(filepath.Join(backups, name), []byte("left over"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	plant("copy.db", "copy.db.partial", "workspace-2026-11-26.db.gz.partial")
 	full = true
 	if err := store.BackupIfDue(ctx); !errors.Is(err, workspace.ErrVolumeFull) {
 		t.Fatalf("a backup at the reserve: %v", err)
 	}
-	backups := filepath.Join(dir, "backups")
 	if entries, _ := os.ReadDir(backups); len(entries) != 0 {
 		t.Fatalf("a refused backup left %v", entries)
 	}
@@ -230,9 +244,14 @@ WHERE p.id = ?`, page.ID).Scan(&title, &deletedAt, &content); err != nil || titl
 		t.Fatalf("the trashed page in the copy: %q, %v", deletedAt, err)
 	}
 
-	// Once a day; the newest BackupsKept stay.
+	// Once a day; a plain copy left by a crash after the archive was written
+	// goes all the same. The newest BackupsKept stay.
+	plant("copy.db")
 	if err := store.BackupIfDue(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(backups); len(entries) != 1 {
+		t.Fatalf("the backups folder after a second run today holds %v", entries)
 	}
 	for range workspace.BackupsKept + 2 {
 		now = now.AddDate(0, 0, 1)

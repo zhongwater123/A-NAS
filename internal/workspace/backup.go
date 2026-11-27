@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zhongwater123/A-NAS/internal/sqlitedb"
 )
@@ -23,6 +24,12 @@ import (
 // its default level saves 4 % more in two and a half times as long.
 func (s *Store) BackupIfDue(ctx context.Context) error {
 	dir := filepath.Join(s.directory, "backups")
+	// A backup cut short by a crash or a power cut leaves its plain copy or
+	// half an archive; they go first, so they neither stay for good nor
+	// count against the room the next copy asks for.
+	if err := removeLeftovers(dir); err != nil {
+		return err
+	}
 	name := filepath.Join(dir, "workspace-"+s.now().UTC().Format("2006-01-02")+".db.gz")
 	if _, err := os.Stat(name); err == nil {
 		return nil
@@ -43,20 +50,43 @@ func (s *Store) BackupIfDue(ctx context.Context) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	plain := filepath.Join(dir, "copy.db")
+	plain := filepath.Join(dir, plainCopy)
 	defer func() { _ = os.Remove(plain) }()
 	if err := sqlitedb.Copy(ctx, filepath.Join(s.directory, "workspace.db"), plain); err != nil {
 		return err
 	}
-	if err := compress(plain, name); err != nil {
+	if err := compress(ctx, plain, name); err != nil {
 		return err
 	}
 	return sqlitedb.KeepNewest(dir, "workspace-", ".db.gz", BackupsKept)
 }
 
+// plainCopy is the uncompressed copy a backup compresses. Its name is fixed,
+// so leftovers are found.
+const plainCopy = "copy.db"
+
+// removeLeftovers removes the plain copy and the half-written files
+// (….partial) of a backup that did not finish.
+func removeLeftovers(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if name := entry.Name(); name == plainCopy || strings.HasSuffix(name, ".partial") {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // compress writes plain to name with gzip, readable by its owner alone; a
-// failed write leaves nothing behind.
-func compress(plain, name string) (err error) {
+// failed or cancelled write leaves nothing behind.
+func compress(ctx context.Context, plain, name string) (err error) {
 	in, err := os.Open(plain)
 	if err != nil {
 		return err
@@ -77,7 +107,8 @@ func compress(plain, name string) (err error) {
 	if err != nil {
 		return err
 	}
-	if _, err = io.Copy(writer, in); err != nil {
+	// A large database takes a while; stopping the service does not wait for it.
+	if _, err = io.Copy(writer, cancellable{ctx, in}); err != nil {
 		return err
 	}
 	if err = writer.Close(); err != nil {
@@ -90,4 +121,17 @@ func compress(plain, name string) (err error) {
 		return err
 	}
 	return os.Rename(partial, name)
+}
+
+// cancellable reads from r until ctx is done.
+type cancellable struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c cancellable) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
 }

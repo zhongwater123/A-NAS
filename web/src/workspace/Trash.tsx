@@ -37,7 +37,14 @@ export function Trash({
   onClose: () => void;
 }) {
   const queries = useQueryClient();
-  const trash = useQuery({ queryKey: trashKey, queryFn: ({ signal }) => listTrash(signal) });
+  // Others delete, restore and purge pages, and upkeep removes expired
+  // ones, while the trash is open: it reads again as often as the list.
+  const trash = useQuery({
+    queryKey: trashKey,
+    queryFn: ({ signal }) => listTrash(signal),
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
+  });
   const [busy, setBusy] = useState<string>();
   const act = async (page: WorkspaceTrashedPage, run: () => Promise<unknown>, done: string) => {
     setBusy(page.id);

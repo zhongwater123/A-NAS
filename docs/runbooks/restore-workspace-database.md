@@ -14,7 +14,7 @@
 - 权限：NAS 上的 root。
 - 目标：数据卷上的 `/srv/a-nas/data/workspace/`，属主 `a-nas-workspace`。备份在其中的 `backups/workspace-<UTC 日期>.db.gz`，每天一份，留最近 14 份。
 - 风险：备份之后保存的版本、上传的页面与改的名字全部丢失；恢复期间共享工作区不可用（`503 workspace_unavailable`），成员的 agent 调用同样失败。
-- 停止条件：`a-nas-check` 报数据卷不在、只读或不是预期的那块；`gzip -t` 校验备份失败；要恢复的那天没有备份。
+- 停止条件：`a-nas-check` 报数据卷不在、只读或不是预期的那块；`gzip -t` 校验备份失败；要恢复的那天没有备份；停服务后它仍不是 `inactive`（服务还开着数据库时移走它，会丢掉正在写的内容）。
 
 ## 步骤
 
@@ -26,25 +26,34 @@
    - 预期：列出 `workspace-<日期>.db.gz`；所选的那份输出 `ok`。
    - 完成标准：确定要回到的日期。日期是 UTC，北京时间 08:00 前保存的内容算在前一天的备份之后。
 
-2. 停服务，留下现在的数据库。
+2. 停服务。
    ```sh
    systemctl stop anas-workspace.service
-   cd /srv/a-nas/data/workspace
-   mkdir -m 0700 replaced-$(date -u +%Y%m%dT%H%M%SZ)
-   mv workspace.db workspace.db-wal workspace.db-shm replaced-*/ 2>/dev/null; ls replaced-*/
+   systemctl is-active anas-workspace.service
    ```
-   - 预期：`systemctl is-active anas-workspace` 为 `inactive`；`replaced-…/` 里有 `workspace.db`（`-wal`、`-shm` 可能没有）。
+   - 预期：输出 `inactive`（`failed` 也表示服务已不在运行）。
+   - 完成标准：服务已停。输出 `active` 或 `deactivating` 时它还开着数据库：停止，不做下一步。
+
+3. 留下现在的数据库。只在服务已停时移动：
+   ```sh
+   cd /srv/a-nas/data/workspace
+   if systemctl is-active --quiet anas-workspace.service; then echo "服务仍在运行，没有移动"; else
+     replaced=replaced-$(date -u +%Y%m%dT%H%M%SZ); mkdir -m 0700 "$replaced"
+     for f in workspace.db workspace.db-wal workspace.db-shm; do [ -e "$f" ] && mv "$f" "$replaced/"; done
+     ls "$replaced"; fi
+   ```
+   - 预期：列出 `workspace.db`（`-wal`、`-shm` 可能没有）。
    - 完成标准：目录里不再有 `workspace.db*`。现在的 `-wal` 与 `-shm` 不能留在原处：SQLite 会把它们写进恢复的数据库。
 
-3. 解压备份。
+4. 解压备份。
    ```sh
    gzip -dc backups/workspace-2026-11-26.db.gz > workspace.db
    chown a-nas-workspace:a-nas-workspace workspace.db && chmod 0600 workspace.db
    ```
    - 预期：`workspace.db` 的属主是 `a-nas-workspace`，权限 `0600`。
-   - 完成标准：`sqlite3 workspace.db 'PRAGMA integrity_check'` 输出 `ok`（NAS 上没有 `sqlite3` 时跳过，第 4 步的检查会发现打不开的库）。
+   - 完成标准：`sqlite3 workspace.db 'PRAGMA integrity_check'` 输出 `ok`（NAS 上没有 `sqlite3` 时跳过，第 5 步的检查会发现打不开的库）。
 
-4. 启动服务。
+5. 启动服务。
    ```sh
    systemctl start anas-workspace.service
    a-nas-check
