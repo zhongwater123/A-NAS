@@ -234,6 +234,10 @@ func send(ctx context.Context, dial dialer, op string, message any, files []*os.
 // decoder taken over by a malicious file can only read what it was given.
 func ReadOnly(files ...*os.File) error {
 	for _, file := range files {
+		// A nil file has no name for the errors below to print.
+		if file == nil {
+			return errors.New("ffmpeg worker input is missing")
+		}
 		flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFL, 0)
 		if err != nil {
 			return fmt.Errorf("ffmpeg worker input %s: %w", file.Name(), err)

@@ -29,3 +29,16 @@ func TestWritableInputsAreRefusedBeforeDialing(t *testing.T) {
 		t.Fatalf("ReadOnly(read-only) = %v", err)
 	}
 }
+
+// A missing input is an error, not a panic: in a background job a panic would
+// take the whole service down.
+func TestMissingInputIsRefusedBeforeDialing(t *testing.T) {
+	t.Parallel()
+	dial := func(context.Context, string) (*net.UnixConn, func(), error) {
+		t.Fatal("a request with a missing input dialled the worker")
+		return nil, nil, nil
+	}
+	if _, _, err := send(context.Background(), dial, OpProbe, Request{Op: OpProbe}, []*os.File{nil}); err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("send() = %v, want the missing input refused", err)
+	}
+}
