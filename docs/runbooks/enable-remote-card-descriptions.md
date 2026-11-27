@@ -30,13 +30,15 @@
 
 1. **确认这台 NAS 连得上接口**（以普通账号即可）：
    ```bash
-   read -rp 'URL: ' URL; read -rsp 'Key: ' KEY; echo
-   curl -sS -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
-     -d '{"model":"<模型名>","messages":[{"role":"user","content":"hi"}],"max_tokens":1}' "$URL"
+   read -rp 'URL: ' URL; read -rp 'Model: ' MODEL; read -rsp 'Key: ' KEY; echo
+   curl -sS -o /dev/null -w '%{http_code}\n' --connect-timeout 10 --max-time 60 \
+     -H @<(printf 'Authorization: Bearer %s\n' "$KEY") -H 'Content-Type: application/json' \
+     -d "{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":1}" "$URL"
    unset KEY
    ```
+   - 密钥经 `printf`（shell 内建命令）写进只有 curl 读的管道，不出现在任何进程的命令行里，别的账号用 `ps` 看不到。
    - 预期：`200`。
-   - 完成标准：是 `200`。连不上、超时或 `401` 时停下。
+   - 完成标准：是 `200`。连不上、60 秒内没有回答（curl 报超时）或 `401` 时停下。
 2. **root：写接口地址、模型名与密钥**，只有 root 能读：
    ```bash
    read -rp 'URL: ' URL; read -rp 'Model: ' MODEL; read -rsp 'Key: ' KEY; echo

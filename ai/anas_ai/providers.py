@@ -1231,6 +1231,9 @@ class LlamaReader:
 # How long a busy card describer (429, 503) is waited for before it is asked
 # again: a shared endpoint that refuses a request cools down for about 5 s.
 DESCRIBE_BUSY_WAITS = (5, 10, 20, 40)
+# How long finding the card describer and connecting to it may take: the
+# Worker cannot be stopped before its socket is open.
+DESCRIBE_CONNECT_SECONDS = 15
 
 
 class _Busy(Exception):
@@ -1254,11 +1257,15 @@ class RemoteDescriber:
 
     def __init__(self, url, model, key="", busy_waits=DESCRIBE_BUSY_WAITS, timeout=OCR_SILENCE_SECONDS):
         parts = urllib.parse.urlsplit(url)
+        try:
+            port = parts.port
+        except ValueError as error:
+            raise Unavailable(f"the remote card describer's URL: {error}") from error
         if parts.scheme not in ("http", "https") or not parts.hostname or not model:
             raise Unavailable("a remote card describer needs an http(s) URL and a model name")
         self.host = parts.hostname
         self._connection = http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
-        self._port = parts.port
+        self._port = port
         self._path = urllib.parse.urlunsplit(("", "", parts.path or "/", parts.query, ""))
         self._model, self._key = model, key
         self._busy_waits, self._timeout = tuple(busy_waits), timeout
@@ -1274,11 +1281,11 @@ class RemoteDescriber:
     def complete(self, body, run):
         """As LlamaReader._complete: the text, no log probabilities, the finish reason and the prompt tokens.
 
-        A busy endpoint (429, 503) is asked again after each of busy_waits,
-        then raises Failed, so that the card is described again later. A key
-        or a URL it does not take (401, 403, 404), or an endpoint it cannot
-        reach, is Unavailable: no card can be described until that changes.
-        Other 4xx are InvalidInput, as from llama-server.
+        A busy endpoint (429, 503) is asked again after each of busy_waits.
+        One still busy, a key or a URL it does not take (401, 403, 404), or
+        an endpoint it cannot reach is Unavailable: the photo library waits
+        and asks again, without counting it against the card. Other 4xx are
+        InvalidInput, as from llama-server.
         """
         for wait in self._busy_waits:
             try:
@@ -1293,16 +1300,21 @@ class RemoteDescriber:
         try:
             return self._post(body, run)
         except _Busy as busy:
-            raise Failed(str(busy)) from busy
+            raise Unavailable(str(busy)) from busy
 
     def _post(self, body, run):
         headers = {"Content-Type": "application/json"}
         if self._key:
             headers["Authorization"] = "Bearer " + self._key
-        connection = self._connection(self.host, self._port, timeout=self._timeout)
+        connection = self._connection(self.host, self._port, timeout=DESCRIBE_CONNECT_SECONDS)
         text, finish, prompt_tokens, failed = [], None, 0, None
         try:
+            if run.terminate:
+                raise Cancelled()
+            # Bounded, as the Worker cannot be stopped until the socket is
+            # open; the answer then may take as long as llama-server's.
             connection.connect()
+            connection.sock.settimeout(self._timeout)
             run.attach(connection.sock)
             connection.request("POST", self._path, json.dumps(body), headers)
             response = connection.getresponse()

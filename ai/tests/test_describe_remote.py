@@ -130,11 +130,21 @@ class RemoteDescriberTest(unittest.TestCase):
         self.assertEqual(answer["summary"], "两人走向雪山")
         self.assertEqual(len(server.requests), 3)
 
-    def test_an_endpoint_that_stays_busy_fails_the_card_for_now(self):
+    def test_an_endpoint_that_stays_busy_is_waited_for_without_failing_the_card(self):
         server = self.endpoint((429, "cooling down"), (429, "cooling down"), (429, "cooling down"))
-        with self.assertRaises(providers.Failed):
+        # Unavailable: the photo library asks again later and does not count it against the card.
+        with self.assertRaisesRegex(providers.Unavailable, "429"):
             self.describe(self.reader(server))
         self.assertEqual(len(server.requests), 3)
+
+    def test_a_card_cancelled_before_it_is_sent_is_not_sent(self):
+        server = self.endpoint()
+        reader = self.reader(server)
+        run = reader.run_options()
+        run.terminate = True
+        with self.assertRaises(providers.Cancelled):
+            reader.describe([b"one", b"two", b"three"], [0, 2.4, 5], [1, 2, 3], 6, run)
+        self.assertEqual(server.requests, [])
 
     def test_a_key_the_endpoint_refuses_makes_describing_unavailable(self):
         server = self.endpoint((401, "no such key"))
@@ -162,6 +172,9 @@ class RemoteDescriberTest(unittest.TestCase):
         self.assertIsNone(reader.remote)
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": server.url})
         self.assertIsNone(reader.remote, "a URL without a model name")
+        worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": "http://127.0.0.1:port/v1/chat/completions",
+                                         "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b"})
+        self.assertIsNone(reader.remote, "a URL whose port is no number")
         worker.remote_describer(reader, {"ANAS_AI_DESCRIBE_URL": server.url, "ANAS_AI_DESCRIBE_MODEL": "qwen3.5-4b",
                                          "ANAS_AI_DESCRIBE_KEY": "secret"})
         self.assertEqual(reader.remote.host, "127.0.0.1")
