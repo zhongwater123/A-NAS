@@ -40,7 +40,7 @@ func TestBoardPicture(t *testing.T) {
 		{Text: "一件医疗的事", When: "还有 5 天"},
 		{Text: "续租房合同十个字", When: "还有 45 天"},
 	}
-	picture := f.Board(rows, 2, "都处理完了", now)
+	picture := f.Board(rows, 2, "都处理完了", "buried", now)
 	if picture.Bounds().Dx() != Width || picture.Bounds().Dy() != Height {
 		t.Fatalf("picture is %v", picture.Bounds())
 	}
@@ -54,27 +54,45 @@ func TestBoardPicture(t *testing.T) {
 	if black, all := blackIn(picture, plain), plain.Dx()*plain.Dy(); black == 0 || black > all/3 {
 		t.Errorf("a plain row has %d of %d pixels black", black, all)
 	}
-	// The footer counts the rest; the companion's column stays white for now.
+	// The footer counts the rest; the companion stands in its own column.
 	if blackIn(picture, image.Rect(margin, footerY-30, 200, footerY+8)) == 0 {
 		t.Error("the footer does not count the rest")
 	}
-	if blackIn(picture, image.Rect(leftWidth, 0, Width, Height)) != 0 {
-		t.Error("the board drew into the companion's column")
+	if blackIn(picture, image.Rect(leftWidth, 0, Width, Height)) == 0 {
+		t.Error("the companion is missing")
 	}
-	again := f.Board(rows, 2, "都处理完了", now)
+	again := f.Board(rows, 2, "都处理完了", "buried", now)
 	if !bytes.Equal(Pack(picture), Pack(again)) {
 		t.Error("the same board drew two different pictures")
 	}
-	if bytes.Equal(Pack(picture), Pack(f.Board(rows, 2, "都处理完了", now.Add(time.Minute)))) {
+	if bytes.Equal(Pack(picture), Pack(f.Board(rows, 2, "都处理完了", "buried", now.Add(time.Minute)))) {
 		t.Error("the time of the update is not on the picture")
 	}
 }
 
 func TestEmptyBoardSaysSo(t *testing.T) {
 	f := fonts(t)
-	picture := f.Board(nil, 0, "都处理完了", time.Date(2026, 11, 27, 10, 5, 0, 0, time.Local))
+	picture := f.Board(nil, 0, "都处理完了", "sleep", time.Date(2026, 11, 27, 10, 5, 0, 0, time.Local))
 	if blackIn(picture, image.Rect(margin, 180, leftWidth-margin, 250)) == 0 {
 		t.Error("an empty board is blank")
+	}
+}
+
+func TestEveryPoseIsDrawn(t *testing.T) {
+	f := fonts(t)
+	now := time.Date(2026, 11, 27, 10, 5, 0, 0, time.Local)
+	column := image.Rect(leftWidth, 0, Width, Height)
+	for _, pose := range []string{"sleep", "idle", "buried"} {
+		inked := blackIn(f.Board(nil, 0, "都处理完了", pose, now), column)
+		if inked == 0 {
+			t.Errorf("pose %s draws nothing", pose)
+		}
+	}
+	if blackIn(f.Board(nil, 0, "都处理完了", "", now), column) != 0 {
+		t.Error("no pose still drew a companion")
+	}
+	if bytes.Equal(Pack(f.Board(nil, 0, "都处理完了", "sleep", now)), Pack(f.Board(nil, 0, "都处理完了", "idle", now))) {
+		t.Error("asleep and waiting look the same")
 	}
 }
 
@@ -122,7 +140,7 @@ func TestDrawBoardSample(t *testing.T) {
 		{Text: "交停车费", When: "已过期 3 天", Urgent: true},
 		{Text: "一件医疗的事", When: "明天截止"},
 		{Text: "交电费", When: "还有 5 天"},
-	}, 2, "都处理完了", time.Now())
+	}, 2, "都处理完了", "buried", time.Now())
 	var pgm bytes.Buffer
 	pgm.WriteString("P5\n800 480\n255\n")
 	pgm.Write(picture.Pix)

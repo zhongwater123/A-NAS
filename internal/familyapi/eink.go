@@ -227,7 +227,7 @@ func (h *handler) devicePicture(w http.ResponseWriter, r *http.Request) {
 	for i, row := range board.Rows {
 		rows[i] = eink.Row{Text: row.Text, When: row.When, Urgent: row.Urgent}
 	}
-	picture := eink.Pack(f.Board(rows, board.More, family.BoardEmpty, h.store.Now()))
+	picture := eink.Pack(f.Board(rows, board.More, family.BoardEmpty, board.Pet, h.store.Now()))
 	w.Header().Set("X-Content-Hash", board.Key())
 	writePicture(w, picture)
 }

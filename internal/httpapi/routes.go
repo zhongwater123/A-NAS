@@ -253,7 +253,7 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 		return h.guardAgent(route)
 	}
 	if route.Posture == apiroute.Device {
-		return guardDevice(route)
+		return h.guardDevice(route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.Accounts == nil {

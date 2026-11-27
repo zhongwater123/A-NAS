@@ -1,11 +1,14 @@
 package eink
 
 import (
+	"bytes"
+	"embed"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -127,10 +130,58 @@ const (
 	footerY   = 448
 )
 
+// The companion's poses in the right column (internal/eink/pet/CREDITS.md):
+// asleep, waiting, buried under leaves. Black is 0, white 255.
+//
+//go:embed pet/*.png
+var petFiles embed.FS
+
+const (
+	petColumn = Width - margin - leftWidth // 176
+	petBottom = Height - 8
+)
+
+// pet is the picture of a pose, or nil for one without a picture.
+func pet(pose string) image.Image {
+	data, err := petFiles.ReadFile("pet/" + pose + ".png")
+	if err != nil {
+		return nil
+	}
+	picture, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		panic(err) // the embedded pictures are the repository's own
+	}
+	return picture
+}
+
+// drawPet puts the pose bottom centre in the right column, and zz over the
+// sleeping one, which the picture leaves out.
+func (f *Fonts) drawPet(picture *image.Gray, pose string) {
+	art := pet(pose)
+	if art == nil {
+		return
+	}
+	bounds := art.Bounds()
+	x0 := leftWidth + (petColumn-bounds.Dx())/2
+	y0 := petBottom - bounds.Dy()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if gray := color.GrayModel.Convert(art.At(x, y)).(color.Gray); gray.Y < 0x80 {
+				picture.SetGray(x0+x-bounds.Min.X, y0+y-bounds.Min.Y, black)
+			}
+		}
+	}
+	if pose == "sleep" {
+		text(picture, f.face(true, 22), black, x0+bounds.Dx()-40, y0-8, "z")
+		text(picture, f.face(true, 30), black, x0+bounds.Dx()-20, y0-30, "z")
+	}
+}
+
 // Board draws the to-do board: up to three rows, the most pressing first,
 // urgent ones white on black; the rest counted at the bottom with the time
-// of the update; 都处理完了 when nothing is listed.
-func (f *Fonts) Board(rows []Row, more int, empty string, now time.Time) *image.Gray {
+// of the update; 都处理完了 when nothing is listed; the companion in its pose
+// in the right column.
+func (f *Fonts) Board(rows []Row, more int, empty, pose string, now time.Time) *image.Gray {
 	picture := image.NewGray(image.Rect(0, 0, Width, Height))
 	draw.Draw(picture, picture.Bounds(), image.NewUniform(white), image.Point{}, draw.Src)
 	if len(rows) == 0 {
@@ -162,6 +213,7 @@ func (f *Fonts) Board(rows []Row, more int, empty string, now time.Time) *image.
 	}
 	updated := "更新 " + now.Format("15:04")
 	text(picture, small, black, leftWidth-margin-width(small, updated), footerY, updated)
+	f.drawPet(picture, pose)
 	return picture
 }
 

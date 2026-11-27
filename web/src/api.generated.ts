@@ -2370,7 +2370,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** A paired screen asks whether to redraw (docs/specs/eink-screens.md). It takes the screen's device token as a bearer token and never a session cookie; a request carrying Origin (a browser's) is 403 forbidden, a missing, wrong or revoked token 401. The answer's names are the firmware's and fixed; times are the NAS's local time to the second, without a zone. Malformed report fields are ignored */
+        /** A paired screen asks whether to redraw (docs/specs/eink-screens.md). It takes the screen's device token as a bearer token and never a session cookie; a request carrying Origin (a browser's) is 403 forbidden, a missing, wrong or revoked token 401, and a client refused 10 times within 10 minutes 429 too_many_attempts until those 10 minutes end. The answer's names are the firmware's and fixed; times are the NAS's local time to the second, without a zone. Malformed report fields are ignored */
         get: operations["askEinkNext"];
         put?: never;
         post?: never;
@@ -14841,6 +14841,7 @@ export interface operations {
             };
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -14869,6 +14870,7 @@ export interface operations {
             };
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -14892,6 +14894,7 @@ export interface operations {
             };
             401: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
