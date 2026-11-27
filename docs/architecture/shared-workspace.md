@@ -93,7 +93,7 @@ agent（产品服务的 `agent` 姿态）：`POST|GET|DELETE /api/v1/workspace/m
 - Codex：`codex mcp add` 只有 `--bearer-token-env-var`，而桌面版与编辑器插件读不到 shell 里设的环境变量，所以写进 `config.toml` 的 `[mcp_servers.a-nas]`：`url` 与 `http_headers = { Authorization = "Bearer …" }`（Codex 源码 `codex-rs/config/src/mcp_types.rs` 的 `StreamableHttp`）。`codex mcp list` 不连接服务，所以另外发一次 `tools/list`：macOS 与 Linux 用 `curl`，Windows 用 `Invoke-RestMethod`（Windows PowerShell 5.1 给外部程序传参时会弄乱 JSON 里的引号）。无状态的 MCP 服务不要求先 `initialize`，但要求 `Accept` 同时含 `application/json` 与 `text/event-stream`。
 - 两者都让 agent 最后告诉成员开一个新对话：新加的服务在之后开始的对话里才可用。
 
-令牌在产品服务核验时记下上次使用时间，所以试连的那一次就让对话框变成“已连接”。令牌经过成员与 agent 的对话，因而也到了模型厂商与本机的对话记录里；成员此前把命令粘给 agent 时已经如此，令牌只能在局域网里用于共享工作区，可以撤销，90 天不用即失效。要让令牌完全不进对话，得用一次性地址加脚本（`curl … | sh`），多一套基础设施，agent 也常拒绝运行这类命令，没有采用。
+令牌在产品服务核验时记下上次使用时间，所以试连的那一次就让对话框变成“已连接”。令牌经过成员与 agent 的对话，因而也到了模型厂商与本机的对话记录里；这项代价与没有采用的一次性配对链接见 [ADR 0040 的后果](../adr/0040-let-members-agents-edit-shared-pages-through-agent-tokens.md#后果)。
 
 ## MCP 工具
 
