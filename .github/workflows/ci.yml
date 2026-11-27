@@ -305,6 +305,10 @@ jobs:
       - name: Run the root integration tests in disposable containers
         run: scripts/root-integration-test.sh anas-systemd:trixie
 
+      # Require all six tests to pass with the device's FFmpeg and libheif (#425).
+      - name: Run the real codec tests in the Debian 13 image
+        run: scripts/codec-test.sh anas-systemd:trixie
+
       # The Qdrant content package takes the pinned tarball
       # (scripts/build-content-packages.sh).
       - name: Restore the pinned Qdrant server

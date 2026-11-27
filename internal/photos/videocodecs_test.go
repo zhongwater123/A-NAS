@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhongwater123/A-NAS/internal/codectest"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
 	"github.com/zhongwater123/A-NAS/internal/photos"
 )
@@ -22,7 +23,7 @@ import (
 func TestRealVideoCodecs(t *testing.T) {
 	tools, ok := ffmpegworker.LocalTools()
 	if !ok {
-		t.Skip("media codecs not installed")
+		codectest.Missing(t, "FFmpeg is not installed")
 	}
 	dir := t.TempDir()
 	encode := func(name string, args ...string) []byte {

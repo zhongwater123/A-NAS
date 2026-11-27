@@ -31,6 +31,18 @@
 
 清单目前固定 Linux x86_64 包。ARM64 Linux 上经 binfmt 注册的 x86_64 模拟（qemu-user-static 或 Rosetta）运行同一个二进制，开发机 C 的做法见 [macOS 环境](environments/macos.md#运行检查)；[`scripts/check-dev-env.sh`](../../scripts/check-dev-env.sh) 检查二进制是否已获取、binfmt 是否已注册。完整检查须设置 `ANAS_QDRANT_REQUIRED=1`，缺失依赖就失败；该标志不会让不兼容的二进制变得可运行。读取及跳过逻辑见 [`vectorindextest`](../../internal/vectorindex/vectorindextest/vectorindextest.go)。
 
+## 真实编解码器的测试
+
+6 个测试用真实的 FFmpeg 与 libheif 检查转码与抽帧、音频解码、HEIC、动态照片和几种视频编码：`internal/ffmpegworker` 的 `TestRealFFmpeg`、`TestRealFFmpegAudio`、`TestRealHEIF`，`internal/music` 的 `TestRealFFmpegDecodesThroughTheWorker`，`internal/photos` 的 `TestRealMotionPhotoCodecs`、`TestRealVideoCodecs`。样本都由测试自己生成。
+
+普通 Go 测试按本机可用的工具运行。CI 的 `Project checks` 为软件包检查按需安装 FFmpeg，缺少 libheif 工具时相关用例仍会跳过。Debian 13 的编解码测试设置 `ANAS_CODECS_REQUIRED=1`，缺工具或生成不了样本会使作业失败（[`codectest`](../../internal/codectest/codectest.go)，[#425](https://github.com/zhongwater123/A-NAS/issues/425)）。
+
+CI 的系统测试作业用 [`scripts/codec-test.sh`](../../scripts/codec-test.sh) 运行它们：在作业中编译这三个包的测试程序，以普通用户在系统测试的 Debian 13 镜像中运行（编解码器与设备上的相同），并核对 6 个测试都出现在输出里且通过。本地有 Docker 与这个镜像时：
+
+```bash
+scripts/build-system-test-image.sh && make codec-test
+```
+
 ## 测试素材
 
 测试用的大文件与模型（[拉取模型](ai-development.md#拉取模型)）放在同一个私有仓库 [zhongwater123/A-NAS-assets](https://github.com/zhongwater123/A-NAS-assets) 中，每套素材一个 Release，附 `SHA256SUMS`。仓库开启了不可变 Release，补充素材就发新的 Release。读取需要仓库所有者把账号加为协作者。

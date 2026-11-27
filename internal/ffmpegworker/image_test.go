@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/zhongwater123/A-NAS/internal/codectest"
 )
 
 func TestImageUsesWorkerOwnedMemoryAndBoundedSize(t *testing.T) {
@@ -43,11 +45,11 @@ func TestImageUsesWorkerOwnedMemoryAndBoundedSize(t *testing.T) {
 func TestRealHEIF(t *testing.T) {
 	decoder, err := exec.LookPath("heif-thumbnailer")
 	if err != nil {
-		t.Skip("heif-thumbnailer is not installed")
+		codectest.Missing(t, "heif-thumbnailer is not installed")
 	}
 	encoder, err := exec.LookPath("heif-enc")
 	if err != nil {
-		t.Skip("heif-enc is not installed")
+		codectest.Missing(t, "heif-enc is not installed")
 	}
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.png")
