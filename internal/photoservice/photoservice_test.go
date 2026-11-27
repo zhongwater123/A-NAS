@@ -84,15 +84,22 @@ func start(t *testing.T, configure ...func(*photoservice.Config)) running {
 	}
 	go func() { r.done <- photoservice.Run(ctx, config) }()
 	t.Cleanup(func() { cancel(); <-r.done }) //nolint:errcheck // Waits for Run to stop; tests that expect a clean stop check its error first.
-	// The socket file appears on bind, a moment before it accepts.
+	waitForSocket(t, r.socket)
+	return r
+}
+
+// waitForSocket waits until socket accepts connections. Run binds its
+// sockets one after another while the test goes on, and a socket file
+// appears on bind, a moment before it accepts.
+func waitForSocket(t *testing.T, socket string) {
+	t.Helper()
 	waitFor(t, func() bool {
-		conn, err := net.Dial("unix", r.socket)
+		conn, err := net.Dial("unix", socket)
 		if err == nil {
 			_ = conn.Close()
 		}
 		return err == nil
 	})
-	return r
 }
 
 func waitFor(t *testing.T, condition func() bool) {

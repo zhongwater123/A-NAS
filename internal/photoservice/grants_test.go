@@ -331,11 +331,15 @@ func TestTheGrantSocketRefusesAnyOtherUID(t *testing.T) {
 		config.GrantSocketPath, config.GrantPeerUID = grantSocket, os.Getuid()+1
 	})
 	r.ready.Store(true)
-	if info, err := os.Stat(grantSocket); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("grant socket mode = %v, %v", info, err)
-	}
+	// start waits only for the API socket; Run binds the grant socket after it.
+	waitForSocket(t, grantSocket)
+	// Run sets the socket's mode after binding it and only then serves it, so
+	// the mode is checked once the server has turned this UID away.
 	if _, err := (photosapi.GrantClient(grantSocket)).List(context.Background()); err == nil || photosapi.GrantErrorCode(err) != "" {
 		t.Fatalf("List() from another UID = %v; want the connection closed unanswered", err)
+	}
+	if info, err := os.Stat(grantSocket); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("grant socket mode = %v, %v", info, err)
 	}
 }
 
