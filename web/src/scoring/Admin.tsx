@@ -211,11 +211,15 @@ function RowCover({ batch }: { batch: ScoringBatch }) {
 
 function BatchProgress({ batch }: { batch: ScoringBatch }) {
   if (batch.state === "importing") {
-    const { files, imported, skipped } = batch.import;
+    const { files, imported, skipped, waitingForSpace } = batch.import;
     return (
       <span className={styles.scProgress}>
         <span>
-          {files === 0 ? "正在读取文件夹" : `已处理 ${formatCount(imported + skipped)} / ${formatCount(files)} 个文件`}
+          {waitingForSpace
+            ? "空间不足，导入已暂停"
+            : files === 0
+              ? "正在读取文件夹"
+              : `已处理 ${formatCount(imported + skipped)} / ${formatCount(files)} 个文件`}
         </span>
         <span className={styles.scBar} aria-hidden="true">
           <span style={{ inlineSize: `${share(imported + skipped, files) * 100}%` }} />
@@ -361,7 +365,13 @@ function BatchDetail({
           导出
         </button>
       </header>
-      {batch.state === "importing" && (
+      {batch.state === "importing" && batch.import.waitingForSpace && (
+        <Notice tone="warning">
+          数据卷剩余空间低于保留容量，导入已暂停；腾出空间后自动继续。已处理{" "}
+          {formatCount(batch.import.imported + batch.import.skipped)} / {formatCount(batch.import.files)} 个文件。
+        </Notice>
+      )}
+      {batch.state === "importing" && !batch.import.waitingForSpace && (
         <Notice tone="info">
           正在导入：
           {batch.import.files === 0

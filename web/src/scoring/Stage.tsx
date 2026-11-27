@@ -909,7 +909,9 @@ export function Stage({
       )}
       {delivery.waiting > 0 && delivery.retrying && (
         <div className={`${styles.scBanner} ${styles.scDelivery}`} role="status">
-          有 {delivery.waiting} 个分数还没送达，连接恢复后会自动提交
+          {delivery.noSpace
+            ? `有 ${delivery.waiting} 个分数还没送达：数据卷剩余空间不足，腾出空间后会自动提交`
+            : `有 ${delivery.waiting} 个分数还没送达，连接恢复后会自动提交`}
         </div>
       )}
       <button

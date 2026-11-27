@@ -394,6 +394,9 @@ export interface OutboxState {
   waiting: number;
   // The last attempt failed and the outbox is waiting to try again.
   retrying: boolean;
+  // It failed because the data volume is at its reserve: freeing space,
+  // not the connection, lets the answers through.
+  noSpace?: boolean;
   // The rater's count of answers in the batch, as the server last said.
   rated?: number;
 }
@@ -460,7 +463,7 @@ export class Outbox {
           const rated = await this.send(answer);
           this.queue.shift();
           this.pause = 0;
-          this.publish({ waiting: this.queue.length, retrying: false, rated });
+          this.publish({ waiting: this.queue.length, retrying: false, noSpace: false, rated });
         } catch (caught) {
           if (!this.retryable(caught)) {
             this.queue.shift();
@@ -469,7 +472,7 @@ export class Outbox {
             continue;
           }
           this.pause = Math.min(this.pause ? this.pause * 2 : firstRetry, longestRetry);
-          this.publish({ retrying: true });
+          this.publish({ retrying: true, noSpace: isCode(caught, "insufficient_storage") });
           await new Promise((resolve) => window.setTimeout(resolve, this.pause));
         }
       }
