@@ -70,6 +70,13 @@
 .ws-button.primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-accent) 88%, black);
 }
+.ws-button.danger {
+  color: var(--color-danger);
+}
+.ws-button.danger:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+}
 .ws-button.on {
   border-color: var(--color-accent);
   color: var(--color-accent);
@@ -648,6 +655,32 @@ details.ws-notice {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+.ws-trash {
+  display: grid;
+  gap: 2px;
+  max-height: 420px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.ws-trash-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+}
+.ws-trash-row:hover,
+.ws-trash-row:focus-within {
+  background: var(--color-bg);
+}
+.ws-trash-empty {
+  margin: 0;
+  padding: 28px 0;
+  color: var(--color-muted);
+  text-align: center;
 }
 .ws-members {
   display: grid;

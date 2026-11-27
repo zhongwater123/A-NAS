@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, FileCode2, PlugZap, Upload, Users } from "lucide-react";
+import { ArrowUpRight, FileCode2, PlugZap, Trash2, Upload, Users } from "lucide-react";
 import { type DragEvent, useMemo, useRef, useState } from "react";
 
 import { APIError } from "../api/client";
@@ -16,6 +16,7 @@ import {
   getPage,
   listPages,
   renamePage,
+  restorePage,
   saveVersion,
   tabName,
   tabURL,
@@ -27,6 +28,7 @@ import { Members } from "./Members";
 import { Presence } from "./Presence";
 import { acceptHTML, Failed, HTMLPicker } from "./parts";
 import { WorkspaceQueries } from "./queries";
+import { Trash } from "./Trash";
 import { savedText } from "./words";
 import styles from "./workspace.module.css";
 
@@ -64,7 +66,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
     refetchIntervalInBackground: false,
   });
   const pages = list.data ?? [];
-  const [dialogOpen, setDialogOpen] = useState<"connect" | "members">();
+  const [dialogOpen, setDialogOpen] = useState<"connect" | "members" | "trash">();
   const [uploading, setUploading] = useState(false);
   const [dropping, setDropping] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
@@ -118,6 +120,10 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
             成员
           </button>
         )}
+        <button type="button" className={styles.wsButton} onClick={() => setDialogOpen("trash")}>
+          <Trash2 size={15} aria-hidden="true" />
+          回收站
+        </button>
         <button
           type="button"
           className={`${styles.wsButton} ${styles.primary}`}
@@ -172,6 +178,16 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
       )}
       {dialogOpen === "members" && (
         <Members container={root} userId={userId} kit={kit} onClose={() => setDialogOpen(undefined)} />
+      )}
+      {dialogOpen === "trash" && (
+        <Trash
+          container={root}
+          userId={userId}
+          admin={admin}
+          kit={kit}
+          onRestored={refresh}
+          onClose={() => setDialogOpen(undefined)}
+        />
       )}
       {dialog}
       {toasts}
@@ -249,18 +265,22 @@ function PageRow({
     link.download = "";
     link.click();
   };
+  // A deleted page waits in the trash; the toast takes it back at once.
   const remove = async () => {
     const ok = await kit.confirm({
       title: `删除“${page.title}”？`,
-      message: `全部 ${page.latest.version} 个版本一起删除，所有人都看不到，不能恢复。`,
+      message: `全部 ${page.latest.version} 个版本一起移到回收站，所有人都看不到。30 天内可以从回收站恢复。`,
       confirm: "删除",
       danger: true,
     });
     if (!ok) return;
     try {
       await deletePage(page.id);
-      kit.toast({ text: `已删除“${page.title}”` });
       onChanged();
+      kit.toast({
+        text: `已删除“${page.title}”`,
+        action: { label: "撤销", run: () => void restorePage(page.id).then(onChanged, failed) },
+      });
     } catch (error) {
       failed(error);
     }

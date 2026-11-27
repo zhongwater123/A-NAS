@@ -202,7 +202,10 @@ const workspaceActions: Record<string, string> = {
   "workspace.page_created": "上传了共享页面",
   "workspace.page_saved": "保存了共享页面的新版本",
   "workspace.page_renamed": "修改了共享页面的标题",
-  "workspace.page_deleted": "删除了共享页面",
+  "workspace.page_deleted": "把共享页面移到了回收站",
+  "workspace.page_restored": "从回收站恢复了共享页面",
+  "workspace.page_purged": "彻底删除了回收站里的共享页面",
+  "workspace.page_expired": "删除的共享页面在回收站满 30 天，已彻底删除",
   "workspace.member_added": "允许一个账号使用共享工作区",
   "workspace.member_removed": "不再允许一个账号使用共享工作区",
 };

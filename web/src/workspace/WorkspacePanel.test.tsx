@@ -117,7 +117,7 @@ describe("共享工作区", () => {
     expect(store.uploads).toEqual([{ name: null, base: 3, body: expect.stringContaining("<p>x</p>") }]);
   });
 
-  it("renames a page and lets its uploader delete it", async () => {
+  it("renames a page and lets its uploader delete it into the trash", async () => {
     const user = userEvent.setup();
     render(<WorkspacePanel userId={reader.id} admin={false} />);
     const prd = await row("家庭相册分享 PRD");
@@ -136,10 +136,54 @@ describe("共享工作区", () => {
     await user.click(within(renamed).getByRole("button", { name: "更多操作：分享 PRD" }));
     await user.click(await screen.findByRole("menuitem", { name: "删除…" }));
     const confirm = await screen.findByRole("dialog", { name: "删除“分享 PRD”？" });
-    expect(within(confirm).getByText(/全部 2 个版本/)).toBeTruthy();
+    expect(within(confirm).getByText(/全部 2 个版本一起移到回收站/)).toBeTruthy();
     await user.click(within(confirm).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(screen.queryByRole("link", { name: /分享 PRD/ })).toBeNull());
     expect(store.pages.map((page) => page.id)).toEqual(["page_old"]);
+    expect(store.trash.map((item) => item.page.id)).toEqual(["page_prd"]);
+    // The toast takes it back at once.
+    await user.click(await screen.findByRole("button", { name: "撤销" }));
+    await row("分享 PRD");
+    expect(store.trash).toEqual([]);
+  });
+
+  it("brings a deleted page back from the trash, or removes it for good", async () => {
+    const user = userEvent.setup();
+    const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    store.trash = [
+      {
+        page: workspacePage("page_plan", "去年的方案", [version(1), version(2)]),
+        deletedBy: reader,
+        deletedAt: daysAgo(2),
+      },
+      { page: workspacePage("page_draft", "旧草稿", [version(1)]), deletedBy: reader, deletedAt: daysAgo(5) },
+      {
+        page: workspacePage("page_bob", "bob 的草稿", [version(1, { savedBy: other })]),
+        deletedBy: other,
+        deletedAt: daysAgo(1),
+      },
+    ];
+    render(<WorkspacePanel userId={reader.id} admin={false} />);
+    await row("家庭相册分享 PRD");
+    await user.click(screen.getByRole("button", { name: "回收站" }));
+    const dialog = await screen.findByRole("dialog", { name: "回收站" });
+    const items = await within(dialog).findByRole("list", { name: "删除的页面" });
+    expect(within(items).getByText(/^alice 删除 · .+ · 2 个版本 · 28 天后彻底删除$/)).toBeTruthy();
+    // bob uploaded his draft: alice sees it in the trash, as she saw the
+    // page, but only bob and administrators bring it back.
+    expect(within(items).getByText("bob 的草稿")).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "恢复“bob 的草稿”" })).toBeNull();
+
+    await user.click(within(dialog).getByRole("button", { name: "恢复“去年的方案”" }));
+    await row("去年的方案");
+    await waitFor(() => expect(within(dialog).queryByText("去年的方案")).toBeNull());
+
+    await user.click(within(dialog).getByRole("button", { name: "彻底删除“旧草稿”" }));
+    const confirm = await screen.findByRole("dialog", { name: "彻底删除“旧草稿”？" });
+    expect(within(confirm).getByText("全部 1 个版本一起删除，不能恢复。")).toBeTruthy();
+    await user.click(within(confirm).getByRole("button", { name: "彻底删除" }));
+    await waitFor(() => expect(store.trash.map((item) => item.page.id)).toEqual(["page_bob"]));
+    await waitFor(() => expect(within(dialog).queryByText("旧草稿")).toBeNull());
   });
 
   it("empties the window when an administrator takes the member out", async () => {
