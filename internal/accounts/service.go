@@ -185,6 +185,21 @@ var databaseSchema = sqlitedb.Schema{
     handed_album TEXT NOT NULL DEFAULT ''
 );`,
 		Down: "DROP TABLE account_deletions;",
+	}, {
+		// Agent tokens (ADR 0040): one per coding agent a member connects. Only
+		// the hash is kept; the account's deletion takes its tokens along.
+		Up: `CREATE TABLE agent_tokens (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL CHECK (scope IN ('workspace')),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('claude-code', 'codex', 'other')),
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+);
+CREATE INDEX agent_tokens_user_id ON agent_tokens(user_id);`,
+		Down: "DROP TABLE agent_tokens;",
 	}},
 }
 
@@ -346,6 +361,19 @@ type sqlExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// endSignIns removes an account's sessions and agent tokens, as disabling
+// it or resetting its password does. The tokens go for good: enabling the
+// account again or choosing a new password must not bring back a token
+// someone else may hold (ADR 0040).
+func endSignIns(ctx context.Context, exec sqlExecutor, userID string) error {
+	for _, statement := range []string{"DELETE FROM sessions WHERE user_id = ?", "DELETE FROM agent_tokens WHERE user_id = ?"} {
+		if _, err := exec.ExecContext(ctx, statement, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func allocateUID(ctx context.Context, db sqlExecutor, userID string, now time.Time) (int, error) {
 	var last int
 	if err := db.QueryRowContext(ctx, "SELECT COALESCE(MAX(uid), ?) FROM linux_identities", FirstUserUID-1).Scan(&last); err != nil {
@@ -384,8 +412,15 @@ type Service struct {
 	// RunDeletions that a deletion was asked for or cancelled.
 	deletionDelay time.Duration
 	deletionWake  chan struct{}
-	// identityMu keeps a deletion from starting while identity
-	// synchronization sends accounts to the Host Agent (startDeletion).
+	// identityMu orders identity synchronization against what changes its
+	// answer. A synchronization reads every account, then has the Host Agent
+	// make the host match, which takes seconds. Without the order, a change
+	// that lands in between is undone on the host by what was read before
+	// it: an account disabled meanwhile gets its SMB credential and its
+	// assistant back until the next synchronization. So disabling, enabling,
+	// a password reset and a password change hold it from the control
+	// plane's change to the Host Agent's answer, and a deletion does not
+	// start during a synchronization (startDeletion).
 	identityMu sync.Mutex
 }
 
@@ -919,6 +954,10 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if s.credentials == nil {
 		return errors.New("credential provisioner is unavailable")
 	}
+	// A synchronization that read the account as active finishes first, so
+	// that this is the last word the host hears (identityMu).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	if status == UserStatusDisabled {
 		// Disabling again only retries host access and assistant shutdown.
 		return s.disableHostCredential(ctx, username)
@@ -934,7 +973,7 @@ func (s *Service) DisableUser(ctx context.Context, actor User, userID string) er
 	if _, err := tx.ExecContext(ctx, "UPDATE users SET status = 'disabled' WHERE id = ?", userID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+	if err := endSignIns(ctx, tx, userID); err != nil {
 		return err
 	}
 	if err := s.appendAuditTo(ctx, tx, actor.ID, "user.disabled", "user", userID, ""); err != nil {
@@ -965,6 +1004,10 @@ func (s *Service) ResetCredential(ctx context.Context, actor User, userID, passw
 	if err := checkPassword(password); err != nil {
 		return err
 	}
+	// SMB goes off until the member chooses a password; a synchronization
+	// that read the account before must not switch it on again (identityMu).
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	var user User
 	var privateSpaceID string
 	var deleting bool
@@ -1001,7 +1044,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 		UID: uid, Enabled: false,
 	}); err != nil {
 		_, _ = s.store.db.ExecContext(ctx, "UPDATE users SET status = 'error' WHERE id = ? AND status <> 'disabled'", userID)
-		_, _ = s.store.db.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID)
+		_ = endSignIns(ctx, s.store.db, userID)
 		s.sessions.forgetUser(userID)
 		return fmt.Errorf("provision account credential: %w", err)
 	}
@@ -1014,7 +1057,7 @@ WHERE u.id = ?`, userID).Scan(&user.ID, &user.Username, &user.Role, &user.Status
 status = CASE WHEN status = 'disabled' THEN 'disabled' ELSE 'active' END WHERE id = ?`, passwordHash, userID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE user_id = ?", userID); err != nil {
+	if err := endSignIns(ctx, tx, userID); err != nil {
 		return err
 	}
 	// The member learns of the reset, and LastCredentialReset shows it, only

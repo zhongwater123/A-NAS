@@ -36,6 +36,9 @@ export interface UploadItem extends PendingPhoto {
   video?: boolean;
   completed?: number;
   liveStill?: boolean;
+  // assetId is the photo or video the upload became; a MOV that completed a
+  // Live Photo became none (the montage center builds projects of these).
+  assetId?: string;
 }
 // What a finished batch brought: the targets photos and videos went to, how
 // many of each, how many photos a MOV completed, and how many Live Photo
@@ -162,7 +165,7 @@ export function useUploads(onSettled: (summary: UploadSummary) => void) {
             update(item.key, { state: "done", progress: 1, completed: result.completed.length });
           } else {
             if (item.target.albumId) await addToAlbum(item.target.albumId, result.id);
-            update(item.key, { state: "done", progress: 1, liveStill: result.liveVideoMissing });
+            update(item.key, { state: "done", progress: 1, liveStill: result.liveVideoMissing, assetId: result.id });
           }
           handle?.done();
         } catch (caught) {

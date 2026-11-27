@@ -1,0 +1,112 @@
+[Unit]
+Description=A-NAS assistant (VNAS) for %i
+Documentation=https://github.com/zhongwater123/A-NAS/blob/main/docs/adr/0024-run-a-sandboxed-hermes-agent-per-member.md
+# Started by anas-assistant-api@%i.service, stopped when that proxy exits idle,
+# 45 s after its last connection. The Product Service holds one from the member's
+# sign-in until their last session ends, so it runs while they are signed in.
+StopWhenUnneeded=yes
+# The member's private network and its bridge to the model (anas-assistant-net@.service).
+# The units scripts/build-packages.sh makes from this one (scheduled tasks, curator) join
+# the same network.
+Requires=anas-assistant-net@%i.service
+After=anas-assistant-net@%i.service
+JoinsNamespaceOf=anas-assistant-net@%i.service
+# Without the administrator's model key (设置 → VNAS) the assistant is off: a start that
+# still arrives, such as a scheduled task asked to run now while the key is deleted, runs
+# nothing. The units made from this one inherit it.
+ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek
+
+[Service]
+Type=simple
+User=%i
+Group=%i
+SupplementaryGroups=a-nas-users
+Environment=HOME=/nas/助手 HERMES_HOME=/var/lib/hermes-home HERMES_MANAGED_DIR=/usr/lib/a-nas/assistant/managed
+Environment=HERMES_WRITE_SAFE_ROOT=/nas/助手 PYTHONDONTWRITEBYTECODE=1
+# `hermes serve` with Hermes's own login (assistant-start.sh): the instance's secret, in the
+# Host Agent's root-only /var/lib/a-nas-host/assistant/tokens, is the member's password there,
+# and only its scrypt hash is in the sandbox (the member's config.yaml). The Host Agent logs in
+# with the secret for a member's signed-in session (decision 10).
+WorkingDirectory=/nas/助手
+# Under PrivatePIDs= every command is process 1 of a PID namespace of its own, which gets
+# only the signals it handles, so each runs under tini; without it a stop waits out
+# TimeoutStopSec (docs/investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md).
+ExecStart=/usr/bin/tini -- /bin/bash /usr/lib/a-nas/assistant/assistant-start.sh
+ExecStartPost=/usr/bin/tini -- /bin/bash /usr/lib/a-nas/assistant/wait-port.sh 9119
+TimeoutStartSec=120
+# serve flushes its transcripts on SIGTERM and then dies of it; that is a clean stop.
+SuccessExitStatus=143
+# The member's own data, read-only; the assistant directory is the only
+# writable place. Everything else under /srv disappears.
+BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i:/nas/个人空间
+BindReadOnlyPaths=/srv/a-nas/data/spaces/shared:/nas/共享空间
+BindPaths=/srv/a-nas/data/assistant/%i/files:/nas/助手
+# Hermes's own state, outside the workspace its file tools may write. The directory is the
+# member's own (the Host Agent prepares it): Hermes's gateway serves no other.
+BindPaths=/srv/a-nas/data/assistant/%i/hermes:/var/lib/hermes-home
+# Hermes loads code and settings from these at start (hooks are trusted by
+# placement), so they are read-only and not the agent's to change. The Host Agent
+# writes the member's config.yaml and skill; the rest comes with the package.
+BindReadOnlyPaths=/var/lib/a-nas-host/assistant/members/%i/config.yaml:/var/lib/hermes-home/config.yaml
+BindReadOnlyPaths=/var/lib/a-nas-host/assistant/members/%i/skills:/run/anas-assistant-skills
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/empty.env:/var/lib/hermes-home/.env
+# SOUL.md goes into every system prompt; only Hermes's own write guard would keep
+# the agent from rewriting it, so it is the runtime's default, read-only.
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/runtime/src/SOUL.md:/var/lib/hermes-home/SOUL.md
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/empty:/var/lib/hermes-home/hooks
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/empty:/var/lib/hermes-home/plugins
+# A Hermes profile is a second Hermes home with its own writable config, .env, hooks
+# and plugins; `hermes serve` creates them on request (POST /api/profiles, ?profile=)
+# and starts in the sticky active_profile. One member has exactly one, so both are
+# empty and read-only.
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/empty:/var/lib/hermes-home/profiles
+BindReadOnlyPaths=/usr/lib/a-nas/assistant/empty.env:/var/lib/hermes-home/active_profile
+# Recycle bins hold one folder per member and only the member's is readable. An
+# unreadable folder makes Hermes's ripgrep searches fail outright, so the agent sees
+# each bin as an empty tmpfs holding just its member's own folder.
+TemporaryFileSystem=/nas/个人空间/.a-nas-trash /nas/共享空间/.a-nas-trash
+BindReadOnlyPaths=/srv/a-nas/data/spaces/private/%i/.a-nas-trash/%i:/nas/个人空间/.a-nas-trash/%i
+BindReadOnlyPaths=/srv/a-nas/data/spaces/shared/.a-nas-trash/%i:/nas/共享空间/.a-nas-trash/%i
+TemporaryFileSystem=/srv:ro
+# The Host Agent's assistant socket, in /run/a-nas where members cannot enter, executes the
+# member's changes (提交更改); the member is the peer UID.
+BindReadOnlyPaths=/run/a-nas/assistant-changes.sock:/run/anas-change-agent/agent.sock
+# The photo service's assistant socket (#113) sits in a directory only that service
+# can enter, so other processes of the member cannot reach it; it is bound in over an
+# empty file. The photo service learns the member from the peer UID.
+BindReadOnlyPaths=-/run/a-nas-photos-assistant/assistant.sock:/run/anas-assistant-photos/photos.sock
+# The Product Service's companion socket (#412), the same way: the companion tools reach
+# the member's VNAS window through it. The units for scheduled tasks and the curator leave
+# it out (scripts/build-packages.sh), so that nothing without a window reaches one; there
+# the tools answer that no desktop is in use.
+BindReadOnlyPaths=-/run/a-nas-companion-assistant/assistant.sock:/run/anas-assistant-companion/companion.sock
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+PrivatePIDs=true
+PrivateIPC=true
+ProtectProc=invisible
+KeyringMode=private
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @privileged
+SystemCallErrorNumber=EPERM
+TasksMax=256
+MemoryMax=2G

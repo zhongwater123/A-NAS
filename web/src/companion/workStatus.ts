@@ -21,7 +21,7 @@
 // The store lives here, outside the companion's own code, which loads later and only
 // when animations are installed: the VNAS window writes to it whether or not the card
 // is there, and companionReady() tells it whether one is (petCard.tsx reads the store).
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 import { BEHAVIORS, type Behavior, behaviorLine, shortDetail, toolStep } from "./behaviors";
 import { createWorkStatusBridge } from "./dsh-pet/host/plugin/work-status-bridge";
 import { PollStateStore } from "./dsh-pet/host/state";

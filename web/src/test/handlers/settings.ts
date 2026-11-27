@@ -12,15 +12,17 @@ export interface SettingsOptions extends StorageOptions {
 }
 
 // settingsHandlers answers what Settings reads whatever section it shows: the
-// host state the desktop shares with every window, the data volumes, with the
-// rest of the storage section, and the system update an administrator's
-// sidebar marks. sent is what storageHandlers records, update what
-// systemUpdateHandlers does.
+// host state the desktop shares with every window, the account's agents, the
+// data volumes, with the rest of the storage section, and the system update
+// an administrator's sidebar marks. sent is what storageHandlers records,
+// update what systemUpdateHandlers does.
 export function settingsHandlers(options: SettingsOptions = {}) {
   const storage = storageHandlers(options);
   const update = systemUpdateHandlers(options.systemUpdate);
   const handlers = [
     http.get("/api/v1/host-state", ({ response }) => response(200).json(options.hostState ?? healthyState)),
+    // 我的账号 lists the agents the account connected to 共享工作区: none here.
+    http.get("/api/v1/session/agent-tokens", ({ response }) => response(200).json({ items: [] })),
     ...storage.handlers,
     ...update.handlers,
   ];

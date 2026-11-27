@@ -2,6 +2,7 @@ import { Camera, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { initial } from "../people/PersonAvatar";
+import { Modal } from "../ui/modal";
 import {
   addBaby,
   babyAvatarURL,
@@ -15,7 +16,7 @@ import {
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { today } from "./format";
-import { Field, Modal } from "./parts";
+import { Field } from "./parts";
 
 // BabyAvatar shows a baby's picture, or on a warm disc the character a text
 // avatar shows for the nickname or name (陈小禾 → 禾).
@@ -120,6 +121,7 @@ export function BabyDialog({
   return (
     <Modal
       title={current ? "宝宝资料" : "添加宝宝"}
+      container={family.container}
       busy={busy}
       onClose={onClose}
       footer={

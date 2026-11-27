@@ -15,6 +15,7 @@ import (
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
+	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
 	"github.com/zhongwater123/A-NAS/internal/hoststate/fake"
 	"github.com/zhongwater123/A-NAS/internal/httpapi"
 	"github.com/zhongwater123/A-NAS/internal/modules"
@@ -65,10 +66,11 @@ func routedSessions(t *testing.T) (http.Handler, accounts.Session, accounts.Sess
 	product := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: fake.NewHealthy(), DataSource: httpapi.DataSourceSimulated, Accounts: service,
 		Terminal: unreached, Containers: unreached, Apps: unreached, AppShortcuts: unreached, Photos: unreached,
-		Shares: unreached, Family: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
+		Shares: unreached, Family: unreached, Montage: unreached, Workspace: unreached, Media: unreached, Feedback: unreached, Transfers: unreached, Assistant: unreached,
 		Modules:      []modules.Module{{ID: scoringapi.ID, Mounts: scoringapi.Mounts(), Handler: unreached}},
 		WebSearch:    websearchapi.New(nil, websearch.Release{}, nil),
 		SystemUpdate: systemupdateapi.New(nil, nil, nil, nil),
+		AssistantKey: assistantkeyapi.New(nil, nil),
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	return product, owner, member
@@ -110,6 +112,18 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			product.ServeHTTP(recorder, httptest.NewRequest(method, target, nil))
 			if recorder.Code != http.StatusUnauthorized || answerCode(recorder) != "authentication_required" {
 				t.Errorf("%s without a session = %d %s, want 401 authentication_required", name, recorder.Code, recorder.Body.String())
+			}
+			if operation.Extensions["x-anas-posture"] == "agent" {
+				// An agent route takes no session at all: the cookie alone
+				// is refused as no token (ADR 0040).
+				request := httptest.NewRequest(method, target, strings.NewReader("{}"))
+				request.AddCookie(cookie)
+				recorder = httptest.NewRecorder()
+				product.ServeHTTP(recorder, request)
+				if recorder.Code != http.StatusUnauthorized || answerCode(recorder) != "authentication_required" {
+					t.Errorf("%s with a session cookie = %d %s, want 401 authentication_required", name, recorder.Code, recorder.Body.String())
+				}
+				continue
 			}
 			if apiroute.Safe(method) {
 				continue
@@ -156,12 +170,16 @@ func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 		if public != (route.Posture == apiroute.Public) {
 			t.Errorf("route %s %s is %s, but the specification says public = %v", route.Method, route.Pattern, route.Posture, public)
 		}
-		marker, marked := operation.Extensions["x-anas-posture"]
-		if marked && marker != "admin" {
-			t.Errorf("operation %s %s has x-anas-posture %v; the only value is admin", route.Method, route.Pattern, marker)
+		marker := operation.Extensions["x-anas-posture"]
+		if marker != nil && marker != "admin" && marker != "agent" {
+			t.Errorf("operation %s %s has x-anas-posture %v; the values are admin and agent", route.Method, route.Pattern, marker)
 		}
-		if marked != (route.Posture == apiroute.Admin) {
-			t.Errorf("route %s %s is %s, but the specification says admin = %v", route.Method, route.Pattern, route.Posture, marked)
+		if (marker == "admin") != (route.Posture == apiroute.Admin) {
+			t.Errorf("route %s %s is %s, but the specification says x-anas-posture %v", route.Method, route.Pattern, route.Posture, marker)
+		}
+		bearer := operation.Security != nil && len(*operation.Security) == 1 && (*operation.Security)[0]["bearerAuth"] != nil
+		if (marker == "agent") != (route.Posture == apiroute.Agent) || (marker == "agent") != bearer {
+			t.Errorf("route %s %s is %s, but the specification says x-anas-posture %v with bearerAuth = %v", route.Method, route.Pattern, route.Posture, marker, bearer)
 		}
 	}
 }

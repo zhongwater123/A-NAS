@@ -4,8 +4,9 @@ import { type FormEvent, useEffect, useEffectEvent, useState } from "react";
 import type { Session, User } from "../api.generated";
 import { nicknameProblem, nicknameRuleText, passwordProblem, passwordRuleText } from "../auth/accountRules";
 import { changePassword, removeAvatar, updateNickname } from "../auth/api";
-import { isLocalConsole } from "../desktop/LocalConsoleScreenSaver";
+import { isLocalConsole } from "../lib/localConsole";
 import { displayName, fullName, usePeople } from "../people/people";
+import { AgentTokens } from "./AgentTokens";
 import { AvatarDialog } from "./AvatarDialog";
 import { roleLabel, statusLabel } from "./labels";
 import { Avatar, Banner, Field, Group, Modal, messageOf, PageHeader, Row, useSettingsKit } from "./parts";
@@ -112,6 +113,7 @@ export function AccountSection({
         />
         <Row label="登录记录" anchor="sign-ins" onClick={onShowSignIns} />
       </Group>
+      <AgentTokens account={user.id} />
       <Group>
         <button
           className={`${styles.setRow} ${styles.setRowCommand} ${styles.danger}`}
@@ -271,11 +273,13 @@ export function PasswordInput({
   autoComplete,
   minLength,
   autoFocus,
+  required = true,
 }: {
   name: string;
-  autoComplete: "current-password" | "new-password";
+  autoComplete: "current-password" | "new-password" | "off";
   minLength?: number;
   autoFocus?: boolean;
+  required?: boolean;
 }) {
   const [shown, setShown] = useState(false);
   return (
@@ -285,7 +289,7 @@ export function PasswordInput({
         name={name}
         type={shown ? "text" : "password"}
         minLength={minLength}
-        required
+        required={required}
         autoComplete={autoComplete}
         autoFocus={autoFocus}
         spellCheck={false}

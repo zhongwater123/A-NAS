@@ -1,0 +1,14 @@
+Package: a-nas-montage-music
+Version: @VERSION@
+Architecture: all
+Maintainer: A-NAS <zhongwater123@users.noreply.github.com>
+Section: misc
+Priority: optional
+Depends: a-nas (= @VERSION@), @CONTENT@
+Description: the montage center's music analysis for A-NAS
+ allin1 finds a song's beats, downbeats and sections for the montage center
+ (docs/architecture/montage-music.md): its Worker, units and the links to
+ its runtime and models, which are content packages of their own. While
+ allin1's commercial licence is pending it is installed by hand on the
+ development machine and the Experimental NAS only, and no release depends
+ on it (docs/runbooks/enable-montage-music.md).

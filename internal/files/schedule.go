@@ -464,8 +464,15 @@ VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(space_id) DO NOTHING`,
 	return nil
 }
 
+// errScheduleGone reports a schedule that was switched off or deleted after
+// RunDueSnapshots read it: nothing is taken for it and nothing recorded.
+var errScheduleGone = errors.New("the snapshot schedule is no longer on")
+
 func (s *Service) runSchedule(ctx context.Context, spaces SpaceLookup, schedule SnapshotSchedule, now time.Time, logger *slog.Logger) error {
 	snapshot, err := s.takeScheduledSnapshot(ctx, spaces, schedule.SpaceID, now)
+	if errors.Is(err, errScheduleGone) {
+		return nil
+	}
 	run := ScheduleRun{At: s.now().UTC(), Status: ScheduleRunSucceeded, SnapshotID: snapshot.ID}
 	if err != nil {
 		run.Status, run.Error = ScheduleRunFailed, scheduleErrorCode(err)

@@ -23,6 +23,9 @@ type ImportRequest struct {
 	Content       io.Reader
 	MotionContent io.Reader
 	MotionName    string
+	// recorded runs in the transaction that creates the asset, so that what
+	// it records commits with the asset or not at all (SaveFilm).
+	recorded func(ctx context.Context, tx *sql.Tx, assetID string) error
 }
 
 // Import persists one original, a photo or a video, and creates its photo
@@ -86,7 +89,7 @@ func (s *Service) importTarget(ctx context.Context, p Principal, request ImportR
 	if err != nil {
 		return "", library{}, err
 	}
-	if !canAdd(p, lib) {
+	if !canImport(p, lib) {
 		return "", library{}, ErrForbidden
 	}
 	if err := s.checkDirectory(ctx, s.db, lib, request.DirectoryID); err != nil {
@@ -195,6 +198,11 @@ func (s *Service) importStaged(ctx context.Context, p Principal, lib library, na
 		}
 		if err := s.enqueueTextReading(ctx, tx, staged.id); err != nil {
 			return err
+		}
+		if request.recorded != nil {
+			if err := request.recorded(ctx, tx, assetID); err != nil {
+				return err
+			}
 		}
 		record, err := s.assetByID(ctx, tx, assetID)
 		if err != nil {

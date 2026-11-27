@@ -37,3 +37,37 @@ func TestRemovingADeletedAccountKeepsWhatItWrote(t *testing.T) {
 		t.Fatalf("removing again: %v", err)
 	}
 }
+
+func TestRemovingAnAccountDropsItsOwnTodos(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	own := must(f.store.addTodo(ctx, dad, TodoFields{Title: "复查", Category: "medical", Due: "2026-10-29"}, dad.AccountID))
+	shared := must(f.store.AddTodo(ctx, dad, TodoFields{Title: "交电费", Due: "2026-10-29", OwnerID: dad.AccountID}))
+	must(f.store.SetTodoStatus(ctx, dad, shared.ID, TodoIgnored))
+	must(f.store.SetTodoStatus(ctx, mom, shared.ID, TodoOpen))
+	keys := []string{}
+	for _, reminder := range must(f.store.TodoReminders(ctx, dad)) {
+		keys = append(keys, reminder.Key)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("dad's reminders = %v", keys)
+	}
+	wantErr(t, f.store.AcknowledgeTodoReminders(ctx, dad, keys), nil)
+	delete(f.accounts, dad.AccountID)
+	if err := f.store.RemoveAccount(ctx, dad.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := f.store.db.QueryRow("SELECT COUNT(*) FROM todos WHERE id = ?", own.ID).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("dad's own to-do is left: %d, %v", left, err)
+	}
+	if err := f.store.db.QueryRow("SELECT COUNT(*) FROM hints_seen").Scan(&left); err != nil || left != 0 {
+		t.Fatalf("dad's acknowledgements are left: %d, %v", left, err)
+	}
+	// The shared to-do stays, under the names it was written with.
+	todos := must(f.store.Todos(ctx, mom))
+	if len(todos) != 1 || todos[0].CreatedByID != dad.AccountID || todos[0].CreatedByName != "dad" ||
+		todos[0].OwnerID != dad.AccountID || todos[0].OwnerName != "dad" {
+		t.Fatalf("shared to-dos = %+v", todos)
+	}
+}

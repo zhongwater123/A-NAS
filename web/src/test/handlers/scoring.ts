@@ -15,16 +15,25 @@ import type {
 } from "../../api.generated";
 import { http } from "../server";
 
-const builtIn = (id: string, name: string): ScoringDimension => ({ id, name, description: "", custom: false });
+const builtIn = (id: string, name: string, description = ""): ScoringDimension => ({
+  id,
+  name,
+  description,
+  custom: false,
+});
 
 // Every 打分项 a batch can choose, as the module lists them: the built-in
-// ones, then one an administrator made.
+// ones, the scoring handbook's first with 总体 last, then one an
+// administrator made.
 export const scoringCatalogue: ScoringDimension[] = [
-  builtIn("overall", "总分"),
-  builtIn("composition", "构图"),
-  builtIn("light_color", "光影色彩"),
+  builtIn("composition", "构图", "画面安排得好不好：层次、引导，边缘干不干净"),
+  builtIn("light_color", "光影", "光线和颜色好不好看"),
+  builtIn("narrative", "叙事性", "有没有在讲一件事，看完说得出它讲什么"),
+  builtIn("subject", "主体", "有没有一眼就看到的主体，和背景分不分得开"),
+  builtIn("overall", "总体", "看完各项，有多想多看一会儿；不是各项的平均"),
+  builtIn("quality", "画质", "按正常大小看有没有抖动、虚焦、噪点，不用 100% 查看"),
+  builtIn("emotion", "情绪", "平静还是激烈，只看感觉不看好坏：1 平静，5 激烈"),
   builtIn("sharpness", "清晰度"),
-  builtIn("narrative", "叙事意境"),
   builtIn("preference", "喜好程度"),
   { id: "custom_1", name: "色彩和谐", description: "整张照片的颜色是否协调", custom: true },
 ];
@@ -68,7 +77,13 @@ export function adminBatch(overrides: Partial<ScoringBatch> = {}): ScoringBatch 
     hideDecimals: false,
     state: "open",
     createdAt: "2026-11-12T01:00:00Z",
-    import: { files: 120, imported: 118, skipped: 2, skippedBy: [{ reason: "unsupported_type", count: 2 }] },
+    import: {
+      files: 120,
+      imported: 118,
+      skipped: 2,
+      skippedBy: [{ reason: "unsupported_type", count: 2 }],
+      waitingForSpace: false,
+    },
     photos: 116,
     anchors: 2,
     complete: 40,

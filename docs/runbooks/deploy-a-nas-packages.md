@@ -1,7 +1,7 @@
 # 部署 A-NAS 软件包
 
-状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；尚未在 Experimental NAS 上执行）
-更新时间：2026-11-13
+状态：draft（2026-11-11 在系统测试的 Debian 13 容器中验证了安装、升级、回滚与再升级，2026-11-12 起包括从软件源装上 Docker 与 Caddy；Experimental NAS 自 2026-11-17 起按本手册升级，最近一次见[当前状态](../status/CURRENT.md)）
+更新时间：2026-11-25
 
 ## 目的
 
@@ -25,7 +25,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
 - 目标：Experimental NAS（主机名 `a-nas-dev`）或新机器。Debian 13，安装时启用 `non-free-firmware` 组件，安装程序按硬件装上固件与微码；能访问 Debian 的镜像源。`a-nas-host`（[ADR 0031](../adr/0031-declare-host-dependencies-in-debian-packages.md)）依赖的 Debian 包从镜像源装，Docker、Caddy 与产品从 A-NAS 软件源装（[ADR 0015](../adr/0015-take-docker-and-caddy-from-their-upstream-repositories.md)）。
 - 签名密钥：A-NAS 存档密钥，开发机 B 与开发机 A 各用自己的子密钥签名（[管理发布签名密钥](manage-release-key.md)）。测试密钥只签开发机自己的测试软件源；换了密钥的软件源，各台机器要重新做一次第 4 步。近期以局域网推送发布（[决定记录](../decisions/2026-11-13-release-by-lan-push.md)）：开发机 B 构建并签名，软件源目录经开发机 A 或开发机 B 推送到 NAS 的暂存账号（第 2 步）。GitHub 的 `zhongwater123/A-NAS-dist` 是备选，平时不发布。
 - 空间：软件源保留每个版本，内容包约 4.4 GB，每个 release 的产品包约 45 MB，Docker 与 Caddy 每更新一次约 92 MB；NAS 的系统盘要放得下软件源的副本、`/opt/a-nas` 中的内容与 apt 的缓存。开发机上 `make release` 在 `/var/tmp` 逐个组装内容包，最大的约 2.6 GiB，用完即删；2026-11-11 用全部真实内容第一次运行，用时 22 分钟，软件源 4.1 GB。
-- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享与家庭服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享与家庭的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
+- 服务影响：升级与回滚各重启一次 Host Agent、产品服务、相册、分享、家庭与剪辑服务，几秒内进行中的文件操作、终端、上传与相册整理会断开后重连。升级前 `preinst` 停下写数据库的服务，复制数据库：系统盘的复制到 `/var/backups/a-nas`，数据卷上的（相册、分享、家庭与剪辑的数据库）留在数据卷的 `.a-nas-backups`，与原数据库共用数据块，几乎不占空间。正在运行的容器代理不重启，要换上新程序见[容器代理手册](install-container-agent.md)。
 - 停止条件：
   - 第 4 步的哈希与开发者给出的不一致；
   - apt 报告签名或哈希错误（`NO_PUBKEY`、`BADSIG`、`Hash Sum mismatch`）；
@@ -40,7 +40,8 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    make system-test
    make release REPO=/mnt/d/A-NAS-releases/apt CONTENT=/mnt/d/A-NAS-releases/content
    ```
-   - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与助手试用的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
+   - `CONTENT` 是内容库：模型、两个 Python 运行环境、Qdrant、llama.cpp 与 AI 助手的 Hermes 运行环境，目录结构见 [`scripts/build-content-packages.sh`](../../scripts/build-content-packages.sh)。软件源里已有的内容包不再构建。`make release` 还把 [`packages.json`](../../deploy/upstream/packages.json) 固定的 Docker 与 Caddy 软件包取到 `CONTENT/upstream`，按 SHA-256 核对；已有的不再下载。
+   - 软件源缺少内容包且本地也缺少对应的运行环境时，按[恢复内容库中的运行环境](#恢复内容库中的运行环境)准备文件，再运行 `make release`。
    - `make release` 要存档密钥的口令（[管理发布签名密钥](manage-release-key.md)第 6 步）。
    - 预期：最后三行是 `A-NAS <版本> (<提交>) is in …`、签名密钥的指纹（主密钥与本机的子密钥）与 `a-nas-archive-keyring` 的 SHA-256。
    - 完成标准：把版本、指纹与哈希交给部署的人。打了 release 标签的提交进 `release` 与 `dev`，其他提交只进 `dev`。
@@ -86,7 +87,7 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    ```
    - 至少写 `ANAS_SMB_INTERFACE=<网卡>`。可写的键与说明见 `/usr/share/a-nas/site.conf.example`（装包后才有，内容同 [`deploy/site/site.conf`](../../deploy/site/site.conf)）。
    - 由开发机推送新版本的机器另写 `ANAS_UPDATE_STAGING=/home/anas-dev/apps/a-nas/repository`（第 2 步的暂存目录）：之后的版本由“设置 → 系统更新”取用推送、安装，见下面“以后的版本”。已装好的机器随时可以加上这一行，系统更新每次运行时读取，不用运行 `a-nas-site`。
-6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`，装了助手试用的加 `a-nas-assistant-trial`。
+6. NAS（root）：安装或升级。产品的几个包写同一个版本；装了本地屏幕的加 `a-nas-console`。装过助手试用的设备升级到 2026-11-18 之后的第一个版本时也加 `a-nas-assistant-trial`（空的过渡包，[接管试用](enable-ai-assistant.md#从试用接管)），之后不再需要。
    ```bash
    apt-get update
    apt-get install --no-install-recommends -o Dpkg::Options::=--force-confold a-nas=<版本> a-nas-host=<版本> a-nas-docker-policy
@@ -103,6 +104,35 @@ A-NAS 以签名软件源中的 Debian 软件包发布（[ADR 0034](../adr/0034-r
    a-nas-site
    ```
    - 它重新生成 systemd 的配置，重启 Host Agent 与产品服务，开关互联网入口，最后运行 `a-nas-check`。
+
+## 恢复内容库中的运行环境
+
+开发机从私有仓库 [A-NAS-assets 的归档索引](https://github.com/zhongwater123/A-NAS-assets#运行环境与源码包)取回已有文件。索引中运行环境与源码包的 Release 标签为 `sha256-<压缩包的 SHA-256>`。
+
+**AI 助手（Hermes）。** 发布脚本按[当前提交的清单](../../ai/assistant/runtime.json)核对压缩包的大小和 SHA-256。重建可能改变哈希。先将 `CONTENT` 设为传给 `make release` 的内容库目录，再从 A-NAS 仓库根目录运行以下命令。`gh` 需有权读取资产仓库。在 WSL 中使用 Windows 上的 GitHub CLI 时，将命令中的 `gh` 换成 `gh.exe`。
+
+```bash
+(
+  set -eu
+  sha=$(jq -er .sha256 ai/assistant/runtime.json)
+  file=$(jq -er .file ai/assistant/runtime.json)
+  dir=${CONTENT:?请先设置内容库目录}/assistant-runtimes/$sha
+  mkdir -p "$dir"
+  cd "$dir"
+  gh release download "sha256-$sha" --repo zhongwater123/A-NAS-assets --pattern "$file"
+  printf '%s  %s\n' "$sha" "$file" | sha256sum -c -
+)
+```
+
+**AI Worker 与网页搜索。** `make release` 的缺包提示会给出 `ai-runtimes/<ID>.tar.gz` 或 `search-runtimes/<ID>.tar.gz`。按该 ID 查找标题以 `ai-runtime-<ID>` 或 `search-runtime-<ID>` 开头的 Release，把附件放到提示的路径，核对文件的 SHA-256 与 Release 标签一致。若无匹配归档，分别用 [AI 构建脚本](../../scripts/build-ai-runtime.sh)或[搜索构建脚本](../../scripts/build-search-runtime.sh)生成当前 ID 的压缩包，再把它复制到该路径。
+
+**SearXNG 源码。** 若搜索构建脚本从上游下载的源码与[清单](../../deploy/search/searxng.json)不符，用清单的 SHA-256 找到对应 Release，将 `searxng.tar.gz` 放到仓库的 `build/search-source/<SHA-256>/`。再次运行构建脚本时，它会先核对本地文件的大小和哈希。
+
+## 可选硬件包
+
+产品发布包含同架构的可选 `a-nas-hotspot-radio` 及锁定 Debian 依赖。系统更新会更新已安装的热点包。在提供热点包的版本之间回退时，热点包也回退到相同版本。回到尚未提供热点的版本时保留依赖包和安装选择，旧产品没有热点服务。
+
+ARM64 的热点依赖可单独签名发布。运行 `ANAS_TARGET_ARCH=arm64 bash scripts/release.sh --hotspot-radio-only REPO CONTENT`，目标使用单独的 ARM64 软件源目录。发布到 GitHub 平铺源时，`ANAS_TARGET_ARCH=arm64 make publish` 选择 `apt-dev-arm64` 或 `apt-release-arm64`。这是已有 ARM64 产品环境的可选依赖源。按[热点网卡手册](prepare-experimental-nas-hotspot-radio.md)配置证书、安装和验收。
 
 ## 以后的版本：设置 → 系统更新
 
@@ -171,18 +201,23 @@ git diff deploy/upstream/packages.json
   ```
   - 新版本改过的数据库结构，由旧版本启动时按新版本存下的反向步骤退回（[`internal/sqlitedb/migrate.go`](../../internal/sqlitedb/migrate.go)）。
   - Docker、Caddy 与 `a-nas-docker-policy` 不降级：`a-nas-host` 只要求不低于固定的版本。旧包即使没有地址池保护，独立包仍在 Docker 启动前校验配置。
-- 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。
+- 旧版本启动时报告 `the newer build left no reverse step`，或 `a-nas-check` 报告某个服务没有打开数据卷上的数据库：从升级前的副本恢复。系统盘的数据库复制在 `/var/backups/a-nas/<时间>-<旧版本>/`，数据卷上的复制在数据卷内 `/srv/a-nas/data/.a-nas-backups/<时间>-<旧版本>/`（同名，与原数据库共用数据块）。Host Agent 也开着 `control.db`，一并停下；先删掉现有的 `-wal` 与 `-shm`，否则 SQLite 会把新版本留下的日志写进恢复的数据库。剪辑服务与共享工作区服务单独停起：回到它们之前的版本时没有这些单元，这几行报 `Unit anas-montage.service not loaded` 或 `Unit anas-workspace.service not loaded`，可以忽略。
   ```bash
+  systemctl stop anas-montage
+  systemctl stop anas-workspace
   systemctl stop anas-api anas-photos anas-shares anas-family anas-host-agent
   name=<时间>-<旧版本>
   ls /var/backups/a-nas /srv/a-nas/data/.a-nas-backups
   rm -f /var/lib/a-nas/*.db-wal /var/lib/a-nas/*.db-shm \
-    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm}
+    /srv/a-nas/data/photos/catalog.db-{wal,shm} /srv/a-nas/data/shares/catalog.db-{wal,shm} /srv/a-nas/data/family/family.db-{wal,shm} \
+    /srv/a-nas/data/montage/montage.db-{wal,shm} /srv/a-nas/data/workspace/workspace.db-{wal,shm}
   cp -a "/var/backups/a-nas/$name/system-disk/." /var/lib/a-nas/
-  for store in photos shares family; do
+  for store in photos shares family montage workspace; do
     [[ ! -d "/srv/a-nas/data/.a-nas-backups/$name/$store" ]] || cp -a "/srv/a-nas/data/.a-nas-backups/$name/$store/." "/srv/a-nas/data/$store/"
   done
   systemctl start anas-host-agent anas-photos anas-shares anas-family anas-api
+  systemctl start anas-montage
+  systemctl start anas-workspace
   a-nas-check
   ```
   副本是升级那一刻的数据库，之后的改动会丢失。两处各保留最近两份；副本不含 `-shm`，它由 SQLite 从日志重建。

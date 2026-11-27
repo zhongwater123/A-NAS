@@ -21,8 +21,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/httpjson"
 	"github.com/zhongwater123/A-NAS/internal/mediaapi"
 	"github.com/zhongwater123/A-NAS/internal/modules"
+	"github.com/zhongwater123/A-NAS/internal/montageapi"
 	"github.com/zhongwater123/A-NAS/internal/musicapi"
 	"github.com/zhongwater123/A-NAS/internal/personalizationapi"
+	"github.com/zhongwater123/A-NAS/internal/phonehotspotapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/sharesapi"
 	"github.com/zhongwater123/A-NAS/internal/storageapi"
@@ -30,6 +32,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/taskmanager"
 	"github.com/zhongwater123/A-NAS/internal/taskmanagerapi"
 	"github.com/zhongwater123/A-NAS/internal/transfersapi"
+	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
 
 // table is every route of the product API with its posture. A domain's own
@@ -68,12 +71,15 @@ func (h *productHandler) table() []apiroute.Route {
 	for _, domain := range []interface{ Routes() []apiroute.Route }{
 		accountsapi.NewUsers(h.Accounts, logger),
 		accountsapi.NewProfiles(h.Accounts, h.pictures, logger),
+		accountsapi.NewAgentTokens(h.Accounts, logger),
 		storageapi.New(h.Storage, logger),
 		filesapi.New(h.Files, h.FilesChanged, logger),
 		filepreviewapi.New(h.FilePreviews, logger),
 		personalizationapi.New(h.Personalization, h.pictures, logger),
 		musicapi.New(h.Music, logger),
-		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(), Logger: logger}),
+		phonehotspotapi.New(h.PhoneHotspot, logger),
+		activityapi.New(activityapi.Sources{Accounts: h.Accounts, Files: h.Files, Storage: h.Storage, Photos: h.photoActivitySource(), Family: h.familyActivitySource(),
+			Workspace: h.workspaceActivitySource(), Logger: logger}),
 		systemlogapi.New(h.SystemLogs, string(h.DataSource), logger),
 		taskmanagerapi.New(tasks, string(h.DataSource), logger),
 	} {
@@ -84,6 +90,15 @@ func (h *productHandler) table() []apiroute.Route {
 	}
 	if h.SystemUpdate != nil {
 		routes = append(routes, h.SystemUpdate.Routes()...)
+	}
+	if h.AssistantKey != nil {
+		routes = append(routes, h.AssistantKey.Routes()...)
+	}
+	if h.Montage != nil {
+		// The desktop shows 剪辑中心 while this answers. The switch is the
+		// Product Service's, so the montage service is not asked.
+		routes = append(routes, apiroute.Route{Method: get, Pattern: montageapi.PathPrefix, Posture: session,
+			Handler: func(w http.ResponseWriter, _ *http.Request, _ accounts.Session) { w.WriteHeader(http.StatusNoContent) }})
 	}
 	return append(routes, h.mounts()...)
 }
@@ -109,10 +124,43 @@ func (h *productHandler) mounts() []apiroute.Route {
 		mount(sharesapi.PathPrefix, apiroute.Session, withUser(h.Shares), sharesapi.Endpoints())
 	}
 	if h.Family != nil {
-		mount(familyapi.PathPrefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		// The family service also keeps the family's to-dos, which every
+		// account uses, member or not.
+		for _, prefix := range []string{familyapi.PathPrefix, familyapi.TodosPrefix} {
+			mount(prefix, apiroute.Session, withUser(h.Family), familyapi.Endpoints())
+		}
+	}
+	if h.Montage != nil {
+		mount(montageapi.PathPrefix, apiroute.Session, withUser(h.Montage), montageapi.ProductEndpoints())
+		// The requests that may lead to planning register a planning grant
+		// first (docs/architecture/montage-center.md, 规划授权).
+		for _, endpoint := range montageapi.PlanningRoutes {
+			routes = append(routes, apiroute.Route{Method: endpoint.Method, Pattern: endpoint.Pattern, Posture: apiroute.Mutation,
+				Handler: montageapi.RegisterPlan(h.PlanGrants, h.Montage, h.Logger)})
+		}
+		// Choosing a song copies it from the member's music library here
+		// first (docs/specs/montage-center.md, 配乐).
+		var tracks montageapi.Tracks
+		if h.Music != nil {
+			tracks = h.Music
+		}
+		routes = append(routes, apiroute.Route{Method: http.MethodPut, Pattern: montageapi.SongPath, Posture: apiroute.Mutation,
+			Handler: montageapi.CopySong(tracks, h.Montage, h.Logger)})
 	}
 	if h.Photos != nil {
 		mount(photosapi.PathPrefix, apiroute.Session, serve(h.Photos), photosapi.Endpoints())
+	}
+	if h.Workspace != nil {
+		// The workspace service confirms the session itself; the agents' and
+		// the links' routes are not part of the desktop's mount (ADR 0040).
+		mount(workspaceapi.PathPrefix, apiroute.Session, serve(h.Workspace), workspaceapi.MemberEndpoints())
+		mount(workspaceapi.AdminPrefix, apiroute.Admin, serve(h.Workspace), workspaceapi.AdminEndpoints())
+		for _, route := range workspaceapi.AgentRoutes {
+			routes = append(routes, apiroute.Route{Method: route.Method, Pattern: route.Pattern, Posture: apiroute.Agent, Handler: serve(h.Workspace)})
+		}
+		for _, route := range workspaceapi.LinkRoutes {
+			routes = append(routes, apiroute.Route{Method: route.Method, Pattern: route.Pattern, Posture: apiroute.Public, Handler: serve(h.Workspace)})
+		}
 	}
 	if h.Media != nil {
 		mount(mediaapi.PathPrefix, apiroute.Session, withUser(h.Media), mediaapi.Endpoints())
@@ -163,8 +211,12 @@ func (h *productHandler) register(routes []apiroute.Route) {
 // mounted route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
-	case route.Posture < apiroute.Public || route.Posture > apiroute.Admin:
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Agent:
 		return fmt.Errorf("route %s %s has no valid posture (%d)", route.Method, route.Pattern, route.Posture)
+	case route.Posture == apiroute.Agent && route.Method == "":
+		return fmt.Errorf("route %s is mounted for every method as agent; give each agent operation its method", route.Pattern)
+	case route.Posture == apiroute.Agent:
+		return nil
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
 	case route.Method == "" && len(route.Endpoints) == 0:
@@ -186,6 +238,9 @@ func checkPosture(route apiroute.Route) error {
 func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 	if route.Posture == apiroute.Public {
 		return func(w http.ResponseWriter, r *http.Request) { route.Handler(w, r, accounts.Session{}) }
+	}
+	if route.Posture == apiroute.Agent {
+		return h.guardAgent(route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.Accounts == nil {

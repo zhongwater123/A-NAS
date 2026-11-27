@@ -11,29 +11,44 @@
 #   qdrant/<sha256>/<file>        scripts/fetch-qdrant.sh's tarball
 #   llama/<sha256>/<file>         scripts/fetch-llama.sh's tarball
 #   assistant-runtimes/<sha256>/runtime.tar.gz
-#                                 the assistant trial's Hermes runtime
+#                                 the AI assistant's Hermes runtime
 #   upstream/<sha256>/<file>      Docker and Caddy, which scripts/release.sh
 #                                 fetches there (not content packages)
 # Models, Qdrant, llama.cpp and the Hermes runtime are checked against their
 # pins.
 #
-# With --stand-in, the models and the two runtimes are stand-ins under the
+# With --montage-music it also builds the content of the montage center's
+# music analysis (docs/architecture/montage-music.md): allin1's and Demucs'
+# models, and its runtime from
+#   montage-music-runtimes/<id>.tar.gz  scripts/build-montage-music-runtime.sh's tarball
+# No release depends on them while allin1's licence is pending; the
+# Experimental NAS installs them by hand (docs/runbooks/enable-montage-music.md).
+#
+# With --aesthetic-scorer-only, build just the scoring model for internal evaluation.
+# Default releases omit its weights while redistribution is pending.
+#
+# With --stand-in, the models and the three runtimes are stand-ins under the
 # same names, for the system test: small random files, and virtual
 # environments around Debian's Python, where web search's holds the system
 # test's stand-in for SearXNG. Qdrant and llama.cpp are the real ones from
-# CONTENT; the assistant trial's runtime is left out. Stand-ins go to a
+# CONTENT. Stand-ins go to a
 # directory of their own, never to a repository.
 #
-# Usage: scripts/build-content-packages.sh [--stand-in] OUT CONTENT
+# Usage: scripts/build-content-packages.sh [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT
 set -euo pipefail
 
-stand_in=false
-if [[ "${1:-}" == --stand-in ]]; then
-  stand_in=true
+stand_in=false montage_music=false aesthetic_only=false
+while [[ "${1:-}" == --* ]]; do
+  case $1 in
+    --stand-in) stand_in=true ;;
+    --aesthetic-scorer-only) aesthetic_only=true ;;
+    --montage-music) montage_music=true ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
   shift
-fi
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 [--stand-in] OUT CONTENT" >&2
+done
+if [[ $# -ne 2 ]] || { "$aesthetic_only" && "$montage_music"; }; then
+  echo "usage: $0 [--stand-in] [--montage-music | --aesthetic-scorer-only] OUT CONTENT" >&2
   exit 2
 fi
 mkdir -p "$1"
@@ -97,31 +112,64 @@ have() {
 }
 
 # Models (ADR 0016): a package for the model's file, or for each of its parts
-# (scripts/lib/content.sh model_files).
-for role in "${ai_roles[@]}"; do
-  manifest=$repo/deploy/models/${role##*:}.json
+# (scripts/lib/content.sh model_files). A bundle's package holds the members
+# its manifest lists, unpacked from its tarball.
+model_roles=("${ai_roles[@]}")
+if "$aesthetic_only"; then
+  model_roles=("${aesthetic_role[@]}")
+fi
+model_manifests=()
+for role in "${model_roles[@]}"; do
+  model_manifests+=("${role##*:}")
+done
+if "$montage_music"; then
+  for role in "${montage_music_roles[@]}"; do
+    model_manifests+=("${role#*:}")
+  done
+fi
+for model in "${model_manifests[@]}"; do
+  manifest=$repo/deploy/models/$model.json
   sha=$(pin_field "$manifest" sha256)
+  mapfile -t members < <(jq -r '(.members // [])[]' "$manifest")
   while IFS=$'\t' read -r -u 3 name file size file_sha; do
     have "$name" all && continue
     target=$work/$name/opt/a-nas/models/$sha
     install -d "$target"
-    if "$stand_in"; then
-      head -c 4096 /dev/urandom >"$target/$file"
+    if ((${#members[@]})); then
+      if "$stand_in"; then
+        for member in "${members[@]}"; do
+          install -d "$(dirname "$target/$member")"
+          head -c 4096 /dev/urandom >"$target/$member"
+        done
+      else
+        source=$content/models/$sha/$file
+        pinned_file "$source" "$size" "$file_sha" || { echo "missing or not as pinned: $source ($manifest)" >&2; exit 2; }
+        directory=$(pin_field "$manifest" directory)
+        tar -C "$target" --no-same-owner --strip-components=1 -xf "$source" "${members[@]/#/$directory/}"
+      fi
+      chmod -R u=rwX,go=rX "$target"
     else
-      source=$content/models/$sha/$file
-      pinned_file "$source" "$size" "$file_sha" ||
-        { echo "missing or not as pinned: $source ($manifest; scripts/split-model.sh makes the parts)" >&2; exit 2; }
-      cp -- "$source" "$target/$file"
+      if "$stand_in"; then
+        head -c 4096 /dev/urandom >"$target/$file"
+      else
+        source=$content/models/$sha/$file
+        pinned_file "$source" "$size" "$file_sha" ||
+          { echo "missing or not as pinned: $source ($manifest; scripts/split-model.sh makes the parts)" >&2; exit 2; }
+        cp -- "$source" "$target/$file"
+      fi
+      chmod 0644 "$target/$file"
     fi
-    chmod 0644 "$target/$file"
-    what="The model file deploy/models/${role##*:}.json pins by SHA-256 $sha"
-    [[ "$file_sha" == "$sha" ]] || what="$file, a part of the model file deploy/models/${role##*:}.json pins by SHA-256 $sha,"
+    what="The model file deploy/models/$model.json pins by SHA-256 $sha"
+    [[ "$file_sha" == "$sha" ]] || what="$file, a part of the model file deploy/models/$model.json pins by SHA-256 $sha,"
+    ((${#members[@]} == 0)) || what="The members of the bundle deploy/models/$model.json pins by SHA-256 $sha, unpacked"
     package "$name" all '' "$(pin_field "$manifest" name) for A-NAS's local AI
  $what
  in /opt/a-nas/models/$sha.$("$stand_in" && printf '\n .\n A stand-in with random content for the system test.')" \
       "$(jq -r '"Source: \(.source // .weights // "see the manifest")\nLicense: \(.license // "see the manifest")"' "$manifest")"
   done 3< <(model_files "$manifest")
 done
+
+if "$aesthetic_only"; then exit 0; fi
 
 # runtime NAME KIND ID STAND_IN_SCRIPT: a Python runtime, unpacked where the
 # release links it from. Its scripts start with this path.
@@ -149,6 +197,10 @@ runtime() {
 runtime "a-nas-ai-runtime-$(ai_runtime_id "$repo")" ai-runtimes "$(ai_runtime_id "$repo")" ''
 runtime "a-nas-search-runtime-$(search_runtime_id "$repo")" search-runtimes "$(search_runtime_id "$repo")" \
   "$repo/scripts/system-test-search.py"
+if "$montage_music"; then
+  runtime "a-nas-montage-music-runtime-$(montage_music_runtime_id "$repo")" montage-music-runtimes \
+    "$(montage_music_runtime_id "$repo")" ''
+fi
 
 # Qdrant (ADR 0028): its binary alone, out of the official tarball.
 pin=$repo/deploy/qdrant/qdrant.json
@@ -187,33 +239,35 @@ if ! have "$name" amd64; then
 License: $(pin_field "$pin" license)"
 fi
 
-# The assistant trial's Hermes runtime (ai/assistant-spike/runtime.json). Its
-# scripts name /opt/a-nas/assistant-runtimes/spike, so one is installed at a
-# time: each provides, conflicts with and replaces a-nas-assistant-runtime.
-# Its prerm stops what runs on it before apt replaces it; the trial's postinst
-# starts them again (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm).
-pin=$repo/ai/assistant-spike/runtime.json
+# The AI assistant's Hermes runtime (ai/assistant/runtime.json), which a-nas
+# depends on. Its virtual environment names /opt/a-nas/assistant-runtimes/spike,
+# where it was first built, so one is installed at a time: each provides,
+# conflicts with and replaces a-nas-assistant-runtime. Its prerm stops what runs
+# on it before apt replaces it; a-nas's postinst starts that again
+# (deploy/debian/a-nas-assistant-runtime/DEBIAN/prerm). The stand-in holds what
+# the units name, Debian's Python and an empty SOUL.md, and runs none of Hermes;
+# the system test unpacks the real runtime over it when it is given one.
+pin=$repo/ai/assistant/runtime.json
 name=$(assistant_runtime_package "$repo")
-if ! "$stand_in" && ! have "$name" amd64; then
+if ! have "$name" amd64; then
   sha=$(pin_field "$pin" sha256)
-  tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
-  if [[ ! -e "$tarball" ]]; then
-    # A release needs it (scripts/release.sh); the system test does not.
-    echo "note: no $tarball, so no $name" >&2
-  elif ! pinned "$tarball" "$pin"; then
-    echo "not as pinned: $tarball (ai/assistant-spike/runtime.json)" >&2
-    exit 2
+  target=$work/$name/opt/a-nas/assistant-runtimes
+  install -d "$target"
+  if "$stand_in"; then
+    install -d "$target/spike/venv/bin" "$target/spike/src"
+    ln -s /usr/bin/python3 "$target/spike/venv/bin/python"
+    install -m 0644 /dev/null "$target/spike/src/SOUL.md"
   else
-    install -d "$work/$name/opt/a-nas/assistant-runtimes"
-    tar -C "$work/$name/opt/a-nas/assistant-runtimes" --no-same-owner -xzf "$tarball"
-    package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
+    tarball=$content/assistant-runtimes/$sha/$(pin_field "$pin" file)
+    pinned "$tarball" "$pin" || { echo "missing or not as pinned: $tarball (ai/assistant/runtime.json)" >&2; exit 2; }
+    tar -C "$target" --no-same-owner -xzf "$tarball"
+  fi
+  package "$name" amd64 "python3 (>= $TARGET_PYTHON~), python3 (<< ${TARGET_PYTHON%.*}.$((${TARGET_PYTHON#*.} + 1))~)
 Provides: a-nas-assistant-runtime
 Conflicts: a-nas-assistant-runtime
-Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant trial
- The runtime ai/assistant-spike/runtime.json pins by SHA-256 $sha, in
- /opt/a-nas/assistant-runtimes/spike, for development testing only
- (docs/runbooks/try-ai-assistant-on-experimental-nas.md)." \
-      "Hermes Agent (MIT) with the packages its build installs, each under its own license." \
-      "$repo/deploy/debian/a-nas-assistant-runtime/DEBIAN"
-  fi
+Replaces: a-nas-assistant-runtime" "the Hermes runtime of the A-NAS assistant (VNAS)
+ The runtime ai/assistant/runtime.json pins by SHA-256 $sha, in
+ /opt/a-nas/assistant-runtimes/spike (docs/adr/0024).$("$stand_in" && printf '\n .\n A stand-in around Debian'"'"'s Python for the system test.')" \
+    "Hermes Agent (MIT) with the packages its build installs, each under its own license." \
+    "$repo/deploy/debian/a-nas-assistant-runtime/DEBIAN"
 fi

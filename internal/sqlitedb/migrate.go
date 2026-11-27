@@ -108,7 +108,7 @@ func userVersion(ctx context.Context, db *sql.DB) (int, error) {
 func stepUp(ctx context.Context, db *sql.DB, version int, step Step, released bool) error {
 	apply := inSchemaChange
 	if released {
-		apply = inTx
+		apply = WithTx
 	}
 	return apply(ctx, db, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, step.Up); err != nil {
@@ -155,18 +155,6 @@ func hasDowngrades(ctx context.Context, tx *sql.Tx) bool {
 	var count int
 	err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", downgrades).Scan(&count)
 	return err != nil || count > 0
-}
-
-func inTx(ctx context.Context, db *sql.DB, apply func(*sql.Tx) error) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	if err := apply(tx); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
 }
 
 // inSchemaChange runs apply in a transaction on one connection with foreign

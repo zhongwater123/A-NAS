@@ -2,9 +2,7 @@
 # Runs the tests of the real codecs (FFmpeg, libheif) in a disposable
 # container of the system test's Debian 13 image, which has the codecs the
 # device has (#425): transcoding and frames, audio decoding through the
-# worker, HEIC, motion photos and the video codecs. Elsewhere these tests are
-# skipped for want of the tools, and go test prints no skips, so nothing
-# showed that CI never ran them.
+# worker, HEIC, motion photos and the video codecs.
 #
 # The test binaries are built here, so the image needs no Go toolchain. They
 # run as an ordinary user, with ANAS_CODECS_REQUIRED=1: a missing codec fails

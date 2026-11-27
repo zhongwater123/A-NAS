@@ -420,6 +420,10 @@ JOIN spaces s ON s.owner_user_id = u.id AND s.kind = 'private' WHERE u.id = ?`, 
 		UserID: actor.ID, PrivateSpaceID: privateSpaceID, Username: actor.Username, Password: newPassword,
 		Role: actor.Role, UID: uid, Enabled: true,
 	}
+	// A synchronization that read "must choose a password" finishes first
+	// (identityMu): it would switch off the SMB credential set here.
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 	if err := s.credentials.SetCredential(ctx, request); err != nil {
 		return fmt.Errorf("%w: %v", ErrCredentialProvision, err)
 	}

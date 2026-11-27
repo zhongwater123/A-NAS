@@ -11,10 +11,10 @@ case "${1:-}" in
   *) exit 0 ;;
 esac
 
-# The photo, share and family services own their stores under fixed IDs
-# (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
+# The photo, share, family, montage and workspace services own their stores
+# under fixed IDs (ADR 0011). A-NAS never adopts an account or an ID it did not create, and
 # systemd-sysusers would leave such an account as it is.
-for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
+for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002 a-nas-montage:31003 a-nas-workspace:31004; do
   name=${account%%:*} id=${account#*:}
   if getent passwd "$name" >/dev/null; then
     [[ "$(id -u "$name"):$(id -g "$name")" == "$id:$id" ]] ||
@@ -28,6 +28,15 @@ for account in a-nas-photos:31000 a-nas-shares:31001 a-nas-family:31002; do
   fi
 done
 
+# The AI assistant's trial (a-nas-assistant-trial before the assistant was part
+# of a-nas) runs its scripts from that package, which the upgrade empties: what
+# runs of it stops now, and the postinst takes the trial over.
+if [[ -d /run/systemd/system && -L /spike ]]; then
+  systemctl stop anas-assistant-cron-waker.service 2>/dev/null || true
+  systemctl stop 'anas-assistant@*.service' 'anas-assistant-api@*.service' 'anas-assistant-cron@*.service' \
+    'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
+fi
+
 # The databases a release writes: the system disk's, and the data volume's
 # stores while it is mounted. Each is copied before every upgrade, rollback
 # or installation that finds it: one left by a removed release, or by an
@@ -37,7 +46,7 @@ shopt -s nullglob
 databases=(/var/lib/a-nas/*.db)
 stores=()
 if mountpoint -q /srv/a-nas/data; then
-  for store in photos/catalog.db shares/catalog.db family/family.db; do
+  for store in photos/catalog.db shares/catalog.db family/family.db montage/montage.db workspace/workspace.db; do
     [[ ! -f "/srv/a-nas/data/$store" ]] || stores+=("$store")
   done
 fi
@@ -51,9 +60,14 @@ else
 fi
 
 # The writers stop first, so that each copy is whole. The new release starts
-# them again; so does the old one if this one fails to unpack.
+# them again; so does the old one if this one fails to unpack. The montage
+# center's socket for planning stops before its service, which root's planner
+# or a member's planning instance would otherwise start again through it while
+# montage.db is copied; a release before it has no such unit.
 if [[ -d /run/systemd/system ]]; then
-  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service 2>/dev/null || true
+  systemctl stop anas-montage-assistant.socket 2>/dev/null || true
+  systemctl stop anas-api.service anas-photos.service anas-shares.service anas-family.service anas-montage.service \
+    anas-workspace.service 2>/dev/null || true
 fi
 # The system disk's copies go to /var/backups/a-nas; the data volume's stay on
 # it, where a copy shares the database's blocks until either changes. Both

@@ -1,11 +1,5 @@
-// Package codectest says what a test of the real codecs does on a machine
-// without them. FFmpeg and libheif's tools are not on every development
-// machine, nor on the CI runner's own system, so such a test is skipped
-// there. Where they are installed for it, a skip would hide that the test no
-// longer runs (go test prints no skips without -v): with
-// ANAS_CODECS_REQUIRED=1 a missing codec fails the test instead, as
-// ANAS_QDRANT_REQUIRED does for the vector index. scripts/codec-test.sh sets
-// it in the Debian 13 image that has the codecs the device has (#425).
+// Package codectest handles missing FFmpeg and libheif tools or codecs in tests.
+// scripts/codec-test.sh requires them in the device's Debian 13 image (#425).
 package codectest
 
 import (

@@ -14,7 +14,10 @@ import {
   systemUpdateStatus,
 } from "../test/handlers/systemupdate";
 import { http, server } from "../test/server";
+import { fixToday } from "../test/today";
 import { SystemUpdateSection } from "./SystemUpdateSection";
+
+fixToday();
 
 const current = "1.0.1-rc.6 开发版 83bb9db1";
 const next = "1.0.1-rc.6 开发版 4e842653";
@@ -155,6 +158,39 @@ describe("Settings → 系统更新", () => {
     await user.click(screen.getByText("详细信息"));
     expect(screen.getByText("FAIL anas-api.service is failed")).toBeVisible();
     expect(screen.getByRole("button", { name: "检查更新" })).toBeEnabled();
+  });
+
+  it("names the version the device goes back to, not the one that failed", async () => {
+    // After a failed check the target is still the version that failed.
+    serve({
+      status: systemUpdateStatus({
+        phase: "rolling-back",
+        target: nextVersion,
+        problem: { code: "check", detail: "FAIL anas-api.service is failed" },
+      }),
+    });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: `正在回到 ${current}` })).toBeTruthy();
+  });
+
+  it("names the version an administrator goes back to", async () => {
+    serve({ status: systemUpdateStatus({ phase: "rolling-back", target: nextVersion }) });
+    renderPage();
+    expect(await screen.findByRole("heading", { name: `正在回到 ${next}` })).toBeTruthy();
+  });
+
+  it("sends a check request from the failed rollback card", async () => {
+    const sent = serve({
+      status: systemUpdateStatus({
+        phase: "rolled-back",
+        problem: { code: "rollback", detail: "FAIL anas-api.service is failed" },
+      }),
+    });
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByRole("heading", { name: "回到原版本时出错" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "检查更新" }));
+    await waitFor(() => expect(sent.actions).toContain("check"));
   });
 
   it("says why a check failed and checks again", async () => {

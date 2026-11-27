@@ -39,9 +39,12 @@ vi.mock("tus-js-client", () => ({ Upload: tus.FakeUpload }));
 
 import { transfer, transfersHandlers } from "../test/handlers/transfers";
 import { server } from "../test/server";
+import { fixToday } from "../test/today";
 import type { Transfer } from "./api";
 import { transferStore, type UploadTarget } from "./store";
 import { TransferCenter } from "./TransferCenter";
+
+fixToday();
 
 const target: UploadTarget = {
   spaceId: "space:shared",

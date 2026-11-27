@@ -183,6 +183,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     window.history.replaceState(null, "", "/?local-console=1");
     try {
       const setups: unknown[] = [];
+      let videoLists = 0;
       serveDesktop({ setup: { setupRequired: true } });
       server.use(
         http.post("/api/v1/setup/admin", async ({ request, response }) => {
@@ -191,9 +192,10 @@ describe("A-NAS v1.0.1 desktop", () => {
         }),
         http.get("/api/v1/local-display", ({ response }) => response(200).json({ sleepAfterMinutes: 30 })),
         // The screen saver's videos are static files beside the page, outside the product API.
-        http.untyped.get(`${window.location.origin}/local-console/screensavers`, () =>
-          HttpResponse.json({ videos: [] }),
-        ),
+        http.untyped.get(`${window.location.origin}/local-console/screensavers`, () => {
+          videoLists += 1;
+          return HttpResponse.json({ videos: [] });
+        }),
       );
       const user = userEvent.setup();
       render(<App />);
@@ -202,6 +204,8 @@ describe("A-NAS v1.0.1 desktop", () => {
       await user.click(screen.getByRole("button", { name: "创建管理员并启用" }));
       expect(await screen.findByRole("region", { name: "桌面应用" })).toBeTruthy();
       expect(setups).toEqual([{ username: "owner", password: "correct horse battery staple", localConsole: true }]);
+      // Only this screen loads the screen saver; signed in, it asks for its videos.
+      await waitFor(() => expect(videoLists).toBe(1));
     } finally {
       window.history.replaceState(null, "", "/");
     }
@@ -233,6 +237,7 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(within(desktop).getByRole("button", { name: "打开回收站" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开备份中心" }).hasAttribute("disabled")).toBe(false);
     expect(within(desktop).getByRole("button", { name: "打开设置" })).toBeTruthy();
+    expect(within(desktop).getByRole("button", { name: "打开待办" }).hasAttribute("disabled")).toBe(false);
     // 文件快照 and the planned 备份 entry became the one 备份中心; the planned 日志 moved into 设置.
     // The terminal moved into 设置 → 终端.
     for (const retired of [
@@ -755,6 +760,52 @@ describe("A-NAS v1.0.1 desktop", () => {
     render(<App />);
     await screen.findAllByRole("button", { name: "打开相册" });
     expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
+  });
+
+  it("shows 剪辑中心 only while the device turns it on, and opens its empty project list", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
+    await user.click(icons[0]);
+    expect(await screen.findByText("还没有项目")).toBeInTheDocument();
+    unmount();
+
+    serveDesktop({ montage: false });
+    render(<App />);
+    await screen.findAllByRole("button", { name: "打开相册" });
+    expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+  });
+
+  it("asks again whether 剪辑中心 is on when the page comes back into view", async () => {
+    serveDesktop({ montage: true });
+    serveWindows();
+    // The first read fails as on a network error, which the contract does not describe.
+    let failed = false;
+    server.use(
+      http.untyped.get(
+        `${window.location.origin}/api/v1/montage`,
+        () => {
+          failed = true;
+          return HttpResponse.error();
+        },
+        { once: true },
+      ),
+    );
+    const shown = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+    try {
+      render(<App />);
+      await waitFor(() => expect(failed).toBe(true));
+      await screen.findAllByRole("button", { name: "打开相册" });
+      expect(screen.queryByRole("button", { name: "打开剪辑中心" })).not.toBeInTheDocument();
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((await screen.findAllByRole("button", { name: "打开剪辑中心" })).length).toBeGreaterThan(0);
+    } finally {
+      shown.mockRestore();
+    }
   });
 
   it("finds an app in the launcher by what it does and opens it with Enter", async () => {

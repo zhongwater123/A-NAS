@@ -48,4 +48,4 @@ make docs-check
 - [基础存储与共享规格](../specs/basic-storage-and-sharing.md)
 - [`useFileListing.ts`](../../web/src/files/useFileListing.ts) 与[请求生命周期测试](../../web/src/files/useFileListing.test.tsx)
 - [`FilePanel.tsx`](../../web/src/files/FilePanel.tsx) 与[导航交错交互测试](../../web/src/files/FilePanel.navigation.test.tsx)
-- [WSL 检查流程](../../.claude/skills/check-in-wsl/SKILL.md)
+- [WSL 检查流程](../../.agents/skills/check-in-wsl/SKILL.md)

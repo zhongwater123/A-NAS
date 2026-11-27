@@ -1,0 +1,138 @@
+<!DOCTYPE html><script src="/assets/workspace-frame.js"></script>
+<html data-anas-at="16" lang="zh-CN">
+<head data-anas-at="36">
+<meta data-anas-at="43" charset="UTF-8">
+<meta data-anas-at="66" name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-anas-at="137">家庭相册分享 PRD</title>
+<style data-anas-at="175">
+  :root {
+    --brand: #4f46e5;
+    --ink: #1f2937;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --card: #ffffff;
+    --bg: #f6f7fb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.7; }
+  header.hero { background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #db2777 100%); color: #fff; padding: 56px 64px 40px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: .5px; }
+  header.hero p { margin: 0; opacity: .9; }
+  .meta { display: flex; gap: 24px; margin-top: 20px; font-size: 13px; opacity: .85; }
+  nav.toc { position: sticky; top: 0; z-index: 5; background: rgba(255,255,255,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); padding: 10px 64px; display: flex; gap: 20px; font-size: 14px; }
+  nav.toc a { color: var(--muted); text-decoration: none; }
+  nav.toc a:hover { color: var(--brand); }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+  section { margin-bottom: 48px; }
+  h2 { font-size: 22px; border-left: 4px solid var(--brand); padding-left: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card .who { font-size: 12px; color: var(--brand); font-weight: 600; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; }
+  th, td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; font-size: 14px; }
+  th { background: #eef2ff; color: #3730a3; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+  .tag.p0 { background: #fee2e2; color: #b91c1c; }
+  .tag.p1 { background: #fef3c7; color: #92400e; }
+  .phone { width: 320px; margin: 0 auto; border: 10px solid #111827; border-radius: 36px; background: #fff; overflow: hidden; box-shadow: 0 20px 40px rgba(17,24,39,.25); }
+  .phone .bar { height: 28px; background: #111827; }
+  .phone .body { padding: 18px; }
+  .phone .thumbs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 12px 0; }
+  .phone .thumbs div { aspect-ratio: 1; border-radius: 8px; background: linear-gradient(160deg, #c7d2fe, #fbcfe8); }
+  .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 16px; }
+  .btn { border: 0; border-radius: 10px; padding: 14px 28px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  .btn-primary { background: var(--brand); color: #fff; }
+  .btn-ghost { background: #f3f4f6; color: var(--ink); }
+  .timeline { list-style: none; padding: 0; border-left: 2px solid var(--line); margin-left: 8px; }
+  .timeline li { position: relative; padding: 0 0 18px 20px; }
+  .timeline li::before { content: ""; position: absolute; left: -7px; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: var(--brand); }
+  .flow { display: block; margin: 0 auto; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+  .live { animation: pulse 2s infinite; color: #16a34a; font-weight: 600; }
+  details { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+</style>
+</head>
+<body data-anas-at="3604">
+<header data-anas-at="3611" class="hero">
+  <h1 data-anas-at="3635">家庭相册分享</h1>
+  <p data-anas-at="3665">让家人在 NAS 上把一组照片发给指定的人，对方在手机上就能看到并保存。</p>
+  <div data-anas-at="3773" class="meta"><span data-anas-at="3791">负责人：产品组</span><span data-anas-at="3825">状态：<span data-anas-at="3840" class="live">评审中</span></span><span data-anas-at="3882">版本：草案 0.3</span></div>
+</header>
+<nav data-anas-at="3931" class="toc">
+  <a data-anas-at="3951" href="#bg">背景</a><a data-anas-at="3975" href="#stories">用户故事</a><a data-anas-at="4010" href="#flow">流程</a><a data-anas-at="4036" href="#proto">原型</a><a data-anas-at="4063" href="#accept">验收标准</a><a data-anas-at="4097" href="#plan">里程碑</a>
+</nav>
+<main data-anas-at="4134">
+  <section data-anas-at="4143" id="bg">
+    <h2 data-anas-at="4165">背景</h2>
+    <p data-anas-at="4185">家里的照片集中在 NAS 上之后，长辈经常要求把某次旅行的照片发给他们。现在只能下载后再用聊天软件转发，原图被压缩，相册里的分组信息也丢失了。</p>
+    <p data-anas-at="4400">本需求在相册中增加“分享给家人”：选定照片后指定接收人，接收人在自己的相册里看到一个分享，可以浏览原图并保存到自己的图库。</p>
+  </section>
+
+  <section data-anas-at="4607" id="stories">
+    <h2 data-anas-at="4634">用户故事</h2>
+    <div data-anas-at="4660" class="cards">
+      <div data-anas-at="4686" class="card"><div data-anas-at="4704" class="who">妈妈</div><h3 data-anas-at="4733">收到旅行照片</h3><p data-anas-at="4760">打开手机上的相册，看到女儿分享的 86 张照片，挑喜欢的保存。</p></div>
+      <div data-anas-at="4865" class="card"><div data-anas-at="4883" class="who">女儿</div><h3 data-anas-at="4912">一次发给多人</h3><p data-anas-at="4939">选中照片后勾选爸爸和妈妈，两个人各自收到，不需要重复操作。</p></div>
+      <div data-anas-at="5046" class="card"><div data-anas-at="5064" class="who">爸爸</div><h3 data-anas-at="5093">只看不存</h3><p data-anas-at="5114">浏览分享的照片，不保存也不占用自己的空间，到期后自动消失。</p></div>
+    </div>
+  </section>
+
+  <section data-anas-at="5242" id="flow">
+    <h2 data-anas-at="5266">流程</h2>
+    <svg data-anas-at="5286" class="flow" width="760" height="120" viewBox="0 0 760 120" role="img" aria-label="分享流程">
+      <defs data-anas-at="5395"><marker data-anas-at="5401" id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path data-anas-at="5487" d="M0,0 L10,5 L0,10 z" fill="#9ca3af"/></marker></defs>
+      <g data-anas-at="5555" font-size="14" text-anchor="middle">
+        <rect data-anas-at="5603" x="10" y="30" width="150" height="56" rx="10" fill="#eef2ff" stroke="#4f46e5"/><text data-anas-at="5688" x="85" y="63">选择照片</text>
+        <rect data-anas-at="5736" x="210" y="30" width="150" height="56" rx="10" fill="#eef2ff" stroke="#4f46e5"/><text data-anas-at="5822" x="285" y="63">选择接收人</text>
+        <rect data-anas-at="5874" x="410" y="30" width="150" height="56" rx="10" fill="#eef2ff" stroke="#4f46e5"/><text data-anas-at="5960" x="485" y="63">发出分享</text>
+        <rect data-anas-at="6009" x="610" y="30" width="140" height="56" rx="10" fill="#fdf2f8" stroke="#db2777"/><text data-anas-at="6095" x="680" y="63">接收人保存</text>
+      </g>
+      <g data-anas-at="6156" stroke="#9ca3af" stroke-width="2" marker-end="url(#arrow)"><line data-anas-at="6218" x1="160" y1="58" x2="205" y2="58"/><line data-anas-at="6259" x1="360" y1="58" x2="405" y2="58"/><line data-anas-at="6300" x1="560" y1="58" x2="605" y2="58"/></g>
+    </svg>
+  </section>
+
+  <section data-anas-at="6373" id="proto">
+    <h2 data-anas-at="6398">原型：发出分享</h2>
+    <div data-anas-at="6433" class="phone">
+      <div data-anas-at="6459" class="bar"></div>
+      <div data-anas-at="6489" class="body">
+        <strong data-anas-at="6516">分享 12 张照片</strong>
+        <div data-anas-at="6561" class="thumbs"><div data-anas-at="6581"></div><div data-anas-at="6592"></div><div data-anas-at="6603"></div><div data-anas-at="6614"></div><div data-anas-at="6625"></div><div data-anas-at="6636"></div></div>
+        <label data-anas-at="6662">接收人</label>
+        <p data-anas-at="6695" style="margin:4px 0 0;color:#6b7280">爸爸、妈妈</p>
+        <label data-anas-at="6763">有效期</label>
+        <p data-anas-at="6796" style="margin:4px 0 0;color:#6b7280">7 天</p>
+        <div data-anas-at="6854" class="actions">
+          <button data-anas-at="6886" class="btn btn-ghost">取消</button>
+          <button data-anas-at="6942" class="btn btn-primary">发出分享</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-anas-at="7051" id="accept">
+    <h2 data-anas-at="7077">验收标准</h2>
+    <table data-anas-at="7103">
+      <thead data-anas-at="7117"><tr data-anas-at="7124"><th data-anas-at="7128">编号</th><th data-anas-at="7143">场景</th><th data-anas-at="7158">预期</th><th data-anas-at="7173">优先级</th></tr></thead>
+      <tbody data-anas-at="7211">
+        <tr data-anas-at="7227"><td data-anas-at="7231">A1</td><td data-anas-at="7242">选 12 张照片发给两个人</td><td data-anas-at="7282">两人各自在“收到的分享”中看到 12 张原图</td><td data-anas-at="7349"><span data-anas-at="7353" class="tag p0">P0</span></td></tr>
+        <tr data-anas-at="7402"><td data-anas-at="7406">A2</td><td data-anas-at="7417">接收人保存其中 3 张</td><td data-anas-at="7453">3 张出现在接收人的私有图库，原分享不变</td><td data-anas-at="7518"><span data-anas-at="7522" class="tag p0">P0</span></td></tr>
+        <tr data-anas-at="7571"><td data-anas-at="7575">A3</td><td data-anas-at="7586">发送人撤回分享</td><td data-anas-at="7616">未保存的照片立即不可见，已保存的保留</td><td data-anas-at="7679"><span data-anas-at="7683" class="tag p1">P1</span></td></tr>
+        <tr data-anas-at="7732"><td data-anas-at="7736">A4</td><td data-anas-at="7747">分享到期</td><td data-anas-at="7768">与撤回相同，并通知发送人</td><td data-anas-at="7813"><span data-anas-at="7817" class="tag p1">P1</span></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section data-anas-at="7902" id="plan">
+    <h2 data-anas-at="7926">里程碑</h2>
+    <ul data-anas-at="7949" class="timeline">
+      <li data-anas-at="7977"><strong data-anas-at="7981">12 月第 1 周</strong> 完成评审与视觉稿</li>
+      <li data-anas-at="8050"><strong data-anas-at="8054">12 月第 3 周</strong> 相册服务接口与网页端</li>
+      <li data-anas-at="8129"><strong data-anas-at="8133">1 月第 1 周</strong> 手机端适配与验收</li>
+    </ul>
+    <details data-anas-at="8209"><summary data-anas-at="8218">未决问题</summary><p data-anas-at="8249">接收人没有 NAS 账号时是否允许以链接方式查看？本期不做，记入后续。</p></details>
+  </section>
+</main>
+</body>
+</html>

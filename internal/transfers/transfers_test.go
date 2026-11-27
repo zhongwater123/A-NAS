@@ -455,10 +455,17 @@ func TestCanceledDownloadStopsAndUnstartedOnesFail(t *testing.T) {
 
 func TestHistoryKeepsTheNewestFinishedTransfers(t *testing.T) {
 	f := newFixture(t)
-	for index := range maxFinished + 3 {
-		upload := f.beginUpload(t, f.alice, "f"+strconv.Itoa(index)+".txt", 0)
-		_, _ = f.service.Cancel(f.ctx, f.alice, upload.ID)
+	finish := func(owner accounts.User, name string) {
+		upload := f.beginUpload(t, owner, name, 0)
+		_, _ = f.service.Cancel(f.ctx, owner, upload.ID)
 		f.advance(time.Second)
+	}
+	// Bob's two are the oldest of all: a limit counted across owners would
+	// drop them to make room for Alice's.
+	finish(f.bob, "bob0.txt")
+	finish(f.bob, "bob1.txt")
+	for index := range maxFinished + 3 {
+		finish(f.alice, "f"+strconv.Itoa(index)+".txt")
 	}
 	if err := f.service.store.prune(f.ctx, f.clock().Add(-keepFinished), maxFinished); err != nil {
 		t.Fatal(err)
@@ -466,6 +473,19 @@ func TestHistoryKeepsTheNewestFinishedTransfers(t *testing.T) {
 	items, err := f.service.List(f.ctx, f.alice)
 	if err != nil || len(items) != maxFinished {
 		t.Fatalf("history holds %d, want %d (%v)", len(items), maxFinished, err)
+	}
+	kept := map[string]bool{}
+	for _, item := range items {
+		kept[item.Name] = true
+	}
+	for index := range maxFinished + 3 {
+		name := "f" + strconv.Itoa(index) + ".txt"
+		if want := index >= 3; kept[name] != want {
+			t.Fatalf("%s kept = %v, want %v: the three oldest go, the newest stay", name, kept[name], want)
+		}
+	}
+	if items, err := f.service.List(f.ctx, f.bob); err != nil || len(items) != 2 {
+		t.Fatalf("Bob's history holds %d, want his 2: each owner keeps their own newest (%v)", len(items), err)
 	}
 	f.advance(keepFinished + time.Hour)
 	if err := f.service.store.prune(f.ctx, f.clock().Add(-keepFinished), maxFinished); err != nil {

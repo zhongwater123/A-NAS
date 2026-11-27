@@ -329,8 +329,14 @@ func (s *Store) CancelJoin(ctx context.Context, actor Actor) error {
 
 // Approve admits a requester. Fathers and mothers become guardians.
 func (s *Store) Approve(ctx context.Context, actor Actor, accountID string) (Member, error) {
+	// Asked before the transaction: it is a call to the accounts service, and
+	// family.db's one connection would wait on it.
+	accounts, err := s.accounts(ctx)
+	if err != nil {
+		return Member{}, err
+	}
 	var member Member
-	err := s.inTx(ctx, func(tx *sql.Tx) error {
+	err = s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, _, err := s.requireGuardian(ctx, tx, actor); err != nil {
 			return err
 		}
@@ -340,10 +346,6 @@ func (s *Store) Approve(ctx context.Context, actor Actor, accountID string) (Mem
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
-		if err != nil {
-			return err
-		}
-		accounts, err := s.accounts(ctx)
 		if err != nil {
 			return err
 		}

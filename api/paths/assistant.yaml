@@ -258,3 +258,46 @@
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
       "409": { $ref: "../components/common.yaml#/responses/ProductError" }
       "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/assistant-key:
+  get:
+    operationId: getAssistantKey
+    x-anas-posture: admin
+    summary: "Whether the household's DeepSeek key for VNAS is saved (设置 → VNAS, ADR 0024)"
+    description: "Administrators only. The key itself is never answered: once saved it can be replaced or deleted, not read."
+    responses:
+      "200": { description: The key's state, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  put:
+    operationId: saveAssistantKey
+    x-anas-posture: admin
+    summary: Save or replace the DeepSeek key, which gives every member VNAS
+    description: >-
+      Administrators only. acknowledged must be true: the administrator confirms that members' conversations with VNAS,
+      the file contents and photo information it reads to answer, and the photos and desktop screens it looks at go to
+      DeepSeek's servers (400 acknowledgement_required). The Host Agent keeps the key encrypted on the device, where only
+      the model gateway reads it, and prepares every active member's assistant; 400 invalid_key when it cannot be a
+      DeepSeek key. Nothing logs the key.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyRequest" } } } }
+    responses:
+      "200": { description: The key's state after saving, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "413": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: deleteAssistantKey
+    x-anas-posture: admin
+    summary: Delete the DeepSeek key, which turns VNAS off for everyone
+    description: >-
+      Administrators only. Every member's assistant stops; their conversations, memory, scheduled tasks and files stay
+      and come back when a key is saved again.
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "200": { description: The key's state after deleting, content: { application/json: { schema: { $ref: "../components/assistant.yaml#/schemas/AssistantKeyState" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

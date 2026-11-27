@@ -42,12 +42,12 @@ const keyField = "key"
 // scanPage is how many points a scan reads per request.
 const scanPage = 1000
 
-// idleTimeout closes an unused connection. The proxy exits seconds after the
-// last connection closes, and the instance stops with it
+// defaultIdleTimeout closes an unused connection. The proxy exits seconds
+// after the last connection closes, and the instance stops with it
 // (anas-vectors-proxy@.service): an instance runs while its owner keeps a
 // connection, so a client that is not Warm meets an instance that has to
 // start.
-var idleTimeout = time.Minute
+const defaultIdleTimeout = time.Minute
 
 // callTimeout bounds every call, the start of a cold instance included (its
 // unit allows 90 s), so that a hung instance cannot hold its caller, or keep
@@ -88,6 +88,7 @@ var ErrNoCollection = errors.New("the vector index has no such collection")
 type Client struct {
 	socket string
 	logger *slog.Logger
+	idle   time.Duration
 
 	// connecting serialises opening the connection; client holds it once
 	// open, so that Warm never waits for an instance that is starting.
@@ -95,13 +96,25 @@ type Client struct {
 	client     atomic.Pointer[qdrant.Client]
 }
 
+// Options configures a Client; zero values take the defaults.
+type Options struct {
+	// Logger is slog.Default() when nil.
+	Logger *slog.Logger
+	// IdleTimeout is a minute when zero; the system test shortens it.
+	IdleTimeout time.Duration
+}
+
 // New returns a client for the instance behind socket. It does not connect
 // until the first request.
-func New(socket string, logger *slog.Logger) *Client {
-	if logger == nil {
-		logger = slog.Default()
+func New(socket string, options Options) *Client {
+	c := &Client{socket: socket, logger: options.Logger, idle: options.IdleTimeout}
+	if c.logger == nil {
+		c.logger = slog.Default()
 	}
-	return &Client{socket: socket, logger: logger}
+	if c.idle <= 0 {
+		c.idle = defaultIdleTimeout
+	}
+	return c
 }
 
 // Close drops the connection, if any.
@@ -148,7 +161,7 @@ func (c *Client) connection(ctx context.Context) (*qdrant.Client, error) {
 				var dialer net.Dialer
 				return dialer.DialContext(ctx, "unix", socket)
 			}),
-			grpc.WithIdleTimeout(idleTimeout),
+			grpc.WithIdleTimeout(c.idle),
 			grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxReply)),
 		},
 	})
@@ -266,6 +279,59 @@ func (c *Client) DeleteCollection(ctx context.Context, name string) error {
 	return client.DeleteCollection(ctx, name)
 }
 
+// Alias returns the collection alias names, or "" when there is no such
+// alias. Deleting a collection deletes its aliases.
+func (c *Client) Alias(ctx context.Context, alias string) (string, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if alias == "" {
+		return "", ErrInvalid
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return "", err
+	}
+	aliases, err := client.ListAliases(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, description := range aliases {
+		if description.GetAliasName() == alias {
+			return description.GetCollectionName(), nil
+		}
+	}
+	return "", nil
+}
+
+// SwitchAlias points alias at collection in one change, so that a reader
+// of the alias sees either the old collection or the new one, never none:
+// an owner fills a new collection, switches its alias to it, and can switch
+// back while it keeps the old one. It reports whether the alias moved: not
+// when it named collection already.
+func (c *Client) SwitchAlias(ctx context.Context, alias, collection string) (bool, error) {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if alias == "" || collection == "" || alias == collection {
+		return false, ErrInvalid
+	}
+	current, err := c.Alias(ctx, alias)
+	if err != nil || current == collection {
+		return false, err
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return false, err
+	}
+	var actions []*qdrant.AliasOperations
+	if current != "" {
+		actions = append(actions, qdrant.NewAliasDelete(alias))
+	}
+	if err := client.UpdateAliases(ctx, append(actions, qdrant.NewAliasCreate(alias, collection))); err != nil {
+		return false, fmt.Errorf("point alias %s at %s: %w", alias, collection, err)
+	}
+	return true, nil
+}
+
 // Point is what the index keeps for one key.
 type Point struct {
 	// Key is the owner's stable ID of what the vector belongs to, such as a
@@ -336,6 +402,32 @@ func (c *Client) Delete(ctx context.Context, collection string, keys []string) e
 		CollectionName: collection,
 		Wait:           &wait,
 		Points:         qdrant.NewPointsSelectorIDs(ids),
+	})
+	return err
+}
+
+// DeleteMatching removes the points whose keyword field holds any of
+// values, for an owner with many points per thing: the montage center's
+// window vectors are many per video, and when a video goes its windows are
+// no longer there to name each point.
+func (c *Client) DeleteMatching(ctx context.Context, collection, field string, values []string) error {
+	ctx, cancel := bounded(ctx)
+	defer cancel()
+	if len(values) == 0 {
+		return nil
+	}
+	if field == "" || field == keyField {
+		return ErrInvalid
+	}
+	client, err := c.connection(ctx)
+	if err != nil {
+		return err
+	}
+	wait := true
+	_, err = client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collection,
+		Wait:           &wait,
+		Points:         qdrant.NewPointsSelectorFilter(&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewMatchKeywords(field, values...)}}),
 	})
 	return err
 }

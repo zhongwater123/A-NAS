@@ -43,7 +43,7 @@ GITLEAKS ?= $(GO) tool -modfile=tools/gitleaks/go.mod gitleaks
 # Packages tested at once under the race detector, as on a 4-core CI runner.
 RACE_PARALLEL ?= 4
 
-.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test codec-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
+.PHONY: all api-install api api-check web-install web-typecheck web-lint web-test web-build fmt skills fmt-check docs-check ops-check vendor-check vet go-lint vuln-check secrets-check test race-test ai-lint ai-test ai-sdk-test root-integration-test codec-test system-test release-key-test publish release image image-test build build-binaries packages check check-steps scoring-module clean
 
 all: check
 
@@ -126,8 +126,17 @@ web-build: web-install
 # Go files under node_modules belong to npm packages, which go.mod ignores.
 GO_FILES = find . -name '*.go' -type f -not -path './.git/*' -not -path '*/node_modules/*'
 
+# The changed Go and Web files, the way fmt-check and web-lint expect them;
+# the coding agents' hooks run the same script after each edit (AGENTS.md).
 fmt:
-	gofmt -w $$($(GO_FILES))
+	scripts/format-changed.sh
+
+# Claude Code reads skills only from .claude/skills, other agents from
+# .agents/skills (AGENTS.md): edit the second and copy it with this target;
+# docs-check fails while the two differ.
+skills:
+	rm -rf .claude/skills
+	cp -R .agents/skills .claude/skills
 
 fmt-check:
 	@files="$$(gofmt -l $$($(GO_FILES)))"; \
@@ -145,6 +154,7 @@ docs-check:
 	@have="$$(lychee --version 2>/dev/null | sed -n 's/^lychee //p')"; \
 	if [ "$$have" != "$(LYCHEE_VERSION)" ]; then echo "docs-check needs lychee $(LYCHEE_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	{ git ls-files '*.md' 2>/dev/null || find . -name '*.md' -not -path './.git/*' -not -path './.claude/worktrees/*' -not -path '*/node_modules/*' -not -path '*/build/*' -not -path '*/dist/*'; } | \
+	grep -v -E '(^|/)docs/status/[0-9]{4}-[0-9]{2}-[0-9]{2}(-[0-9]+)?\.md$$' | \
 	lychee --offline --include-fragments --no-progress --files-from -
 
 # dsh-pet as copied into web/src/companion/dsh-pet (scripts/check-dsh-pet-vendor.sh).
@@ -168,6 +178,7 @@ vendor-check:
 # regenerated without --excludes (Dependabot's) would not.
 ops-check:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/docker
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s deploy/network
 	@have="$$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$have" != "$(SHELLCHECK_VERSION)" ]; then echo "ops-check needs ShellCheck $(SHELLCHECK_VERSION); found: $${have:-none}" >&2; exit 1; fi
 	shellcheck $(SHELL_SCRIPTS) $(MAINTAINER_SCRIPTS) $(IMAGE_SCRIPTS)
@@ -234,6 +245,23 @@ ops-check:
 	grep -Fqx 'RuntimeDirectory=a-nas-family' deploy/systemd/system/anas-family.service
 	grep -Fqx 'Environment=ANAS_FAMILY_SESSION_GROUP=a-nas-family' deploy/systemd/system/anas-host-agent.service
 	grep -Fq '"/run/a-nas-family/family.sock"' cmd/anas-api/config.go
+	grep -Fqx 'User=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api montage-service' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'RuntimeDirectory=a-nas-montage' deploy/systemd/system/anas-montage.service
+	grep -Fqx 'Environment=ANAS_MONTAGE_SESSION_GROUP=a-nas-montage' deploy/systemd/system/anas-host-agent.service
+	grep -Fq '"/run/a-nas-montage/montage.sock"' cmd/anas-api/config.go
+	grep -Fqx 'u a-nas-montage 31003 "A-NAS montage service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
+	grep -Fqx 'User=a-nas-workspace' deploy/systemd/system/anas-workspace.service
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api workspace-service' deploy/systemd/system/anas-workspace.service
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-workspace.service
+	grep -Fqx 'RestrictAddressFamilies=AF_UNIX' deploy/systemd/system/anas-workspace.service
+	grep -Fqx 'RuntimeDirectory=a-nas-workspace' deploy/systemd/system/anas-workspace.service
+	! grep -q '^SupplementaryGroups=' deploy/systemd/system/anas-workspace.service
+	grep -Fqx 'Environment=ANAS_WORKSPACE_SESSION_GROUP=a-nas-workspace' deploy/systemd/system/anas-host-agent.service
+	grep -Fq '"/run/a-nas-workspace/workspace.sock"' cmd/anas-api/config.go
+	grep -Fqx 'u a-nas-workspace 31004 "A-NAS shared workspace service" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-photos' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ExecStart=/usr/lib/a-nas/anas-api photo-service' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'ReadWritePaths=/srv/a-nas/data' deploy/systemd/system/anas-photos.service
@@ -241,7 +269,7 @@ ops-check:
 	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'Environment=GOMEMLIMIT=1GiB' deploy/systemd/system/anas-photos.service
 	grep -Fqx 'MemoryMax=2G' deploy/systemd/system/anas-photos.service
-	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
+	grep -Fqx 'SupplementaryGroups=a-nas-photos a-nas-shares a-nas-family a-nas-montage a-nas-workspace a-nas-search a-nas-modules' deploy/systemd/system/anas-api.service
 	grep -Fqx 'g a-nas-modules -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'g a-nas-module-sessions -' deploy/sysusers.d/a-nas.conf
 	grep -Fqx 'User=a-nas-search' deploy/systemd/system/anas-search.service
@@ -251,12 +279,36 @@ ops-check:
 	grep -Fq 'IPAddressDeny=0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12' deploy/systemd/system/anas-search.service
 	grep -Eqx 'u a-nas-search - "[^"]+" /nonexistent /usr/sbin/nologin' deploy/sysusers.d/a-nas-search.conf
 	! grep -Eq '^(User|Group)=' deploy/systemd/system/anas-host-agent.service
-	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
+	grep -Fqx 'RuntimeDirectory=a-nas a-nas-sessions a-nas-share-sessions a-nas-family-sessions a-nas-montage-sessions a-nas-workspace-sessions a-nas-module-sessions' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectory=a-nas-host' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'StateDirectoryMode=0700' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'd /var/lib/a-nas-host 0700 root root -' deploy/tmpfiles.d/a-nas.conf
 	grep -Fqx 'Environment=ANAS_PHOTO_SESSION_GROUP=a-nas-photos' deploy/systemd/system/anas-host-agent.service
 	grep -Fqx 'ListenStream=/run/a-nas-ai/ai.sock' deploy/systemd/system/anas-ai.socket
+	grep -Fqx 'SocketUser=a-nas-montage' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'SocketMode=0600' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'FileDescriptorName=grants' deploy/systemd/system/anas-photos-grants.socket
+	grep -Fqx 'Sockets=anas-photos-grants.socket' deploy/systemd/system/anas-photos.service
+	grep -Fqx 'ListenStream=/run/a-nas-montage-compute/compute.sock' deploy/systemd/system/anas-montage-compute.socket
+	@# The montage center's socket for planning: open to every UID in a directory only root enters, bound into
+	@# the members' planning instances alone, and stopped before the montage service it would start again.
+	grep -Fqx 'ListenStream=/run/a-nas-montage-assistant/assistant.sock' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'SocketMode=0666' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'DirectoryMode=0700' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'FileDescriptorName=assistant' deploy/systemd/system/anas-montage-assistant.socket
+	grep -Fqx 'Sockets=anas-montage-assistant.socket' deploy/systemd/system/anas-montage.service
+	test "$$(grep -c 'montage-assistant' deploy/systemd/system/anas-assistant@.service)" = 0
+	grep -Fq 'BindReadOnlyPaths=-/run/a-nas-montage-assistant/assistant.sock:/run/anas-assistant-montage/montage.sock' scripts/lib/assistant-units.sh
+	grep -Fq 'HERMES_TUI_TOOLSETS=montage,memory,skills' scripts/lib/assistant-units.sh
+	grep -Fqx 'ExecStart=/usr/lib/a-nas/assistant/runtime/venv/bin/python -I /usr/lib/a-nas/assistant/montage-planner.py' deploy/systemd/system/anas-montage-planner.service
+	grep -Fqx 'ConditionPathExists=/etc/credstore.encrypted/a-nas-assistant-deepseek' deploy/systemd/system/anas-montage-planner.service
+	test "$$(grep -c '^      systemctl stop anas-montage-assistant.socket || true$$' deploy/debian/a-nas/DEBIAN/prerm)" = 2
+	grep -Fqx '  systemctl stop anas-montage-assistant.socket 2>/dev/null || true' deploy/debian/a-nas/DEBIAN/preinst
+	@# Planning grants are in the Host Agent's own state, never under a service's directory.
+	grep -Fq '"/var/lib/a-nas-host/assistant/plans"' ai/assistant/montage-planner.py
+	! grep -rq 'a-nas/assistant-plans' ai/assistant cmd internal deploy scripts
+	grep -Fqx 'PrivateNetwork=true' deploy/systemd/system/anas-montage-compute.service
+	grep -Fqx 'InaccessiblePaths=-/srv/a-nas' deploy/systemd/system/anas-montage-compute.service
 	grep -Fq '"/run/a-nas-ai/ai.sock"' cmd/anas-api/config.go
 	grep -Fqx 'SocketGroup=a-nas-photos' deploy/systemd/system/anas-ai.socket
 	grep -Fqx 'SocketMode=0660' deploy/systemd/system/anas-ai.socket
@@ -268,8 +320,12 @@ ops-check:
 	grep -Fq -- '--face-detector /usr/lib/a-nas/ai/face-detector.onnx --face-detector-manifest /usr/lib/a-nas/ai/face-detector.json --face-embedder /usr/lib/a-nas/ai/face-embedder.onnx --face-embedder-manifest /usr/lib/a-nas/ai/face-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--animal-embedder /usr/lib/a-nas/ai/animal-embedder.onnx --animal-embedder-manifest /usr/lib/a-nas/ai/animal-embedder.json' deploy/systemd/system/anas-ai.service
 	grep -Fq -- '--ocr-server /usr/lib/a-nas/ai/llama/llama-server --ocr-runtime-manifest /usr/lib/a-nas/ai/llama.json --ocr-model /usr/lib/a-nas/ai/ocr-model.gguf --ocr-model-manifest /usr/lib/a-nas/ai/ocr-model.json --ocr-mmproj /usr/lib/a-nas/ai/ocr-mmproj.gguf --ocr-mmproj-manifest /usr/lib/a-nas/ai/ocr-mmproj.json' deploy/systemd/system/anas-ai.service
+	grep -Fq -- '--aesthetic-scorer /usr/lib/a-nas/ai/aesthetic-scorer.bundle --aesthetic-scorer-manifest /usr/lib/a-nas/ai/aesthetic-scorer.json' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HUB_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=TRANSFORMERS_OFFLINE=1' deploy/systemd/system/anas-ai.service
+	grep -Fqx 'Environment=HF_HOME=/var/cache/a-nas-ai/huggingface' deploy/systemd/system/anas-ai.service
 	@# Every model role the AI Worker's unit names is one the package links (scripts/lib/content.sh).
-	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf; do \
+	for role in model:litertlm detector:onnx face-detector:onnx face-embedder:onnx animal-embedder:onnx ocr-model:gguf ocr-mmproj:gguf aesthetic-scorer:bundle; do \
 		grep -Eq "^  $${role}:" scripts/lib/content.sh && grep -Fq "/usr/lib/a-nas/ai/$${role%%:*}.$${role#*:} " deploy/systemd/system/anas-ai.service || { echo "model role $$role" >&2; exit 1; }; done
 	! grep -q '^CPUQuota=' deploy/systemd/system/anas-ai.service
 	grep -Fq 'echo "CPUQuota=' deploy/site/a-nas-generator.sh
@@ -321,7 +377,7 @@ ops-check:
 	test "$$(grep -c '^f /run/a-nas-ffmpeg/slots/[0-7] 0440 root a-nas-photos -$$' deploy/tmpfiles.d/a-nas.conf)" = 8
 	grep -Eq '^Depends: (.*, )?ffmpeg, heif-thumbnailer(,|$$)' deploy/debian/a-nas-host/DEBIAN/control
 	awk '/^[A-Za-z0-9]/ { if (pin && !hashed) bad = bad " " pin; pin = $$1; hashed = 0 } /--hash=sha256:[0-9a-f]{64}/ { hashed = 1 } \
-		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant-spike/companion-mcp-sdk.txt
+		END { if (pin && !hashed) bad = bad " " pin; if (bad) { print "pinned without a hash:" bad; exit 1 } }' ai/requirements.txt ai/requirements-dev.txt ai/assistant/companion-mcp-sdk.txt
 	! grep -E "^($$(sed -e 's/#.*//' -e '/^[[:space:]]*$$/d' ai/requirements.excludes | paste -sd '|'))==" ai/requirements.txt
 
 vet:
@@ -344,7 +400,9 @@ go-lint:
 vuln-check:
 	$(GO) tool govulncheck ./...
 	for tool in actionlint gitleaks golangci-lint; do $(GO) tool govulncheck -C tools/$$tool tool || exit 1; done
-	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r ai/requirements.txt
+	@mkdir -p $(BUILD_DIR)
+	python3 scripts/audit-wheel-lock.py ai/requirements.txt > $(BUILD_DIR)/ai-audit-requirements.txt
+	$(PIP_AUDIT) --strict --disable-pip --require-hashes --progress-spinner off -r $(BUILD_DIR)/ai-audit-requirements.txt
 	$(PIP_AUDIT) --disable-pip --require-hashes --progress-spinner off -r deploy/search/requirements.txt
 	cd web && $(NPM) audit --omit=dev
 
@@ -358,7 +416,8 @@ secrets-check:
 	@if [ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" != false ]; then echo "secrets-check needs a clone with its whole history" >&2; exit 1; fi
 	$(GITLEAKS) git --log-opts=HEAD --redact=100 --no-banner --verbose .
 
-test:
+# internal/webui's tests serve the built Web UI.
+test: web-build
 	$(GO) test ./...
 
 # CI runs this beside `make check`. It leaves out internal/webui, which only
@@ -375,7 +434,7 @@ ai-lint:
 	have="$$($(RUFF) --version 2>/dev/null | cut -d ' ' -f 2)"; \
 	if [ "$$have" != "$$want" ]; then echo "ai/requirements-dev.txt pins ruff $$want; found: $${have:-none}" >&2; exit 1; fi
 	cd ai && $(RUFF) check .
-	$(RUFF) check --config ai/ruff.toml deploy/docker
+	$(RUFF) check --config ai/ruff.toml deploy/docker deploy/network
 
 # The AI Worker's tests need only the Python standard library; tests with the
 # real model run when ANAS_AI_MODEL names it (docs/development/LOCAL_ENVIRONMENT.md).
@@ -385,19 +444,19 @@ ai-test:
 # The companion's MCP server under the real MCP SDK (ai/tests/test_companion_mcp.py),
 # which make ai-test has not got and the assistant's runtime is not built here
 # for: a virtual environment of its own with the SDK Hermes's lock pins
-# (ai/assistant-spike/companion-mcp-sdk.txt). Without the SDK it fails.
+# (ai/assistant/companion-mcp-sdk.txt). Without the SDK it fails.
 AI_SDK_VENV ?= $(BUILD_DIR)/companion-mcp-sdk
 AI_SDK_STAMP = $(AI_SDK_VENV)/.installed
 
-$(AI_SDK_STAMP): ai/assistant-spike/companion-mcp-sdk.txt
+$(AI_SDK_STAMP): ai/assistant/companion-mcp-sdk.txt
 	rm -rf $(AI_SDK_VENV)
 	python3 -m venv $(AI_SDK_VENV)
 	$(AI_SDK_VENV)/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary=:all: \
-		-r ai/assistant-spike/companion-mcp-sdk.txt
+		-r ai/assistant/companion-mcp-sdk.txt
 	@touch $(AI_SDK_STAMP)
 
 ai-sdk-test: $(AI_SDK_STAMP)
-	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp
+	cd ai && ANAS_COMPANION_MCP_SDK=required PYTHONDONTWRITEBYTECODE=1 $(abspath $(AI_SDK_VENV))/bin/python -m unittest tests.test_companion_mcp tests.test_worker.ScorerBundleTest
 
 # Modifies accounts, groups, and Samba state: disposable privileged container only.
 root-integration-test:
@@ -484,20 +543,55 @@ scoring-module:
 # build/packages; needs dpkg-deb and jq.
 packages: build-binaries
 	scripts/build-packages.sh $(BUILD_DIR)/packages $(VERSION) $(BUILD_DIR)
+	scripts/check-no-songs.sh $(BUILD_DIR)/packages
+
+# check runs every step, past a failing one (CHECK_FLAGS=-k), so that one run
+# on a development machine reports every failure. CI sets CHECK_FLAGS empty and
+# stops at the first, so that a red run shows within minutes. It writes the
+# deploy manifest only once all have passed.
+CHECK_FLAGS ?= -k
 
 check:
 	@rm -f $(VALIDATION_MANIFEST)
-	@$(MAKE) --no-print-directory check-steps VERSION="$(VERSION)"
+	@$(MAKE) $(CHECK_FLAGS) --no-print-directory check-steps VERSION="$(VERSION)"
 	@commit="$$(git rev-parse --short=12 HEAD)"; \
 	api_sha="$$(sha256sum $(BUILD_DIR)/anas-api | cut -d ' ' -f 1)"; \
 	agent_sha="$$(sha256sum $(BUILD_DIR)/anas-host-agent | cut -d ' ' -f 1)"; \
 	printf 'commit=%s\nproduct_version=%s\napi_sha256=%s\nhost_agent_sha256=%s\n' \
 		"$$commit" "$(VERSION)" "$$api_sha" "$$agent_sha" > $(VALIDATION_MANIFEST)
 
-check-steps: api-check web-typecheck web-lint web-test web-build fmt-check docs-check ops-check vendor-check vet go-lint vuln-check test ai-lint ai-test ai-sdk-test build-binaries packages
+# check-steps runs CHECK_JOBS steps at a time (make -j) and prints each one's
+# output in one piece when it ends. The slow steps come first, so that each
+# starts once its prerequisites are built (the Go steps wait for web-build).
+# It starts no further step while the load average is above CHECK_LOAD, the
+# number of CPUs (make -l): gates of two sessions on one machine then take
+# turns, instead of slowing each other's tests past their time limits. At the
+# end it lists how long each step took, slowest first, from the start and end
+# of each recipe line that scripts/check-times.sh notes in CHECK_TIMES; the
+# steps' own make runs with CHECK_TIMES set.
+CHECK_JOBS ?= 4
+CHECK_LOAD ?= $(shell nproc 2>/dev/null || echo 4)
+CHECK_STEPS = web-test test go-lint vet vuln-check build-binaries packages web-typecheck web-lint ai-test ai-sdk-test \
+	ops-check docs-check api-check ai-lint vendor-check fmt-check
+
+check-steps:
+	@rm -rf $(BUILD_DIR)/check-times && mkdir -p $(BUILD_DIR)/check-times
+	@status=0; $(MAKE) -j$(CHECK_JOBS) -l$(CHECK_LOAD) --output-sync=target --no-print-directory $(CHECK_STEPS) \
+		VERSION="$(VERSION)" CHECK_TIMES=$(BUILD_DIR)/check-times || status=$$?; \
+	scripts/check-times.sh --report $(BUILD_DIR)/check-times; exit $$status
+
+ifdef CHECK_TIMES
+SHELL := $(CURDIR)/scripts/check-times.sh
+# A stamp file's target has slashes: web/node_modules/.package-lock.json.
+.SHELLFLAGS = $(CHECK_TIMES)/$(subst /,-,$@) -c
+# web-build empties internal/webui/dist and writes it anew, and these read it
+# (internal/webui embeds it): not at the same time. Alone they need no Web UI.
+vet go-lint vuln-check: | web-build
+endif
 
 clean:
 	rm -f $(BUILD_DIR)/anas-api $(BUILD_DIR)/anas-host-agent $(BUILD_DIR)/anas-container-agent $(VALIDATION_MANIFEST)
+	rm -rf $(BUILD_DIR)/check-times
 	rm -rf $(BUILD_DIR)/packages
 	rm -rf $(AI_SDK_VENV)
 	find internal/webui/dist -mindepth 1 ! -name '.keep' -delete

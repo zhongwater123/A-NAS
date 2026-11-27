@@ -68,6 +68,11 @@ func (s *Store) Claim(ctx context.Context, batchID, rater string) ([]Claim, bool
 		if ok, err := raterIn(ctx, tx, rater); err != nil || !ok {
 			return errors.Join(err, ErrNotRater)
 		}
+		// Below the reserve nobody scores: the page says why instead of
+		// showing photos whose answers it could not keep.
+		if err := s.room(rowBytes); err != nil {
+			return err
+		}
 		var state string
 		var required int
 		err := tx.QueryRowContext(ctx, "SELECT state, required FROM batches WHERE id = ?", batchID).Scan(&state, &required)
@@ -175,19 +180,43 @@ func (s *Store) pick(ctx context.Context, tx *sql.Tx, batchID, rater string, req
 	return item, nil, err
 }
 
-// ClaimPreview returns the preview behind a rater's own claim, submitted or
-// not, so that the rater can go back to it to change the latest score.
-func (s *Store) ClaimPreview(ctx context.Context, token, rater string) (string, error) {
-	var sha string
-	err := s.db.QueryRowContext(ctx, `SELECT i.sha256 FROM claims c JOIN items i ON i.id = c.item_id
-		WHERE c.token = ? AND c.rater = ?`, token, rater).Scan(&sha)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
+// claimed is the photo behind a claim a rater may still look at.
+type claimed struct {
+	item   int64
+	sha    string
+	source string
+}
+
+// claimedPhoto finds the photo behind rater's own claim token while the
+// rater may see it: the rater is still chosen, and either holds the claim,
+// its lease running and no answer given, or answered it with an answer in
+// force, which the rater can revise or compare against. A claim whose lease
+// ended unanswered went back to the batch, and with it the photo.
+func (s *Store) claimedPhoto(ctx context.Context, token, rater string) (claimed, error) {
+	if ok, err := raterIn(ctx, s.db, rater); err != nil || !ok {
+		return claimed{}, errors.Join(err, ErrNotRater)
 	}
+	var photo claimed
+	err := s.db.QueryRowContext(ctx, `SELECT i.id, i.sha256, b.source FROM claims c
+		JOIN items i ON i.id = c.item_id JOIN batches b ON b.id = c.batch_id
+		WHERE c.token = ?1 AND c.rater = ?2 AND (c.submitted = 0 AND c.expires_at > ?3
+			OR EXISTS (SELECT 1 FROM ratings r WHERE r.claim_token = c.token AND r.rater = ?2 AND r.superseded_at IS NULL))`,
+		token, rater, s.timestamp()).Scan(&photo.item, &photo.sha, &photo.source)
+	if errors.Is(err, sql.ErrNoRows) {
+		return claimed{}, ErrNotFound
+	}
+	return photo, err
+}
+
+// ClaimPreview returns the preview behind a rater's own claim while the
+// rater holds it or has an answer for it, so that the rater can go back to
+// change the latest score and set recent ones beside the photo.
+func (s *Store) ClaimPreview(ctx context.Context, token, rater string) (string, error) {
+	photo, err := s.claimedPhoto(ctx, token, rater)
 	if err != nil {
 		return "", err
 	}
-	return s.previewPath(sha), nil
+	return s.previewPath(photo.sha), nil
 }
 
 // Submission is a rater's answer for one claim.
@@ -252,6 +281,15 @@ func (submission Submission) answers(dimensions []string, scale Scale) error {
 			return invalid("a score of %s is %s", dimension, scale.says())
 		}
 	}
+	// 情绪 goes from 1, calm, to 5, intense, on every scale: the handbook
+	// has no 0 for it.
+	emotion, scored := submission.Scores[Emotion]
+	if len(dimensions) > 0 && dimensions[0] == Emotion {
+		emotion, scored = *submission.Score, true
+	}
+	if scored && emotion < lowestEmotion {
+		return invalid("a score of %s is 1 to 5", Emotion)
+	}
 	later := laterDimensions(dimensions)
 	answered := len(submission.Scores) == len(later)
 	for _, dimension := range later {
@@ -311,6 +349,9 @@ func (s *Store) Submit(ctx context.Context, token, rater string, submission Subm
 		}
 		if ok, err := raterIn(ctx, tx, rater); err != nil || !ok {
 			return errors.Join(err, ErrNotRater)
+		}
+		if err := s.room(rowBytes); err != nil {
+			return err
 		}
 		if err := submission.answers(splitDimensions(dimensions), scale); err != nil {
 			return err

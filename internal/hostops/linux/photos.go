@@ -148,6 +148,36 @@ func (e *Executor) EnsureModuleStore(ctx context.Context, manifest modulemanifes
 	return err == nil && statErr == nil, repaired, err
 }
 
+// EnsureMontageStore owns the montage center's projects, plans and jobs
+// (ADR 0038), outside member spaces, like the family store.
+func (e *Executor) EnsureMontageStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensureOwnedStore(ctx, "montage", accountid.MontageServiceUser, accountid.MontageServiceUID)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, "montage")}, err
+	}
+	return nil, err
+}
+
+// EnsureWorkspaceStore owns the shared workspace's pages and versions (ADR
+// 0040), outside member spaces, like the family store.
+func (e *Executor) EnsureWorkspaceStore(ctx context.Context) ([]string, error) {
+	if !e.dataVolumeReady() {
+		return nil, nil
+	}
+	e.materializeMu.Lock()
+	defer e.materializeMu.Unlock()
+	drifted, err := e.ensureOwnedStore(ctx, "workspace", accountid.WorkspaceServiceUser, accountid.WorkspaceServiceUID)
+	if drifted {
+		return []string{filepath.Join(e.mountPoint, "workspace")}, err
+	}
+	return nil, err
+}
+
 // EnsureFamilyStore owns the family center's records and recordings
 // (ADR 0029), outside member spaces, like the share store.
 func (e *Executor) EnsureFamilyStore(ctx context.Context) ([]string, error) {

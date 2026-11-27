@@ -16,6 +16,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/webentry"
+	"github.com/zhongwater123/A-NAS/internal/workspaceapi"
 )
 
 // photoActivitySource reads the caller's photo events through the photo API,
@@ -92,14 +93,27 @@ func (h *productHandler) familyActivitySource() func(*http.Request, activity.Que
 	if h.Family == nil {
 		return nil
 	}
+	return h.serviceActivity("family", familyapi.ActivityPath, withUser(h.Family))
+}
+
+func (h *productHandler) workspaceActivitySource() func(*http.Request, activity.Query) ([]activity.Event, error) {
+	if h.Workspace == nil {
+		return nil
+	}
+	return h.serviceActivity("workspace", workspaceapi.ActivityPath, serve(h.Workspace))
+}
+
+// serviceActivity reads the caller's events from a service's handler, which
+// answers path with activityapi.WriteServicePage.
+func (h *productHandler) serviceActivity(name, path string, handler apiroute.Handler) func(*http.Request, activity.Query) ([]activity.Event, error) {
 	return func(r *http.Request, q activity.Query) ([]activity.Event, error) {
 		request := r.Clone(r.Context())
 		request.Method, request.Body, request.RequestURI = http.MethodGet, http.NoBody, ""
-		request.URL = &url.URL{Path: familyapi.ActivityPath, RawQuery: q.Values().Encode()}
+		request.URL = &url.URL{Path: path, RawQuery: q.Values().Encode()}
 		response := &bufferedResponse{header: http.Header{}}
-		h.guard(apiroute.Route{Posture: apiroute.Session, Handler: withUser(h.Family)})(response, request)
+		h.guard(apiroute.Route{Posture: apiroute.Session, Handler: handler})(response, request)
 		if response.status != http.StatusOK {
-			return nil, fmt.Errorf("family activity status %d", response.status)
+			return nil, fmt.Errorf("%s activity status %d", name, response.status)
 		}
 		return activityapi.DecodeServicePage(&response.body)
 	}
