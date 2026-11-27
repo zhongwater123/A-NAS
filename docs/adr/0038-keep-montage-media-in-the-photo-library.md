@@ -1,6 +1,6 @@
 # 0038：剪辑中心以独立服务运行，素材、基础分析与成片归相册，经项目授权访问
 
-状态：accepted（2026-11-18，用户；2026-11-20 用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)规划改为成员规划进程里的一次对话，决定 5 与后果已改写；2026-11-17 起草；2026-11-18 用户把规划改为由 NAS 在后台发起，决定 5 已改写；同日评审人定为 Hermes 探针（实施方案的 P1）通过后再决定，[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的两项必过都过了，决定 5 按它的结果改写；已修订 ADR 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10；2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)剪辑分析不等相册空闲，决定 4 与后果已改写；实施方案见[剪辑中心技术设计](../architecture/videocut-center.md)，行为见[规格](../specs/videocut-center.md)）
+状态：accepted（2026-11-18，用户；2026-11-27 起成片的存放被 [ADR 0041](0041-edit-venus-films-on-one-timeline-per-project.md) 修订：Venus 的成片存在项目里，删除项目时删掉，原片照旧归相册、不删；2026-11-20 用户[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)规划改为成员规划进程里的一次对话，决定 5 与后果已改写；2026-11-17 起草；2026-11-18 用户把规划改为由 NAS 在后台发起，决定 5 已改写；同日评审人定为 Hermes 探针（实施方案的 P1）通过后再决定，[Hermes 探针](https://github.com/zhongwater123/A-NAS/pull/546)的两项必过都过了，决定 5 按它的结果改写；已修订 ADR 0011 决定 4、0016 决定 4、0024 决定 3、8 与 10；2026-11-25 用户[决定](../decisions/2026-11-25-photo-ai-gate-member-work.md)剪辑分析不等相册空闲，决定 4 与后果已改写；实施方案见[剪辑中心技术设计](../architecture/videocut-center.md)，行为见[规格](../specs/videocut-center.md)）
 
 [#514](https://github.com/zhongwater123/A-NAS/issues/514) 要把视频剪辑原型接进 A-NAS。接入后，剪辑要在成员离线时继续读原片，要用本地模型看画面，要用成员的 VNAS 做规划，还要把成片放回相册。这带来几个难以逆转的选择：
 - 剪辑以什么身份运行；

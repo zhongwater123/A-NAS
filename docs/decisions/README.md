@@ -81,6 +81,7 @@
 - [2026-11-19：剪辑中心二次编辑起草时选的两项默认做法](2026-11-19-montage-edit-defaults.md)
 - [2026-11-20：剪辑中心的规划怎样交给 VNAS](2026-11-20-montage-planning-as-a-vnas-session.md)
 - [2026-11-25：规划没有完成时自动重来，到上限仍失败就让任务失败并通知](2026-11-25-montage-planning-retries.md)
+- [2026-11-27：Venus PRD v3 没写清或前后矛盾的四处怎么做](2026-11-27-venus-prd-gaps.md)
 
 ### 家庭待办
 
