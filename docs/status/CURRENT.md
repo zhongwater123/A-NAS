@@ -50,6 +50,6 @@
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
 9. 剪辑中心：allin1 版权待议；二次编辑的界面按新交互重做，先写新的 ADR 与规格（[#632](https://github.com/zhongwater123/A-NAS/issues/632)），再拆 #596 的子 issue；导出与修改稿、重剪从修改稿出发两处要先定（[ADR 0039 的修订说明](../adr/0039-edit-montage-films-as-server-side-drafts-saved-as-new-versions.md#实现与后续修订2026-11-25)）；已有的服务端见[实施方案](../architecture/montage-center.md#出片后的二次编辑)。
 10. 家庭待办：随下次发布部署到实验 NAS，再把验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
-11. 墨水屏第一批（配对、客厅待办屏、纸条）：等[决定记录](../decisions/2026-11-27-eink-screens-first-batch.md)中的待定项定下再实现（[规格](../specs/eink-screens.md)，#503）。
+11. 墨水屏第一批（配对、客厅待办屏）：等[决定记录](../decisions/2026-11-27-eink-screens-first-batch.md)中的待定项定下再实现（[规格](../specs/eink-screens.md)，#503；定位与上线清单 #687）。
 11. 共享工作区：M1（共享页面与 agent 修改）合入后部署并实机验收，再做 M2 的批注与版本对比（[规格](../specs/shared-workspace.md)）。
 12. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。
