@@ -2,6 +2,7 @@ package family
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestScreensArePairedWithATokenKeptAsAHash(t *testing.T) {
 		t.Fatalf("the token finds %+v", found)
 	}
 	for _, wrong := range []string{"", token + "x", strings.ToLower(token)} {
-		if _, err := f.store.ScreenByToken(ctx, wrong); err != ErrScreenToken {
+		if _, err := f.store.ScreenByToken(ctx, wrong); !errors.Is(err, ErrScreenToken) {
 			t.Errorf("token %q: err = %v", wrong, err)
 		}
 	}
@@ -42,16 +43,16 @@ func TestScreenNames(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	for _, name := range []string{"", "   ", "一二三四五六七", "客\n厅"} {
-		if _, _, err := f.store.AddScreen(ctx, mom, name); err != ErrInvalid {
+		if _, _, err := f.store.AddScreen(ctx, mom, name); !errors.Is(err, ErrInvalid) {
 			t.Errorf("name %q: err = %v", name, err)
 		}
 	}
 	living := must3(f.store.AddScreen(ctx, mom, "客厅"))
-	if _, _, err := f.store.AddScreen(ctx, dad, "客厅"); err != ErrConflict {
+	if _, _, err := f.store.AddScreen(ctx, dad, "客厅"); !errors.Is(err, ErrConflict) {
 		t.Errorf("a second 客厅: err = %v", err)
 	}
 	door := must3(f.store.AddScreen(ctx, mom, "玄关"))
-	if _, err := f.store.RenameScreen(ctx, door.ID, "客厅"); err != ErrConflict {
+	if _, err := f.store.RenameScreen(ctx, door.ID, "客厅"); !errors.Is(err, ErrConflict) {
 		t.Errorf("renaming onto 客厅: err = %v", err)
 	}
 	if renamed := must(f.store.RenameScreen(ctx, living.ID, "客厅")); renamed.Name != "客厅" {
@@ -60,7 +61,7 @@ func TestScreenNames(t *testing.T) {
 	if renamed := must(f.store.RenameScreen(ctx, door.ID, "冰箱")); renamed.Name != "冰箱" {
 		t.Errorf("renamed = %+v", renamed)
 	}
-	if _, err := f.store.RenameScreen(ctx, "scr_missing", "书房"); err != ErrNotFound {
+	if _, err := f.store.RenameScreen(ctx, "scr_missing", "书房"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("renaming a missing screen: err = %v", err)
 	}
 	if names := screenNames(must(f.store.Screens(ctx))); names != "客厅,冰箱" {
@@ -75,10 +76,10 @@ func TestRemovingAScreenRevokesItsToken(t *testing.T) {
 	if err := f.store.RemoveScreen(ctx, screen.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.store.ScreenByToken(ctx, token); err != ErrScreenToken {
+	if _, err := f.store.ScreenByToken(ctx, token); !errors.Is(err, ErrScreenToken) {
 		t.Errorf("a removed screen's token: err = %v", err)
 	}
-	if err := f.store.RemoveScreen(ctx, screen.ID); err != ErrNotFound {
+	if err := f.store.RemoveScreen(ctx, screen.ID); !errors.Is(err, ErrNotFound) {
 		t.Errorf("removing twice: err = %v", err)
 	}
 	// What a removed screen said as it was being removed is dropped.
@@ -106,6 +107,14 @@ func TestRecordAsk(t *testing.T) {
 	}
 	if r := got.Report; r == nil || *r.Battery != 35 || *r.USB || r.Firmware != "0.2.5-s3" || r.History != "0712a-none-4" || r.RSSI != nil {
 		t.Fatalf("report = %+v", got.Report)
+	}
+	// The next question reports less: the rest keeps its last value, but the
+	// history is only what this question carried.
+	rssi := -61
+	must(0, f.store.RecordAsk(ctx, screen.ID, "0123456789abcdef:bw", f.now, next, ScreenReport{RSSI: &rssi}))
+	if r := must(f.store.ScreenByToken(ctx, token)).Report; r == nil || *r.Battery != 35 || *r.RSSI != -61 ||
+		r.Firmware != "0.2.5-s3" || r.Fail != "wifi" || r.History != "" {
+		t.Fatalf("merged report = %+v", r)
 	}
 }
 

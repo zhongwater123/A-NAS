@@ -113,7 +113,7 @@ func TestEveryOperationIsRoutedBehindItsPosture(t *testing.T) {
 			if recorder.Code != http.StatusUnauthorized || answerCode(recorder) != "authentication_required" {
 				t.Errorf("%s without a session = %d %s, want 401 authentication_required", name, recorder.Code, recorder.Body.String())
 			}
-			if operation.Extensions["x-anas-posture"] == "agent" {
+			if marker := operation.Extensions["x-anas-posture"]; marker == "agent" || marker == "device" {
 				// An agent route takes no session at all: the cookie alone
 				// is refused as no token (ADR 0040).
 				request := httptest.NewRequest(method, target, strings.NewReader("{}"))
@@ -171,8 +171,8 @@ func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 			t.Errorf("route %s %s is %s, but the specification says public = %v", route.Method, route.Pattern, route.Posture, public)
 		}
 		marker := operation.Extensions["x-anas-posture"]
-		if marker != nil && marker != "admin" && marker != "agent" {
-			t.Errorf("operation %s %s has x-anas-posture %v; the values are admin and agent", route.Method, route.Pattern, marker)
+		if marker != nil && marker != "admin" && marker != "agent" && marker != "device" {
+			t.Errorf("operation %s %s has x-anas-posture %v; the values are admin, agent and device", route.Method, route.Pattern, marker)
 		}
 		if (marker == "admin") != (route.Posture == apiroute.Admin) {
 			t.Errorf("route %s %s is %s, but the specification says x-anas-posture %v", route.Method, route.Pattern, route.Posture, marker)
@@ -180,6 +180,10 @@ func TestEveryRouteIsSpecifiedWithItsPosture(t *testing.T) {
 		bearer := operation.Security != nil && len(*operation.Security) == 1 && (*operation.Security)[0]["bearerAuth"] != nil
 		if (marker == "agent") != (route.Posture == apiroute.Agent) || (marker == "agent") != bearer {
 			t.Errorf("route %s %s is %s, but the specification says x-anas-posture %v with bearerAuth = %v", route.Method, route.Pattern, route.Posture, marker, bearer)
+		}
+		device := operation.Security != nil && len(*operation.Security) == 1 && (*operation.Security)[0]["deviceAuth"] != nil
+		if (marker == "device") != (route.Posture == apiroute.Device) || (marker == "device") != device {
+			t.Errorf("route %s %s is %s, but the specification says x-anas-posture %v with deviceAuth = %v", route.Method, route.Pattern, route.Posture, marker, device)
 		}
 	}
 }

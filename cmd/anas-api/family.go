@@ -17,6 +17,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/familyapi"
 	"github.com/zhongwater123/A-NAS/internal/familyservice"
 	"github.com/zhongwater123/A-NAS/internal/ffmpegworker"
+	"github.com/zhongwater123/A-NAS/internal/serviceproxy"
 	"github.com/zhongwater123/A-NAS/internal/sessionlookup"
 )
 
@@ -77,5 +78,7 @@ func configuredFamily(config Config, users *accounts.Service, photoAPI http.Hand
 	if err := store.Purge(context.Background()); err != nil {
 		logger.Warn("family trash purge failed", "error", err)
 	}
-	return familyapi.New(store, logger, media), store.RemoveAccount, func() { _ = store.Close() }, nil
+	// Local hands the family API the headers the family service would get,
+	// such as an e-ink screen's device token.
+	return serviceproxy.Local(familyapi.New(store, logger, media)), store.RemoveAccount, func() { _ = store.Close() }, nil
 }

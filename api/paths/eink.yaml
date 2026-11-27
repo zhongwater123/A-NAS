@@ -1,0 +1,115 @@
+/api/v1/eink/screens:
+  get:
+    operationId: listEinkScreens
+    summary: The paired e-ink screens, oldest first, with what each last reported. Administrators only
+    x-anas-posture: admin
+    responses:
+      "200": { description: The screens, content: { application/json: { schema: { type: object, additionalProperties: false, required: [items], properties: { items: { type: array, items: { $ref: "../components/eink.yaml#/schemas/EinkScreen" } } } } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: pairEinkScreen
+    summary: >-
+      Pair a screen under a name of 1–6 characters, unique among the screens. The answer carries the screen's device
+      token this once; the NAS keeps only its SHA-256. Administrators only
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/eink.yaml#/schemas/EinkScreenName" } } } }
+    responses:
+      "201": { description: The screen and its token, content: { application/json: { schema: { $ref: "../components/eink.yaml#/schemas/EinkPairedScreen" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/eink/screens/{screenId}:
+  parameters: [{ $ref: "../components/eink.yaml#/parameters/ScreenID" }]
+  patch:
+    operationId: renameEinkScreen
+    summary: Rename a paired screen; the name stays unique among the screens. Administrators only
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/eink.yaml#/schemas/EinkScreenName" } } } }
+    responses:
+      "200": { description: The screen, content: { application/json: { schema: { $ref: "../components/eink.yaml#/schemas/EinkScreen" } } } }
+      "400": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+  delete:
+    operationId: removeEinkScreen
+    summary: Unpair a screen; its device token stops working at once. Administrators only
+    x-anas-posture: admin
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    responses:
+      "204": { description: Removed }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/eink/next:
+  get:
+    operationId: askEinkNext
+    summary: >-
+      A paired screen asks whether to redraw (docs/specs/eink-screens.md). It takes the screen's device token as a
+      bearer token and never a session cookie; a request carrying Origin (a browser's) is 403 forbidden, a missing,
+      wrong or revoked token 401. The answer's names are the firmware's and fixed; times are the NAS's local time to
+      the second, without a zone. Malformed report fields are ignored
+    security: [{ deviceAuth: [] }]
+    x-anas-posture: device
+    parameters:
+      - { name: shown, in: query, schema: { type: string }, description: "Key of the picture the screen shows; empty after power-on" }
+      - { name: dirty, in: query, schema: { type: string, enum: ["0", "1"] }, description: "1 when the screen pasted its own offline bar" }
+      - { name: partial, in: query, schema: { type: string, enum: ["0", "1"] }, description: "Ignored: the first batch always redraws in full" }
+      - { name: force, in: query, schema: { type: string }, description: "手动 when someone pressed the power key" }
+      - { name: bat, in: query, schema: { type: integer, minimum: 0, maximum: 100 } }
+      - { name: mv, in: query, schema: { type: integer } }
+      - { name: chg, in: query, schema: { type: string, enum: ["0", "1"] } }
+      - { name: usb, in: query, schema: { type: string, enum: ["0", "1"] } }
+      - { name: fw, in: query, schema: { type: string, maxLength: 31 } }
+      - { name: rssi, in: query, schema: { type: integer } }
+      - { name: awake_ms, in: query, schema: { type: integer, minimum: 0 } }
+      - { name: wake, in: query, schema: { type: string } }
+      - { name: reset, in: query, schema: { type: string } }
+      - { name: fail, in: query, schema: { type: string, maxLength: 23 } }
+      - { name: hist, in: query, schema: { type: string, maxLength: 127 } }
+      - { name: tc, in: query, schema: { type: integer }, description: "Ignored in the first batch" }
+      - { name: rh, in: query, schema: { type: integer }, description: "Ignored in the first batch" }
+    responses:
+      "200": { description: What to do, content: { application/json: { schema: { $ref: "../components/eink.yaml#/schemas/EinkAnswer" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/eink/screen.bin:
+  get:
+    operationId: getEinkPicture
+    summary: >-
+      The screen's picture: 800×480 at one bit a pixel, rows top to bottom, pixels left to right, the high bit first,
+      1 white and 0 black; 48000 bytes, with its key in X-Content-Hash. 503 eink_unavailable until the NAS draws
+      pictures. Device token as for askEinkNext
+    security: [{ deviceAuth: [] }]
+    x-anas-posture: device
+    parameters: [{ name: h, in: query, schema: { type: string }, description: "The key askEinkNext gave; only for logs" }]
+    responses:
+      "200":
+        description: The picture
+        headers: { X-Content-Hash: { schema: { type: string }, description: "The picture's key, without :bw" } }
+        content: { application/octet-stream: { schema: { type: string, format: binary } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/eink/screen-bar.bin:
+  get:
+    operationId: getEinkBar
+    summary: >-
+      The bar a screen pastes bottom left when it cannot reach the NAS: 592×80 in the picture's format, 5920 bytes,
+      reading 停止更新 · 画面停在 M月D日 HH:MM. 503 eink_unavailable until the NAS draws pictures. Device token as for
+      askEinkNext
+    security: [{ deviceAuth: [] }]
+    x-anas-posture: device
+    responses:
+      "200": { description: The bar, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

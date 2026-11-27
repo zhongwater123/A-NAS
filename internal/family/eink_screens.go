@@ -1,6 +1,7 @@
 package family
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -206,16 +207,45 @@ func (s *Store) ScreenByToken(ctx context.Context, token string) (Screen, error)
 }
 
 // RecordAsk keeps what a screen said and what it was told: the picture it
-// now shows, when it asked, when to ask again and its report. A screen
-// removed meanwhile is not brought back.
+// now shows, when it asked, when to ask again and its report. A field the
+// screen did not report keeps its last value, except the history of wakes,
+// which is only what this question carried: firmware that stops sending it
+// leaves none behind. A screen removed meanwhile is not brought back.
 func (s *Store) RecordAsk(ctx context.Context, id, shown string, seen, next time.Time, report ScreenReport) error {
-	encoded, err := json.Marshal(report)
-	if err != nil {
+	return s.inTx(ctx, func(tx *sql.Tx) error {
+		screen, err := s.screen(ctx, tx, id)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if screen.Report != nil {
+			report = report.over(*screen.Report)
+		}
+		encoded, err := json.Marshal(report)
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE eink_screens SET shown = ?, seen_at = ?, next_at = ?, report = ? WHERE id = ?",
+			shown, formatTime(seen), formatTime(next), string(encoded), id)
 		return err
-	}
-	_, err = s.db.ExecContext(ctx, "UPDATE eink_screens SET shown = ?, seen_at = ?, next_at = ?, report = ? WHERE id = ?",
-		shown, formatTime(seen), formatTime(next), string(encoded), id)
-	return err
+	})
+}
+
+// over fills what r leaves out from old, all but the history.
+func (r ScreenReport) over(old ScreenReport) ScreenReport {
+	r.Battery = cmp.Or(r.Battery, old.Battery)
+	r.Millivolt = cmp.Or(r.Millivolt, old.Millivolt)
+	r.Charging = cmp.Or(r.Charging, old.Charging)
+	r.USB = cmp.Or(r.USB, old.USB)
+	r.Firmware = cmp.Or(r.Firmware, old.Firmware)
+	r.RSSI = cmp.Or(r.RSSI, old.RSSI)
+	r.AwakeMs = cmp.Or(r.AwakeMs, old.AwakeMs)
+	r.Wake = cmp.Or(r.Wake, old.Wake)
+	r.Reset = cmp.Or(r.Reset, old.Reset)
+	r.Fail = cmp.Or(r.Fail, old.Fail)
+	return r
 }
 
 // ScreenTodos lists what a shared screen may show: open shared to-dos with a
@@ -240,3 +270,6 @@ func (s *Store) ScreenTodos(ctx context.Context) ([]Todo, error) {
 
 // Today is the family's calendar date, as boards count days.
 func (s *Store) Today() time.Time { return s.today() }
+
+// Now is the store's clock, which screens set theirs from.
+func (s *Store) Now() time.Time { return s.now() }

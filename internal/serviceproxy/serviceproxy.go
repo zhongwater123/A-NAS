@@ -33,6 +33,13 @@ const (
 	AgentOriginHeader = "X-A-NAS-Agent-Origin"
 )
 
+// DeviceTokenHeader carries an e-ink screen's device token from the Product
+// Service's device routes to the family service, which checks it. This names
+// the header; the token is the value.
+//
+//nolint:gosec // G101: the header's name, not a credential.
+const DeviceTokenHeader = "X-A-NAS-Device-Token"
+
 // ResponseHeaderTimeout is how long a service may take to start answering a
 // request it has received in full, such as importing an uploaded video or
 // encoding an image to search by. A service that hangs then frees the

@@ -9,7 +9,7 @@ info:
   version: 1.0.1-rc.1
   description: >-
     Local-only authenticated product API for A-NAS storage, files, accounts, recycle bin, manual and scheduled snapshots,
-    the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
+    the managed photo library, the media center, the in-place music library, the shared feedback list, family to-dos, e-ink screens, resumable uploads and followed downloads (the transfer center), an opt-in administrator terminal, container lifecycle actions that go through the separate
     container agent, and each member's AI assistant (ADR 0024). Every operation that takes a JSON body
     bounds it and answers 413 request_too_large above the bound: 1 MiB for most, 256 KiB for shares, the family center and family to-dos, 64 KiB for the montage center, 65 KiB for
     assistant requests, and 1 KiB for small fixed requests such as container actions, app installs and marking
@@ -149,6 +149,11 @@ paths:
   /api/v1/todos/{todoId}: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}" }
   /api/v1/todos/{todoId}/status: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1status" }
   /api/v1/todos/{todoId}/snooze: { $ref: "paths/todos.yaml#/~1api~1v1~1todos~1{todoId}~1snooze" }
+  /api/v1/eink/screens: { $ref: "paths/eink.yaml#/~1api~1v1~1eink~1screens" }
+  /api/v1/eink/screens/{screenId}: { $ref: "paths/eink.yaml#/~1api~1v1~1eink~1screens~1{screenId}" }
+  /api/v1/eink/next: { $ref: "paths/eink.yaml#/~1api~1v1~1eink~1next" }
+  /api/v1/eink/screen.bin: { $ref: "paths/eink.yaml#/~1api~1v1~1eink~1screen.bin" }
+  /api/v1/eink/screen-bar.bin: { $ref: "paths/eink.yaml#/~1api~1v1~1eink~1screen-bar.bin" }
   /api/v1/workspace: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace" }
   /api/v1/workspace/pages: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages" }
   /api/v1/workspace/pages/{pageId}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1pages~1{pageId}" }
@@ -347,6 +352,10 @@ components:
       type: http
       scheme: bearer
       description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
+    deviceAuth:
+      type: http
+      scheme: bearer
+      description: An e-ink screen's device token (docs/specs/eink-screens.md), only on operations marked x-anas-posture device.
   parameters:
     CSRFToken: { $ref: "components/common.yaml#/parameters/CSRFToken" }
     UserID: { $ref: "components/accounts.yaml#/parameters/UserID" }
@@ -380,6 +389,7 @@ components:
     FamilyCommentID: { $ref: "components/family.yaml#/parameters/FamilyCommentID" }
     FamilyCursor: { $ref: "components/family.yaml#/parameters/FamilyCursor" }
     TodoID: { $ref: "components/todos.yaml#/parameters/TodoID" }
+    ScreenID: { $ref: "components/eink.yaml#/parameters/ScreenID" }
     ScoringBatchID: { $ref: "components/scoring.yaml#/parameters/ScoringBatchID" }
     ScoringAnchorID: { $ref: "components/scoring.yaml#/parameters/ScoringAnchorID" }
     ScoringClaimToken: { $ref: "components/scoring.yaml#/parameters/ScoringClaimToken" }
@@ -553,6 +563,11 @@ components:
     FamilyCatalog: { $ref: "components/family.yaml#/schemas/FamilyCatalog" }
     TodoDate: { $ref: "components/todos.yaml#/schemas/TodoDate" }
     TodoCategory: { $ref: "components/todos.yaml#/schemas/TodoCategory" }
+    EinkScreenName: { $ref: "components/eink.yaml#/schemas/EinkScreenName" }
+    EinkScreenReport: { $ref: "components/eink.yaml#/schemas/EinkScreenReport" }
+    EinkScreen: { $ref: "components/eink.yaml#/schemas/EinkScreen" }
+    EinkPairedScreen: { $ref: "components/eink.yaml#/schemas/EinkPairedScreen" }
+    EinkAnswer: { $ref: "components/eink.yaml#/schemas/EinkAnswer" }
     TodoScope: { $ref: "components/todos.yaml#/schemas/TodoScope" }
     TodoStatus: { $ref: "components/todos.yaml#/schemas/TodoStatus" }
     TodoStage: { $ref: "components/todos.yaml#/schemas/TodoStage" }

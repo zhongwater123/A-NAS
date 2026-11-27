@@ -1,0 +1,55 @@
+parameters:
+  ScreenID: { name: screenId, in: path, required: true, schema: { type: string, minLength: 1 } }
+schemas:
+  EinkScreenName:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { type: string, minLength: 1, maxLength: 6, description: "Where the screen hangs, such as 客厅; 1–6 characters after trimming spaces." }
+  EinkScreenReport:
+    type: object
+    additionalProperties: false
+    description: What the screen said about itself when it last asked; a field it did not send, or sent malformed, is absent.
+    properties:
+      battery: { type: integer, minimum: 0, maximum: 100 }
+      millivolt: { type: integer }
+      charging: { type: boolean }
+      usb: { type: boolean }
+      firmware: { type: string }
+      rssi: { type: integer }
+      awakeMs: { type: integer, minimum: 0 }
+      wake: { type: string }
+      reset: { type: string }
+      fail: { type: string, description: "Why the screen's previous wake failed, such as wifi or lowbat." }
+      history: { type: string, description: "The screen's last few wakes as the firmware writes them, such as 0715k-wifi-11." }
+  EinkScreen:
+    type: object
+    additionalProperties: false
+    required: [id, name, createdAt]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      createdAt: { type: string, format: date-time }
+      seenAt: { type: string, format: date-time, description: "When the screen last asked; absent before its first question." }
+      nextAt: { type: string, format: date-time, description: "When the screen was told to ask again." }
+      report: { $ref: "#/schemas/EinkScreenReport" }
+  EinkPairedScreen:
+    type: object
+    additionalProperties: false
+    required: [screen, token]
+    properties:
+      screen: { $ref: "#/schemas/EinkScreen" }
+      token: { type: string, description: "The device token, shown this once; write it into the screen." }
+  EinkAnswer:
+    type: object
+    additionalProperties: false
+    required: [action, reason, key, bar, server_time, next_at]
+    properties:
+      action: { type: string, enum: [none, full] }
+      reason: { type: string, description: "Why, for the screen's log, such as 开机 or 内容没变." }
+      key: { type: string, pattern: "^[0-9a-f]{16}:bw$", description: "The key of the picture the screen should show." }
+      bin: { type: string, description: "Where to fetch the picture; only when action is full." }
+      bar: { type: string, description: "Where to fetch the offline bar." }
+      server_time: { type: string, description: "The NAS's local time, YYYY-MM-DDTHH:MM:SS." }
+      next_at: { type: string, description: "When to ask again, YYYY-MM-DDTHH:MM:SS local time; 07:00:00 at night." }
