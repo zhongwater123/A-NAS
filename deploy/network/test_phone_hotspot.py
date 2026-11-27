@@ -15,6 +15,46 @@ spec.loader.exec_module(hotspot)
 
 
 class HotspotTests(unittest.TestCase):
+    def test_only_authenticated_stations_are_online(self):
+        stations = """02:00:00:00:00:01
+flags=[ASSOC][AUTHORIZED]
+02:00:00:00:00:02
+flags=[ASSOC]
+02:00:00:00:00:03
+flags=[ASSOC][AUTHORIZED]
+"""
+        leases = """120 02:00:00:00:00:01 192.168.173.20 phone *
+120 02:00:00:00:00:02 192.168.173.21 other-phone *
+120 02:00:00:00:00:04 192.168.173.22 left *
+99 02:00:00:00:00:03 192.168.173.23 stale *
+"""
+        self.assertEqual(hotspot.connected_devices(stations, leases, 100), [
+            {"mac": "02:00:00:00:00:01", "ip": "192.168.173.20", "name": "phone"},
+            {"mac": "02:00:00:00:00:03"},
+        ])
+
+    def test_unreadable_leases_preserve_authenticated_stations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            (runtime / "dnsmasq.leases").mkdir()
+            stations = subprocess.CompletedProcess([], 0, stdout="02:00:00:00:00:01\nflags=[ASSOC][AUTHORIZED]\n")
+            with patch.multiple(hotspot, RUNTIME=runtime), patch.object(hotspot, "command", return_value=stations):
+                hotspot.publish_devices("wlan0", 42)
+            self.assertEqual(hotspot.json.loads((runtime / "devices.json").read_text()), [{"mac": "02:00:00:00:00:01"}])
+
+    def test_custom_credentials_use_hostapd_byte_encoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory)
+            with patch.object(hotspot, "RUNTIME", runtime):
+                hotspot.configure_radio("wlan0", "fixture.example.test", "访客 Wi-Fi#", "fixture # only", True)
+            ap = (runtime / "hostapd.conf").read_text(encoding="ascii")
+            self.assertIn(f"ssid2={'访客 Wi-Fi#'.encode().hex()}\n", ap)
+            self.assertRegex(ap, r"(?m)^wpa_psk=[a-f0-9]{64}$")
+            self.assertNotIn("fixture # only", ap)
+            dhcp = (runtime / "dnsmasq.conf").read_text(encoding="ascii")
+            self.assertIn("dhcp-option-force=114,https://fixture.example.test:8443/__anas_hotspot/capport\n", dhcp)
+            self.assertIn("dhcp-option=3\n", dhcp)
+
     def test_wired_vlan_and_bridge_use_their_physical_uplink(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -163,7 +203,9 @@ clean()
         namespace = hotspot.namespace_pid(holder)
         hotspot.command("ip", "link", "set", "lo", "up", namespace=namespace)
         hotspot.command("ip", "addr", "add", f"{address}/24", "dev", "lo", namespace=namespace)
-        web = hotspot.configure_proxy(hotspot.tls_host())
+        hotspot.configure_radio("wlan0", domain, "Sample Wi-Fi", "sample-password", True)
+        hotspot.command("dnsmasq", "--test", f"--conf-file={hotspot.RUNTIME}/dnsmasq.conf")
+        web = hotspot.configure_proxy(hotspot.tls_host(), True)
         for process in hotspot.start_proxy(web, namespace):
             self.addCleanup(self.stop_process, process)
         check = """
@@ -186,7 +228,36 @@ sys.exit(probe(sys.argv[3]))
         shutil.copyfile(hotspot.TLS / "fullchain.pem", hotspot.TLS / "trust.pem")
         subprocess.run(["/usr/sbin/nft", "flush", "ruleset"], check=True, timeout=5)
         hotspot.command("python", *args, domain, namespace=namespace)
+        self.verify_portal(domain, address, namespace)
         self.assertEqual(hotspot.command("ip", "route", "get", peer).stdout, route)
         self.assertEqual(hotspot.command("ip", "route", "show", "default", namespace=namespace).stdout, "")
         http_ports = f"import socket; assert all(socket.socket().connect_ex(({address!r}, p)) != 0 for p in (80, 8080))"
         hotspot.command("python", "-c", http_ports, namespace=namespace)
+
+    def verify_portal(self, domain, address, namespace):
+        script = """
+import http.client, json, socket, ssl, sys
+from urllib.parse import urlsplit
+host, address, port, ca, api = sys.argv[1:]
+context = ssl.create_default_context(cafile=ca)
+def get(path):
+    connection = http.client.HTTPSConnection(host, int(port), context=context, timeout=2)
+    with socket.create_connection((address, int(port)), timeout=2) as transport:
+        connection.sock = context.wrap_socket(transport, server_hostname=host)
+        connection.request("GET", path)
+        response = connection.getresponse()
+        return response.status, response.getheader("Content-Type"), response.getheader("Cache-Control"), response.read()
+status, mime, cache, body = get(api)
+assert (status, mime, cache) == (200, "application/captive+json", "no-store"), (status, mime, cache)
+info = json.loads(body)
+assert info["captive"]
+welcome = urlsplit(info["user-portal-url"])
+assert (welcome.scheme, welcome.hostname, welcome.port) == ("https", host, int(port))
+status, mime, cache, body = get(welcome.path)
+assert status == 200 and mime.startswith("text/html") and cache == "no-store"
+assert f'href="https://{host}:{port}/"'.encode() in body
+assert b":root { color-scheme:" in body and "打开 WebOS".encode() in body
+assert get("/privkey.pem")[0] == 404
+"""
+        hotspot.command("python", "-c", script, domain, address, str(hotspot.HTTPS_PORT), str(hotspot.TLS / "trust.pem"),
+                        hotspot.PORTAL_API, namespace=namespace)

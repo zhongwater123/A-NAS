@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -33,6 +34,19 @@ func RequireOwnedStore(root string) error {
 	}
 	if uint64(fs.Type) != unix.BTRFS_SUPER_MAGIC || fs.Flags&unix.ST_RDONLY != 0 {
 		return fmt.Errorf("%w: %s is not on the writable data volume", ErrStoreUnavailable, root)
+	}
+	return nil
+}
+
+// RequireDataVolumeStore is RequireOwnedStore for a built-in service's
+// subvolume, which also sits beside the verified data volume's marker: its
+// records are never written to the system disk.
+func RequireDataVolumeStore(root string) error {
+	if err := RequireOwnedStore(root); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), ".a-nas-volume.json")); err != nil {
+		return fmt.Errorf("%w: %v", ErrStoreUnavailable, err)
 	}
 	return nil
 }

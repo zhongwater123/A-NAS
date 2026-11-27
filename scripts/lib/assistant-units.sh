@@ -48,7 +48,7 @@ derive_assistant_units() {
   sed -e 's#^Description=.*#Description=Hermes curator for the A-NAS assistant of %i#' \
     -e '\#a-nas-companion-assistant#d' \
     -e "s#^ExecStart=.*#ExecStart=/usr/bin/tini -- $lib/runtime/venv/bin/hermes curator run#" \
-    -e "/^ExecStart=/a ExecStartPost=$lib/runtime/venv/bin/python -P $lib/media-cache.py" \
+    -e "/^ExecStart=/a ExecStartPost=/usr/bin/tini -- $lib/runtime/venv/bin/python -P $lib/media-cache.py" \
     -e '/^ExecStartPost=/d' -e '/^StopWhenUnneeded/d' -e 's/^Type=.*/Type=oneshot/' \
     -e "/^\[Service\]/a ExecCondition=+/bin/sh -c '! systemctl is-active --quiet anas-assistant@%i.service'" \
     "$units/anas-assistant@.service" >"$units/anas-assistant-curator@.service"
@@ -78,6 +78,14 @@ derive_assistant_units() {
     planapi@.service:127.0.0.1:9120; do
     line=${unit#*:}
     grep -Fq -- "$line" "$units/anas-assistant-${unit%%:*}" || { echo "anas-assistant-${unit%%:*} lacks $line" >&2; return 1; }
+  done
+  # Under PrivatePIDs= a command not run under tini ignores the stop's SIGTERM (the unit's
+  # comment); commands run as root (+) are outside its namespace.
+  for unit in "$units"/anas-assistant{,-cron,-curator,-plan}@.service; do
+    if grep -E '^Exec[A-Za-z]+=[^+]' "$unit" | grep -Ev '^Exec[A-Za-z]+=/usr/bin/tini -- ' | grep -q .; then
+      echo "${unit##*/} runs a command without tini under PrivatePIDs=" >&2
+      return 1
+    fi
   done
   if grep -q 'a-nas-companion-assistant\|members/%i/config.yaml:' "$units/anas-assistant-plan@.service" ||
     grep -q 'a-nas-montage-assistant' "$units/anas-assistant-cron@.service" "$units/anas-assistant-curator@.service"; then

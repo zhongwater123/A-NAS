@@ -8,11 +8,11 @@ import { clampRowHeight } from "../photos/layout";
 import type { ScrollerHandle } from "../photos/PhotoScroller";
 import { useSelection } from "../photos/selection";
 import { Timeline } from "../photos/Timeline";
+import { Modal } from "../ui/modal";
 import { familyError } from "./api";
 import { useFamily } from "./context";
 import styles from "./family.module.css";
 import { inAlbum, needsCopy, sharedIdOf } from "./fromLibrary";
-import { Modal } from "./parts";
 
 const noHidden: ReadonlySet<string> = new Set();
 const noPending: never[] = [];
@@ -36,7 +36,7 @@ export function LibraryPicker({
   onPick: (assets: PhotoAsset[]) => void;
   onClose: () => void;
 }) {
-  const { userId } = useFamily();
+  const { userId, container } = useFamily();
   const [libraries, setLibraries] = useState<{ shared?: PhotoLibrary; own?: PhotoLibrary }>();
   const [tab, setTab] = useState("");
   const [failure, setFailure] = useState("");
@@ -127,6 +127,7 @@ export function LibraryPicker({
   return (
     <Modal
       title="从相册选择"
+      container={container}
       large
       onClose={onClose}
       footer={

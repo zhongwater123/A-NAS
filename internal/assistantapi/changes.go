@@ -23,8 +23,8 @@ import (
 // change when the assistant's MCP tool asks, as the member. Every call carries
 // the member's session (accounts.SessionToken) and the executor verifies it
 // itself, so the Product Service cannot grant anything for a member who is not
-// signed in (decision 10). In A-NAS the File Broker executes; the spike's
-// change broker stands in for it.
+// signed in (decision 10). In A-NAS the File Broker executes; in the spike
+// broker-spike runs the same executor.
 type ChangeStore interface {
 	// Prepare turns the arguments of one call of 提交更改 into a change
 	// awaiting the member. ErrInvalidSubmission when it cannot be applied.
@@ -71,8 +71,9 @@ var (
 
 var changeIDPattern = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
-// BrokerChanges is the spike's change broker (ai/assistant-spike/change_broker.py)
-// on its product socket, standing in for the File Broker.
+// BrokerChanges is the spike's change broker (ai/assistant-spike/broker-spike)
+// on its product socket: the File Broker's executor, with the member named in
+// ?account= where A-NAS passes the member's session.
 func BrokerChanges(socket string) ChangeStore {
 	return &brokerChanges{client: &http.Client{
 		Timeout: 60 * time.Second,

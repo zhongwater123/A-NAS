@@ -59,6 +59,14 @@ func (noGrants) SaveFilm(context.Context, string, string, string, *os.File) (str
 
 func get(t *testing.T, socket, token string) (int, string) {
 	t.Helper()
+	status, body, err := request(socket, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return status, body
+}
+
+func request(socket, token string) (int, string, error) {
 	client := http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}, Timeout: 5 * time.Second}
@@ -68,11 +76,11 @@ func get(t *testing.T, socket, token string) (int, string) {
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		t.Fatal(err)
+		return 0, "", err
 	}
 	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(response.Body)
-	return response.StatusCode, strings.TrimSpace(string(body))
+	return response.StatusCode, strings.TrimSpace(string(body)), nil
 }
 
 func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
@@ -105,13 +113,14 @@ func TestTheServiceConfirmsSessionsAndFollowsItsStore(t *testing.T) {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Second)
 		for {
-			if _, err := os.Stat(socket); err == nil {
-				if status, body := get(t, socket, "alice-session"); status == want {
-					return body
-				}
+			// The socket file appears when it is bound, a moment before the
+			// service listens on it: until then a connection is refused.
+			status, body, err := request(socket, "alice-session")
+			if err == nil && status == want {
+				return body
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("the service did not answer %d", want)
+				t.Fatalf("the service did not answer %d: %d %s %v", want, status, body, err)
 			}
 			time.Sleep(10 * time.Millisecond)
 		}

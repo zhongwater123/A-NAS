@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/zhongwater123/A-NAS/internal/photos"
@@ -35,13 +36,23 @@ const (
 	// GrantSaveFilm imports a film, passed as the request's descriptor,
 	// into the owner's private library, once per version key.
 	GrantSaveFilm = "saveFilm"
+	// GrantSearchWindows finds the windows of the grant's videos most like
+	// each of some texts, for the search of a film's edit (ADR 0039 decision 8).
+	// A member waits for it: it holds background AI work back, as a photo
+	// search does.
+	GrantSearchWindows = "searchWindows"
 )
 
 // Grant error codes. GrantOwnerInactive is a grant whose owner's account is
 // not in use now, as while an administrator has disabled it: the grant
 // works again once the account does, so the montage center waits rather
-// than giving the project up, as it does on GrantNotFound.
+// than giving the project up, as it does on GrantNotFound. On a search,
+// GrantModelMismatch says that a video's windows were made with another
+// model than the text encoder's and must be made again first, and
+// GrantAIUnavailable that the text could not be encoded now.
 const (
+	GrantModelMismatch  = "model_mismatch"
+	GrantAIUnavailable  = "ai_unavailable"
 	GrantInvalid        = "invalid_request"
 	GrantUnauthorized   = "authentication_required"
 	GrantNotFound       = "grant_not_found"
@@ -85,6 +96,9 @@ type GrantRequest struct {
 	// VersionKey and Name, on saveFilm.
 	VersionKey string `json:"versionKey,omitempty"`
 	Name       string `json:"name,omitempty"`
+	// Texts and K, on searchWindows: the k windows most like each text.
+	Texts []string `json:"texts,omitempty"`
+	K     int      `json:"k,omitempty"`
 }
 
 // GrantResponse answers a GrantRequest. Next, on list, is set when more
@@ -99,6 +113,8 @@ type GrantResponse struct {
 	Next     string                `json:"next,omitempty"`
 	ObjectID string                `json:"objectId,omitempty"`
 	Analysis *photos.GrantAnalysis `json:"analysis,omitempty"`
+	// Matches, on searchWindows, has a list for each text, in order.
+	Matches [][]photos.WindowMatch `json:"matches,omitempty"`
 }
 
 // GrantError is a refused request.
@@ -257,6 +273,25 @@ func (g Grants) SaveFilm(ctx context.Context, grantID, versionKey, name string, 
 		return "", err
 	}
 	return response.ObjectID, nil
+}
+
+// SearchWindows returns, for each of texts, the k windows of the grant's
+// videos most like it, most alike first. Any number of texts may be asked
+// about: they go as many a request as the photo library takes.
+func (g Grants) SearchWindows(ctx context.Context, grantID string, texts []string, k int) ([][]photos.WindowMatch, error) {
+	matches := make([][]photos.WindowMatch, 0, len(texts))
+	size := max(1, min(photos.MaxWindowSearchTexts, photos.MaxWindowSearchHits/max(k, 1)))
+	for batch := range slices.Chunk(texts, size) {
+		response, err := g.plain(ctx, GrantRequest{Op: GrantSearchWindows, GrantID: grantID, Texts: batch, K: k})
+		if err != nil {
+			return nil, err
+		}
+		if len(response.Matches) != len(batch) {
+			return nil, fmt.Errorf("photo grant: search answered %d lists for %d texts", len(response.Matches), len(batch))
+		}
+		matches = append(matches, response.Matches...)
+	}
+	return matches, nil
 }
 
 // Remove takes assets out of a grant.

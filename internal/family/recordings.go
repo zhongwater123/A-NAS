@@ -214,12 +214,16 @@ func (s *Store) OpenRecording(ctx context.Context, actor Actor, recordID string)
 }
 
 // Purge deletes for good what has been in the trash for TrashDays: records
-// and babies with their channels, and the recordings they held.
+// and babies with their channels, and the recordings they held. It also
+// forgets who acknowledged the reminders of to-dos closed long ago.
 func (s *Store) Purge(ctx context.Context) error {
 	cutoff := s.trashCutoff()
 	var recordings []string
 	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM audit_events WHERE occurred_at < ?", formatTime(s.now().AddDate(0, 0, -AuditDays))); err != nil {
+			return err
+		}
+		if err := purgeTodoKeys(ctx, tx, formatTime(s.now().AddDate(0, 0, -ClosedTodoDays))); err != nil {
 			return err
 		}
 		var err error

@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 
 import { APIError } from "../api/client";
 import { errorText } from "../api/errorMessages";
+import { namesDeviceByAddress } from "../lib/deviceHost";
 import { CatalogApp, InstallPlan, ServiceRuntime } from "./api";
 
 export interface Category {
@@ -135,13 +136,6 @@ export function appURL(
   url.search = "";
   url.hash = "";
   return url.toString();
-}
-
-// namesDeviceByAddress mirrors the server's own test (localorigin.DeviceHost):
-// localhost on the local console, an IP address on the LAN.
-function namesDeviceByAddress(hostname: string): boolean {
-  if (hostname === "localhost" || hostname.startsWith("[")) return true;
-  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
 }
 
 export function openApp(app: Pick<CatalogApp, "webPort" | "scheme" | "path">) {

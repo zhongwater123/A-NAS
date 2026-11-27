@@ -34,7 +34,7 @@
 - 新功能或行为变化：读或创建 `docs/specs/` 中的规格。
 - 难复现、跨边界或可能复发的缺陷：先查 `docs/investigations/`，再更新或创建调查记录。
 - 安装、部署、恢复、磁盘等高风险操作：`docs/runbooks/` 中的手册。
-- 本机工具、WSL 或 Colima：`docs/development/LOCAL_ENVIRONMENT.md`。产品定位：`README.md`；早期背景：`PROJECT_CONTEXT.md`。
+- 新用或更换开发环境、排查平台问题、使用共享开发服务器时，查[开发环境入口](docs/development/LOCAL_ENVIRONMENT.md)，补记实测配置与解决方法。产品定位：`README.md`；早期背景：`PROJECT_CONTEXT.md`。
 - 文档类型或事实归属不明确时：`docs/README.md`。
 
 ## 不重复造轮子
@@ -68,7 +68,7 @@
 规则、流程与格式化写在仓库里，`.claude/`、`.codex/` 只做适配；改其中一个工具的配置，另一个同步改。
 
 - 本文件是唯一的项目指令文件。不要新建 `CLAUDE.md` 或 `CLAUDE.local.md`：工作目录或其上级目录中有其中任何一个，Claude Code 就不再读本文件；确需时其中只写一行 `@AGENTS.md`。
-- 技能在 `.agents/skills/`：[check-in-wsl](.agents/skills/check-in-wsl/SKILL.md)（Windows 上的门禁）、[system-test](.agents/skills/system-test/SKILL.md)、[fake-preview](.agents/skills/fake-preview/SKILL.md)。Claude Code 读 `.claude/skills/` 中的副本：改后运行 `make skills`。
+- 技能在 `.agents/skills/`：[check-on-shared-server](.agents/skills/check-on-shared-server/SKILL.md)（完整门禁默认在共享开发服务器上跑）、[check-in-wsl](.agents/skills/check-in-wsl/SKILL.md)（服务器连不上时的 Windows 门禁）、[system-test](.agents/skills/system-test/SKILL.md)、[fake-preview](.agents/skills/fake-preview/SKILL.md)。Claude Code 读 `.claude/skills/` 中的副本：改后运行 `make skills`。
 - 编辑后的格式化：`.claude/settings.json` 与 `.codex/hooks.json` 都调用 `scripts/format-changed.sh`。
 - Codex 只在信任本项目后才加载本文件、局部 AGENTS.md 与项目钩子。密钥：Claude Code 由 `.claude/settings.json` 拦截，Codex 靠自己的沙箱与审批。个人设置写进被 Git 忽略的 `.claude/settings.local.json` 或 `~/.codex/config.toml`。
 

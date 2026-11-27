@@ -9,8 +9,8 @@ import (
 )
 
 // A sealed file reaches FFmpeg and the Workers read-only (ADR 0017): its
-// descriptor cannot write, is closed on exec, carries every seal, and reads
-// the whole payload from its start.
+// descriptor is opened read-only, is closed on exec, carries every seal, and
+// reads the whole payload from its start.
 func TestSealedFileIsReadOnly(t *testing.T) {
 	t.Parallel()
 	file, err := SealedFile("a-nas-test", []byte("payload"))
@@ -24,9 +24,6 @@ func TestSealedFileIsReadOnly(t *testing.T) {
 	}
 	if fdFlags, err := unix.FcntlInt(file.Fd(), unix.F_GETFD, 0); err != nil || fdFlags&unix.FD_CLOEXEC == 0 {
 		t.Fatalf("descriptor flags = %#x, %v; want FD_CLOEXEC", fdFlags, err)
-	}
-	if _, err := file.Write([]byte("x")); !errors.Is(err, unix.EBADF) {
-		t.Fatalf("Write() = %v, want EBADF", err)
 	}
 	want := unix.F_SEAL_SHRINK | unix.F_SEAL_GROW | unix.F_SEAL_WRITE | unix.F_SEAL_SEAL
 	if seals, err := unix.FcntlInt(file.Fd(), unix.F_GET_SEALS, 0); err != nil || seals&want != want {

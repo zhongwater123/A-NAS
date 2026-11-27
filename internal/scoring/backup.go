@@ -21,9 +21,22 @@ func (s *Store) StagingDir() string { return filepath.Join(s.dir, "staging") }
 func (s *Store) RunBackups(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
+	// Below the reserve the backup waits, said once, as imports do.
+	waiting := false
 	for {
-		if err := s.BackupIfDue(ctx); err != nil && ctx.Err() == nil {
+		err := s.BackupIfDue(ctx)
+		switch {
+		case ctx.Err() != nil:
+		case errors.Is(err, ErrInsufficientSpace):
+			if !waiting {
+				s.logger.WarnContext(ctx, "photo scoring backup waits: the data volume is at its reserve")
+			}
+			waiting = true
+		case err != nil:
 			s.logger.ErrorContext(ctx, "photo scoring backup failed", "error", err)
+		case waiting:
+			s.logger.InfoContext(ctx, "photo scoring backup no longer waits for space")
+			waiting = false
 		}
 		select {
 		case <-ctx.Done():
@@ -33,7 +46,9 @@ func (s *Store) RunBackups(ctx context.Context) {
 	}
 }
 
-// BackupIfDue writes today's backup unless it exists.
+// BackupIfDue writes today's backup unless it exists. The copies taken
+// before an upgrade (migrate), named after the version they hold as in
+// scoring-2026-11-24-v4.db, count among the kept ones.
 func (s *Store) BackupIfDue(ctx context.Context) error {
 	dir := filepath.Join(s.dir, "backups")
 	name := filepath.Join(dir, "scoring-"+s.now().UTC().Format("2006-01-02")+".db")
@@ -42,16 +57,7 @@ func (s *Store) BackupIfDue(ctx context.Context) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	partial := name + ".partial"
-	_ = os.Remove(partial)
-	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
-		_ = os.Remove(partial)
-		return err
-	}
-	if err := os.Chmod(partial, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(partial, name); err != nil {
+	if err := s.copyTo(ctx, name); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(dir)
@@ -72,4 +78,27 @@ func (s *Store) BackupIfDue(ctx context.Context) error {
 		backups = backups[1:]
 	}
 	return nil
+}
+
+// copyTo writes a consistent copy of the database to name, readable by the
+// module's user alone, replacing one that is there.
+func (s *Store) copyTo(ctx context.Context, name string) error {
+	// Include committed pages still in the WAL when budgeting for the copy.
+	var bytes int64
+	if err := s.db.QueryRowContext(ctx, "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()").Scan(&bytes); err != nil {
+		return err
+	}
+	if err := s.room(bytes); err != nil {
+		return err
+	}
+	partial := name + ".partial"
+	_ = os.Remove(partial)
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", partial); err != nil {
+		_ = os.Remove(partial)
+		return err
+	}
+	if err := os.Chmod(partial, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(partial, name)
 }

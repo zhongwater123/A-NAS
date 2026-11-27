@@ -1,0 +1,52 @@
+/* The device screen's screen saver and 息屏 (LocalConsoleScreenSaver.tsx), on
+   the desktop and on a shared page's own tab. Both load them only on the
+   device's own screen. */
+.local-console-screensaver {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  overflow: hidden;
+  cursor: none;
+  background: #000;
+  animation: screensaver-in 0.28s ease-out;
+}
+.local-console-screensaver video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+}
+@keyframes screensaver-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .local-console-screensaver {
+    animation: none;
+  }
+}
+/* While either cover is up, everything else on the page, portals included,
+   skips rendering. Under an opaque cover the desktop would otherwise go on
+   drawing its gauges' transitions and any running animation every frame; the
+   kiosk spent about a quarter of a core on that behind the black screen
+   (docs/investigations/2026-10-28-screensaver-video-cpu.md). The page keeps
+   its DOM and layout, so the first input brings it back as it was. The switch
+   waits until the screen saver has faded in. */
+body:has(> .local-console-screensaver, > .local-console-sleep)
+  > :not(.local-console-screensaver, .local-console-sleep) {
+  content-visibility: hidden;
+  transition: content-visibility 0s 0.3s allow-discrete;
+}
+/* 息屏: plain black over everything, the photo slideshow and sign-in page included, until the first input. */
+.local-console-sleep {
+  position: fixed;
+  z-index: 2147483647;
+  inset: 0;
+  cursor: none;
+  background: #000;
+}

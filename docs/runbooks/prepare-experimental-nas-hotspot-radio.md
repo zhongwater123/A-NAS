@@ -1,7 +1,7 @@
 # 准备实验 NAS 的热点网卡
 
 状态：draft
-更新时间：2026-11-20
+更新时间：2026-11-26
 
 ## 目标与前提
 
@@ -35,6 +35,7 @@
 - 为每台 NAS 准备热点专用域名及与之匹配的证书。热点内的 DNS 直接返回 NAS 热点地址，手机在热点内访问时无需连接公有 DNS。证书可以用 NAS 的有线侧提前签发并更新。
 - 管理员在 NAS 上创建 root 专属的 `/etc/a-nas/phone-hotspot/`，目录权限为 `0700`。将单行域名写入 `domain`，证书链保存为 `fullchain.pem`，私钥保存为 `privkey.pem`，文件由 root 所有且私钥权限为 `0600`。公有 CA 证书使用 NAS 系统信任库。内网 CA 的根证书放在 `trust.pem`，并在连接前通过可信渠道把同一 CA 配到手机信任库。
 - 从有线入口打开「设置 → 网络」，开启手机直连热点。手机连接页面显示的 Wi-Fi 后，打开页面给出的 HTTPS 地址并核对浏览器接受证书，再登录和上传。切回有线入口关闭热点，复查有线端的 `/healthz`。服务启动失败时先看设置页原因，宿主机日志由 `journalctl -u anas-phone-hotspot.service` 查询。
+- 「编辑热点设置」可保存 Wi-Fi 名称、密码和系统连接提示，保存后下次开启时生效。通过「已连接设备」核对手机是否加入以及断开后是否消失。开启连接提示后，用 iPhone 和 Android 核对系统门户，点「打开 WebOS」，再在正常手机浏览器登录并上传。没有系统提示时，可打开设置页显示的 HTTPS 地址。
 - 如需从控制台结束正式热点，执行 `systemctl stop anas-phone-hotspot.service`。确认无线接口回到宿主机且无热点地址，再按下文决定是否移除可选包。更新证书后，下次开启热点会加载新的证书。
 
 - `lsusb -t` 显示无线接口绑定 `mt76x2u`，`iw dev` 有无线接口，`iw list` 的 `Supported interface modes` 含 `AP`。用 `ip -4 route show default` 确认有线出口，再从开发机验证 NAS Web `/healthz`。

@@ -5,11 +5,15 @@ package montagecompute_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,9 +21,10 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/montagecompute"
 )
 
-// startWorker starts the Python Worker on a socket of its own, or skips
-// without the AI runtime's python.
-func startWorker(t *testing.T) montagecompute.Client {
+// startWorker starts the Python Worker on a socket of its own, bound before
+// it starts as its unit's socket is, after prelude (Python with the Worker's
+// module imported as worker); or skips without the AI runtime's python.
+func startWorker(t *testing.T, prelude string) montagecompute.Client {
 	t.Helper()
 	python := os.Getenv("ANAS_MONTAGE_PYTHON")
 	if python == "" {
@@ -42,11 +47,14 @@ func startWorker(t *testing.T) montagecompute.Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-m", "anas_montage.worker")
+	program := "from anas_montage import worker\n" + prelude + "\nworker.main([])"
+	worker := exec.Command("sh", "-c", `export LISTEN_PID=$$; exec "$0" "$@"`, python, "-c", program)
 	worker.Dir = filepath.Join("..", "..", "ai")
 	worker.Env = append(os.Environ(), "PYTHONDONTWRITEBYTECODE=1", "LISTEN_FDS=1")
 	worker.ExtraFiles = []*os.File{inherited}
 	worker.Stderr = os.Stderr
+	// The Worker ends with the test binary, which a test timeout ends without cleanups.
+	worker.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := worker.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +66,7 @@ func startWorker(t *testing.T) montagecompute.Client {
 // case is ai/tests/test_montage_worker.py's tiny_case, one picture of two
 // two-second slots from a card of two beats.
 func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
-	client := startWorker(t)
+	client := startWorker(t, "")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
@@ -125,5 +133,53 @@ func TestTheMontageServicesCallsReachTheWorker(t *testing.T) {
 	}
 	if frames != 120 {
 		t.Fatalf("the clips take %d frames: %s", frames, answer.Clips)
+	}
+
+	// Pinned the other way round (#596), each slot is led by its pin.
+	request.Pins = []montage.FillPin{{Part: 1, Picture: 1, Slot: [2]float64{0, 2}, Beat: "c1/2"}, {Part: 1, Picture: 1, Slot: [2]float64{2, 4}, Beat: "c1/1"}}
+	request.Known = map[string][2]float64{}
+	for range 10 {
+		if answer, err = client.Fill(ctx, request, vectors, dims); err != nil {
+			t.Fatal(err)
+		}
+		if answer.Need == nil {
+			break
+		}
+		request.Known[answer.Need.Name] = [2]float64{answer.Need.Lo, answer.Need.Hi}
+	}
+	var leads []string
+	for _, raw := range answer.Clips {
+		var clip struct {
+			Beat string     `json:"beat"`
+			Slot [2]float64 `json:"slot"`
+		}
+		if err := json.Unmarshal(raw, &clip); err != nil {
+			t.Fatal(err)
+		}
+		leads = append(leads, fmt.Sprintf("%s@%v", clip.Beat, clip.Slot))
+	}
+	if answer.Need != nil || len(answer.Short) != 0 || !slices.Equal(leads, []string{"c1/2@[0 2]", "c1/1@[2 4]"}) {
+		t.Fatalf("Fill() with pins = %v, %+v", leads, answer)
+	}
+	request.Pins[1].Slot = [2]float64{2.5, 4}
+	if _, err := client.Fill(ctx, request, vectors, dims); !errors.Is(err, montage.ErrWorkerRefused) {
+		t.Fatalf("Fill() with a gap between pins = %v", err)
+	}
+
+	alike, err := client.Likeness(ctx, vectors[:2*dims], vectors[:dims], dims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0.0
+	for d := range dims {
+		want += float64((vectors[d] + vectors[dims+d]) / 2 * vectors[d])
+	}
+	var norm float64
+	for d := range dims {
+		mean := float64((vectors[d] + vectors[dims+d]) / 2)
+		norm += mean * mean
+	}
+	if want /= math.Sqrt(norm); math.Abs(alike-want) > 1e-5 {
+		t.Fatalf("Likeness() = %v, want %v", alike, want)
 	}
 }

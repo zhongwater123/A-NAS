@@ -20,9 +20,11 @@ func SealedFile(name string, data []byte) (*os.File, error) {
 }
 
 // WriteSealedFile streams a payload into a sealed file. The caller owns the
-// returned file, positioned at its start and opened read-only: ADR 0017
-// hands FFmpeg and the Workers read-only descriptors, and the seals alone
-// would still leave the memfd's own descriptor open for writing.
+// returned file, positioned at its start and opened read-only. The seals
+// are what keep the content fixed: a receiver can still open the memfd for
+// writing through its own /proc/self/fd, and every write then fails. The
+// read-only descriptor is a second layer, as ADR 0017 hands FFmpeg its input
+// and as systemd's memfd_seal_and_reopen does.
 func WriteSealedFile(name string, write func(io.Writer) error) (*os.File, error) {
 	fd, err := unix.MemfdCreate(name, unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {

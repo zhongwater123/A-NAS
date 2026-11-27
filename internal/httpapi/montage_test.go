@@ -79,7 +79,7 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	}
 	// Jobs are queued and polled here; no job runs.
 	montageStore, err := montage.Open(t.Context(), filepath.Join(dir, "montage"),
-		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, logger), Logger: logger,
+		montage.Options{Grants: photoservice.LocalGrants(photoService, sessions, nil, logger), Logger: logger,
 			Media: songMedia{}, JobCompute: idleCompute{}, Editing: ffmpegworker.Local{}, Planner: montage.FixedPlanner{}})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,8 @@ func TestMontageCenterKeepsToTheContract(t *testing.T) {
 	before := served
 	for route, body := range map[string]string{
 		path + "/generate": `{"requestKey":"g4"}`, jobPath + "/replan": "", jobPath + "/retry-analysis": "",
-		jobPath + "/drop-assets": `{"assetIds":["` + videos[1] + `"]}`,
+		jobPath + "/drop-assets":                   `{"assetIds":["` + videos[1] + `"]}`,
+		"/api/v1/montage/versions/version:x/recut": `{"requestKey":"r1","change":"结尾留长一点"}`,
 	} {
 		response := owner.do(http.MethodPost, route, body, nil, http.StatusServiceUnavailable)
 		if !strings.Contains(response.Body.String(), `"assistant_unavailable"`) {
@@ -285,6 +286,10 @@ func (idleCompute) Catalog(context.Context, montage.CatalogRequest) ([]string, e
 
 func (idleCompute) Fill(context.Context, montage.FillRequest, []float32, int) (montage.FillAnswer, error) {
 	return montage.FillAnswer{}, errors.New("no job runs here")
+}
+
+func (idleCompute) Likeness(context.Context, []float32, []float32, int) (float64, error) {
+	return 0, errors.New("no job runs here")
 }
 
 func (idleCompute) PlanBrief(context.Context, montage.PlanBriefRequest) (montage.PlanBrief, error) {

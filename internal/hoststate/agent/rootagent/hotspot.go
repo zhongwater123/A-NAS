@@ -7,6 +7,31 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/phonehotspot"
 )
 
+func (h *handler) handlePhoneHotspotSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", "PUT")
+		httpjson.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		return
+	}
+	var change phonehotspot.SettingsChange
+	if err := decodeRequest(r, &change); err != nil || change.Validate() != nil {
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "request is invalid")
+		return
+	}
+	if h.phoneHotspot == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "phone hotspot is unavailable")
+		return
+	}
+	settings, err := h.phoneHotspot.SavePhoneHotspotSettings(r.Context(), change)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "save phone hotspot settings", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "phone hotspot is unavailable")
+		return
+	}
+	httpjson.Write(w, http.StatusOK, settings)
+}
+
 func (h *handler) handlePhoneHotspot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method != http.MethodGet && r.Method != http.MethodPut {

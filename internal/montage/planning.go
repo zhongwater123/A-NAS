@@ -38,6 +38,19 @@ import (
 // another refuses the round.
 const PlanTemplate = "plan-v2"
 
+// RecutTemplate is the template a recut's round fills: plan-v2's, starting
+// from the version's plan and changing only what the member's sentence asks
+// (#596).
+const RecutTemplate = "plan-v3"
+
+// templateOf is the template a job with these settings is planned with.
+func templateOf(settings JobSettings) string {
+	if settings.Recut != nil {
+		return RecutTemplate
+	}
+	return PlanTemplate
+}
+
 const (
 	// planGrantLife is how long a planning grant lets rounds start.
 	planGrantLife = 7 * 24 * time.Hour
@@ -55,22 +68,27 @@ const (
 	handoverTimeout = 65 * time.Minute
 	// notTakenAfter: a job that wanted a round this long without one says so.
 	notTakenAfter = 10 * time.Minute
-	// maxPlanRejections: this many answers refused in a row and the
-	// member is asked.
+	// maxPlanRejections: this many answers refused in a row end the round,
+	// which counts as one tried (maxPlanRounds).
 	maxPlanRejections = 3
+	// maxPlanRounds: a job's planning is tried this many rounds for the same
+	// inputs; a round counts once it reached the planning and did not finish
+	// it. After the last the job fails, says why, and the member plans it
+	// again with one click (Replan; docs/decisions/2026-11-25-montage-planning-retries.md).
+	maxPlanRounds = 3
 	// After a round VNAS could not be reached for, the next waits 2, 4, 8
-	// minutes, at most unreachableWaitMost; after one that failed, errorWait,
-	// and a second failure is the member's (docs/architecture/montage-planning-session.md, 重试).
+	// minutes, at most unreachableWaitMost; after one tried, errorWait
+	// (docs/architecture/montage-planning-session.md, 重试).
 	unreachableWaitFirst = 2 * time.Minute
 	unreachableWaitMost  = 15 * time.Minute
 	errorWait            = time.Minute
-	maxPlanErrors        = 2
 )
 
 // Why a round stopped short of the model's planning (rounds.failure): what
-// it needed could not be reached, which is tried again a few minutes later,
-// or the planning itself failed, which is tried once more. The planner says
-// which; a round that timed out before it started was not reached.
+// it needed could not be reached, which is tried again a few minutes later
+// and never counts, or the planning itself failed, which counts as a round
+// tried. The planner says which; a round that timed out before it started
+// was not reached.
 const (
 	failureUnreachable = "unreachable"
 	failureError       = "error"
@@ -114,10 +132,10 @@ func DetailUnreachable(minutes int) string {
 	return fmt.Sprintf("VNAS 暂时连不上，%d 分钟后再试", minutes)
 }
 
-// DetailFailed is the detail of a job that tries once more in minutes after a
-// round whose planning failed.
+// DetailFailed is the detail of a job that plans again in minutes after a
+// round that did not finish its planning.
 func DetailFailed(minutes int) string {
-	return fmt.Sprintf("规划出错，%d 分钟后再试一次", minutes)
+	return fmt.Sprintf("规划没有完成，%d 分钟后自动重来", minutes)
 }
 
 // planDetail is the detail an ErrPlanPending carries.
@@ -203,7 +221,7 @@ func (s *Store) planned(ctx context.Context, input PlanInput, step string) (json
 		return nil, err
 	}
 	if !taken {
-		return nil, s.awaitPlan(ctx, input.JobID, step, input.PickKey)
+		return nil, s.awaitPlan(ctx, input.JobID, input.PickKey)
 	}
 	if step == StepOutline {
 		return answer, nil
@@ -268,66 +286,71 @@ func unreachableWait(n int) time.Duration {
 	return min(unreachableWaitFirst<<min(max(n, 1)-1, 4), unreachableWaitMost)
 }
 
-// retryWait is how long the job still waits before VNAS is asked again after
-// rounds that stopped short of the model's planning, the latest first, and
-// what it waits for; or, after the second that failed, why the member is
-// asked. Only rounds since the member last registered a planning grant, and
-// since the montage service started, count: doing something that may need
-// planning, or installing another version, tries again at once.
-func (s *Store) retryWait(rounds []pastRound, registered time.Time) (time.Duration, string, error) {
+// tried reports whether a round reached the planning and left the job still
+// waiting for it: it ended without what the job waits for (whatever stopped
+// it, as the model may have been called), or the planning failed before its
+// prompt went in. A round VNAS was not reached for was not tried.
+func (r pastRound) tried() bool { return r.state == RoundEnded || r.failure == failureError }
+
+// retryWait is how long the job still waits before VNAS is asked again
+// after rounds that did not plan it, the latest first, and what it waits
+// for: errorWait after a round tried, 2, 4, 8 then 15 minutes after rounds
+// in a row that could not reach VNAS. Only rounds since the member last
+// registered a planning grant, and since the montage service started, make
+// it wait: doing something that may need planning, or installing another
+// version, tries again at once.
+func (s *Store) retryWait(rounds []pastRound, registered time.Time) (time.Duration, string) {
 	since := registered
 	if s.opened.After(since) {
 		since = s.opened
 	}
-	failed, unreached, said := 0, 0, ""
-	for _, round := range rounds {
-		switch {
-		case round.ended.Before(since):
-		case round.failure == failureError:
-			failed++
-			if said == "" {
-				said = round.outcome
-			}
-		case failed == 0:
-			unreached++
-		}
-	}
-	if failed >= maxPlanErrors {
-		return 0, "", &planFailed{said: said}
-	}
 	latest := rounds[0]
 	if latest.ended.Before(since) {
-		return 0, "", nil
+		return 0, ""
 	}
-	wait, detail := unreachableWait(unreached), DetailUnreachable
-	if latest.failure == failureError {
-		wait, detail = errorWait, DetailFailed
+	wait, detail := errorWait, DetailFailed
+	if !latest.tried() {
+		unreached := 0
+		for _, round := range rounds {
+			if round.tried() || round.ended.Before(since) {
+				break
+			}
+			unreached++
+		}
+		wait, detail = unreachableWait(unreached), DetailUnreachable
 	}
 	left := latest.ended.Add(wait).Sub(s.now())
 	if left <= 0 {
-		return 0, "", nil
+		return 0, ""
 	}
-	return left, detail(int((left + time.Minute - 1) / time.Minute)), nil
+	return left, detail(int((left + time.Minute - 1) / time.Minute))
 }
 
-// planFailed: the planning failed twice; said is what the planner reported.
-type planFailed struct{ said string }
+// planFailed: the planning was tried maxPlanRounds rounds and none finished
+// it; said is how the last of them ended, as the planner or the round's end
+// reported it. Its text is the job's error, which the page shows.
+type planFailed struct {
+	rounds int
+	said   string
+}
 
-func (p *planFailed) Error() string { return "the planning failed: " + p.said }
+func (p *planFailed) Error() string {
+	return fmt.Sprintf("规划试了 %d 轮都没有完成：%s", p.rounds, cmp.Or(p.said, "没有交回规划"))
+}
 func (p *planFailed) Unwrap() error { return ErrPlanFailed }
 
 // awaitPlan says why the job's step has no plan yet: a round runs, VNAS has
-// not taken it, it waits to try again, or it needs the member, when a round
-// ended without the step, the planning failed twice or the answers kept
-// failing their checks. A job that may have a round wants one and leaves its
-// owner's marker; one that may not wants none. pickKey is the first step's
-// input key, which a round plans for.
-func (s *Store) awaitPlan(ctx context.Context, jobID, step, pickKey string) error {
+// not taken it, or it waits to plan again; or, once the planning was tried
+// maxPlanRounds rounds for these inputs and none finished it, that it failed.
+// A job that may have a round wants one and leaves its owner's marker; one
+// that may not wants none. pickKey is the first step's input key, which a
+// round plans for.
+func (s *Store) awaitPlan(ctx context.Context, jobID, pickKey string) error {
 	var owner string
-	var rejections, epoch int
+	var epoch int
 	var wanted bool
-	if err := s.db.QueryRowContext(ctx, "SELECT owner_user_id, plan_rejections, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
-		Scan(&owner, &rejections, &epoch, &wanted); err != nil {
+	if err := s.db.QueryRowContext(ctx, "SELECT owner_user_id, plan_epoch, plan_wanted FROM jobs WHERE id = ?", jobID).
+		Scan(&owner, &epoch, &wanted); err != nil {
 		return err
 	}
 	// A round that plans for other inputs, or an earlier epoch, is over:
@@ -346,9 +369,6 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, step, pickKey string) erro
 		s.syncMarkers(ctx)
 		return why
 	}
-	if rejections >= maxPlanRejections {
-		return unwanted(ErrPlanInvalid)
-	}
 	rounds, err := s.pastRounds(ctx, jobID, epoch, pickKey)
 	if err != nil {
 		return err
@@ -358,20 +378,27 @@ func (s *Store) awaitPlan(ctx context.Context, jobID, step, pickKey string) erro
 		return err
 	}
 	if len(rounds) > 0 {
-		switch latest := rounds[0]; {
-		case latest.state == RoundClaimed || latest.state == RoundStarted:
+		if latest := rounds[0]; latest.state == RoundClaimed || latest.state == RoundStarted {
 			return unwanted(pending(DetailPlanning))
-		case latest.state == RoundEnded && latest.failure != failureError:
-			// The model may have been called: never started again on its own (#514).
-			return unwanted(fmt.Errorf("%w: the round ended without the %s step", ErrPlanUnknown, step))
 		}
-		// The rounds stopped short of the model's planning: one that timed
-		// out before it started was abandoned five minutes after its claim.
-		wait, detail, err := s.retryWait(rounds, registered)
-		if err != nil {
-			return unwanted(err)
+		// Only the member can change what a temporary fault or the model's
+		// mistakes did not: those are planned again on their own, a round at
+		// a time, and after the last the job fails rather than waiting for
+		// the member (2026-11-25; it no longer stops at the first round that
+		// may have called the model, #514).
+		tried, said := 0, ""
+		for _, round := range rounds {
+			if round.tried() {
+				tried++
+				if said == "" {
+					said = round.outcome
+				}
+			}
 		}
-		if wait > 0 {
+		if tried >= maxPlanRounds {
+			return unwanted(&planFailed{rounds: tried, said: said})
+		}
+		if wait, detail := s.retryWait(rounds, registered); wait > 0 {
 			return unwanted(pending(detail))
 		}
 	}
@@ -538,10 +565,10 @@ func (s *Store) ClaimRound(ctx context.Context, owner string) (Claim, error) {
 		if json.Unmarshal([]byte(settings), &kept) == nil {
 			claim.Project = kept.ProjectName
 		}
-		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), PlanTemplate
+		claim.RoundID, claim.AttemptToken, claim.Template = newID("round"), newToken(), templateOf(kept)
 		now := sqlitedb.FormatTime(s.now())
 		if _, err := tx.ExecContext(ctx, `INSERT INTO rounds(id, job_id, owner_user_id, attempt_token, state, claimed_at, epoch, template, input_key)
-			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, claim.RoundID, claim.JobID, owner, claim.AttemptToken, now, epoch, PlanTemplate, pickKey); err != nil {
+			VALUES(?, ?, ?, ?, 'claimed', ?, ?, ?, ?)`, claim.RoundID, claim.JobID, owner, claim.AttemptToken, now, epoch, claim.Template, pickKey); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE jobs SET plan_wanted = 0 WHERE id = ?", claim.JobID)
@@ -666,8 +693,10 @@ func (s *Store) AbandonRound(ctx context.Context, owner, roundID, reason, failur
 // RoundComplete for one that ran to the model's last answer, else what
 // stopped it (an error, a timeout, the conversation cut off). One that
 // stopped before the model called any montage tool failed (failureError):
-// whether the model had begun is unknown, but it planned nothing, and the
-// job tries once more. A round reported before it started is abandoned.
+// whether the model had begun is unknown, but it planned nothing. Either
+// way a round that left the job without its plan counts as one tried, and
+// the job plans again on its own (awaitPlan). A round reported before it
+// started is abandoned.
 func (s *Store) EndRound(ctx context.Context, owner, roundID, outcome, result string) error {
 	failure := ""
 	if result != "" && result != RoundComplete {

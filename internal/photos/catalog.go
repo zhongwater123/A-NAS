@@ -600,6 +600,15 @@ CREATE TABLE montage_films (
 `, Down: `
 DROP TABLE montage_films;
 `},
+	// 22: the release that wrote each card description. A description that
+	// failed under another release is tried again (staleFailure); those
+	// written before this step have none, so the first release with it
+	// tries the failures it found once.
+	{Up: `
+ALTER TABLE video_card_descriptions ADD COLUMN written_release TEXT;
+`, Down: `
+ALTER TABLE video_card_descriptions DROP COLUMN written_release;
+`},
 }
 
 // migrationsWithoutDown counts the migrations released before migrations had

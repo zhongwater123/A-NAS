@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -46,4 +47,16 @@ func AbsolutePath(name, value string) (string, error) {
 		return "", errors.New(name + " must be an absolute path")
 	}
 	return filepath.Clean(value), nil
+}
+
+// PositiveDuration parses value, or returns an error naming the variable when
+// it is not a positive duration. An empty value is zero.
+func PositiveDuration(name, value string) (time.Duration, error) {
+	if value == "" {
+		return 0, nil
+	}
+	if d, err := time.ParseDuration(value); err == nil && d > 0 {
+		return d, nil
+	}
+	return 0, errors.New(name + " must be a positive duration such as 30s")
 }

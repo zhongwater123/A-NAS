@@ -5,6 +5,12 @@
 # connections; Qdrant does not tell systemd itself. A start that gets there
 # is no longer counted as failed (start.sh).
 #
+# systemd waits for this script even after Qdrant has exited, so it watches
+# the main process ($MAINPID). It reports a failed start 5 seconds later: the
+# connection queued on the socket starts the instance again at once, and the
+# pause keeps those starts under the socket's trigger limit
+# (docs/investigations/2026-11-25-readiness-scripts-wait-out-timeouts.md).
+#
 # Usage: wait-ready.sh PORT STATE_DIRECTORY
 set -euo pipefail
 
@@ -16,6 +22,11 @@ for _ in $(seq 1 600); do
   if (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; then
     rm -f -- "$2/failed-starts"
     exit 0
+  fi
+  if [[ -n "${MAINPID:-}" ]] && ! kill -0 "$MAINPID" 2>/dev/null; then
+    echo "Qdrant exited before it accepted connections on port $1" >&2
+    sleep 5
+    exit 1
   fi
   sleep 0.1
 done

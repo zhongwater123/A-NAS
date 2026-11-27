@@ -1,6 +1,7 @@
 package phonehotspotapi
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 )
 
 const Path = "/api/v1/network/phone-hotspot"
+const SettingsPath = Path + "/settings"
 
 type API struct {
 	control phonehotspot.Switch
@@ -25,7 +27,35 @@ func (a *API) Routes() []apiroute.Route {
 	return []apiroute.Route{
 		{Method: http.MethodGet, Pattern: Path, Posture: apiroute.Admin, Handler: a.serve},
 		{Method: http.MethodPut, Pattern: Path, Posture: apiroute.Admin, Handler: a.serve},
+		{Method: http.MethodPut, Pattern: SettingsPath, Posture: apiroute.Admin, Handler: a.saveSettings},
 	}
+}
+
+func (a *API) saveSettings(w http.ResponseWriter, r *http.Request, _ accounts.Session) {
+	w.Header().Set("Cache-Control", "no-store")
+	var change phonehotspot.SettingsChange
+	if !httpjson.Read(w, r, 1024, &change) {
+		return
+	}
+	if err := change.Validate(); err != nil {
+		code := "invalid_ssid"
+		if errors.Is(err, phonehotspot.ErrInvalidPassword) {
+			code = "invalid_password"
+		}
+		httpjson.WriteError(w, http.StatusBadRequest, code, err.Error())
+		return
+	}
+	if a.control == nil {
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "phone hotspot is unavailable")
+		return
+	}
+	settings, err := a.control.SavePhoneHotspotSettings(r.Context(), change)
+	if err != nil {
+		a.logger.ErrorContext(r.Context(), "save phone hotspot settings", "error", err)
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "operation_unavailable", "phone hotspot is unavailable")
+		return
+	}
+	httpjson.Write(w, http.StatusOK, settings)
 }
 
 func (a *API) serve(w http.ResponseWriter, r *http.Request, _ accounts.Session) {

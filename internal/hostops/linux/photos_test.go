@@ -24,7 +24,7 @@ func (r *photosRunner) Run(ctx context.Context, name string, args []string, stdi
 		return nil, err
 	}
 	switch {
-	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser || args[1] == accountid.FamilyServiceUser || args[1] == "a-nas-scoring") && r.passwd != "":
+	case name == "getent" && args[0] == "passwd" && (args[1] == accountid.PhotoServiceUser || args[1] == accountid.ShareServiceUser || args[1] == accountid.FamilyServiceUser || args[1] == accountid.WorkspaceServiceUser || args[1] == "a-nas-scoring") && r.passwd != "":
 		return []byte(r.passwd + "\n"), nil
 	case name == "getent":
 		return nil, notFound{}
@@ -212,5 +212,21 @@ func TestModuleStoreUsesItsManifestIdentityAndNeverLeavesTheRange(t *testing.T) 
 		if _, _, err := executor.EnsureModuleStore(context.Background(), manifest); err == nil {
 			t.Errorf("manifest %+v accepted", manifest)
 		}
+	}
+}
+
+func TestWorkspaceStoreUsesItsOwnFixedIdentity(t *testing.T) {
+	mountPoint := filepath.Join(t.TempDir(), "data")
+	if err := os.MkdirAll(mountPoint, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &photosRunner{passwd: "a-nas-workspace:x:31004:31004::/nonexistent:/usr/sbin/nologin"}
+	executor := NewExecutor(nil, runner, Options{SystemRoot: t.TempDir(), MountPoint: mountPoint})
+	if _, err := executor.ensureOwnedStore(context.Background(), "workspace", accountid.WorkspaceServiceUser, accountid.WorkspaceServiceUID); err != nil {
+		t.Fatalf("new workspace store: %v", err)
+	}
+	runner.passwd = "a-nas-workspace:x:998:998::/nonexistent:/usr/sbin/nologin"
+	if _, err := executor.ensureOwnedStore(context.Background(), "workspace", accountid.WorkspaceServiceUser, accountid.WorkspaceServiceUID); !errors.Is(err, accountid.ErrIdentityConflict) {
+		t.Fatalf("a workspace account under another UID: %v", err)
 	}
 }
