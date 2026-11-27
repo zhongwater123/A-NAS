@@ -30,6 +30,7 @@
 - [镜像缺盘与更换硬盘](replace-a-mirror-disk.md)（draft；实验 NAS 待执行）
 - [在实验 NAS 上验收已部署的功能](accept-features-on-experimental-nas.md)（draft；按模块分节，验收完成的节随即删去）
 - [安装与移除照片打分](install-and-remove-photo-scoring.md)（draft；系统测试已验证，实验 NAS 待执行）
+- [从每天的备份恢复共享工作区](restore-workspace-database.md)（draft；实验 NAS 待执行）
 - [启用配乐分析](enable-montage-music.md)（draft；allin1 版权待议期间只手动装在实验 NAS 上，待执行）
 - [在实验 NAS 上演示剪辑中心](demo-montage-center.md)（draft；只在实验 NAS 上用 drop-in 打开，待执行）
 

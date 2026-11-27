@@ -33,11 +33,13 @@ Host Agent：internal/sessionlookup + internal/sessiondir 只读解析会话、a
 
 | 表 | 内容 |
 |---|---|
-| `pages` | `id`（`page_` 加随机串）、标题、创建者的 ID 与当时的名字、创建时间、最新版本号、更新时间 |
+| `pages` | `id`（`page_` 加随机串）、标题、创建者的 ID 与当时的名字、创建时间、最新版本号、更新时间；在回收站时另有删除时间与删除者（`deleted_at` 不为空） |
 | `versions` | 页面 ID、版本号、内容（BLOB）、字节数、SHA-256、保存者的 ID 与当时的名字、经由（`web` 或令牌名）、种类（`web`、`claude-code`、`codex`、`other`）、说明、改动元素的位置（JSON 数组）、创建时间；页面删除时级联删除 |
 | `members` | 可使用的成员：账号 ID、添加者、添加时间 |
 | `transfers` | 一次性地址：键的哈希、方向（下载或上传）、页面 ID（上传新页面时为空）、基线版本、账号 ID、签发令牌的 ID、说明、到期时间；用过即删 |
 | `audit_events` | 本服务的活动记录，与家庭服务相同的列与索引（`activity.IndexStatement`） |
+
+回收站是 `pages` 上的删除时间：删除只填它，版本留着；读页面、列表、改名、保存与 agent 的工具都只认 `deleted_at = ''` 的页面，所以页面在回收站里时对它们就像不存在（`404`）。恢复清掉它；彻底删除与到期清理才真正 `DELETE`，版本随外键级联删除。退回没有这一列的版本时，反向步骤去掉这几列，回收站里的页面回到列表。
 
 内存里存三样东西（`internal/workspace/live.go`），服务重启后丢失，标签页与 agent 下次上报时恢复：
 
@@ -53,6 +55,15 @@ agent 的“这个页面”是这个账号最后用的标签页：按最后有�
 
 `control.db` 新表 `agent_tokens`：令牌哈希（`accountid.TokenHash`）、`id`、账号（外键，`ON DELETE CASCADE`）、范围（`workspace`）、名字、种类、创建时间、上次使用时间。令牌原文形如 `anas_ws_` 加 32 字节随机数的 base32，只在签发时返回一次。上次使用时间由产品服务在核验时更新，同一令牌 10 分钟内只写一次。
 
+## 备份
+
+`Upkeep`（服务每 10 分钟一次，开发模式同样）在清理过期的传输地址、审计与回收站之后调用 `BackupIfDue`：当天（UTC）的 `backups/workspace-YYYY-MM-DD.db.gz` 不在时，经一个只读连接 `VACUUM INTO` 出一份一致的副本（`sqlitedb.Copy`），用 gzip 最快一档压缩，`fsync` 后改名，再删掉多于 14 份的旧备份（`sqlitedb.KeepNewest`）。
+
+- 存储只开一个连接（`sqlitedb.Open`），在它上面 `VACUUM INTO` 会让整份复制期间的请求都排队；WAL 模式下另开的只读连接不等写入，也不挡写入。照片打分的每日备份同样改用这两个函数。
+- 先按数据库页数的两倍向数据卷预留空间询问（未压缩的副本与压缩文件同时存在片刻），不够时这一天不备份，返回 `ErrVolumeFull`，服务日志写一次警告，下次清理再试。
+- 2026-11-27 在 WSL 上测：30 个约 110 KB 的页面各 40 个版本（130 MB），只读连接 `VACUUM INTO` 0.2 秒，gzip 最快一档 0.9 秒压到 71 MB，默认一档 2.3 秒压到 68 MB。随机汉字的页面压缩比约 2，所以 14 份备份约占数据库的 7 倍。版本之间几乎相同，带长窗口的压缩（zstd `--long`）能把它降到很小，那要多一个依赖，等数据库真的变大再定。
+- 备份和数据库在同一个子卷、同一块（镜像）盘上：防损坏与误删，不防硬盘与整机损坏。恢复见[运行手册](../runbooks/restore-workspace-database.md)。系统更新前的数据库副本（`.a-nas-backups`）另由软件包脚本复制，只留两份。
+
 ## 接口
 
 浏览器（`api/paths/workspace.yaml`）：
@@ -61,7 +72,8 @@ agent 的“这个页面”是这个账号最后用的标签页：按最后有�
 |---|---|---|
 | `GET /api/v1/workspace` | session | 能用时 `200 {admin}`，不能用时 `404`；桌面据此显示图标 |
 | `GET /api/v1/workspace/pages`、`POST …/pages` | session、mutation | 列表，每页带谁在看、谁的 agent 在读（`presence`）；上传新页面（请求体 `text/html`，查询参数 `name` 是文件名） |
-| `GET|PATCH|DELETE …/pages/{pageId}` | session、mutation | 页面、版本列表与 `presence`；改标题；删除（上传者与管理员） |
+| `GET|PATCH|DELETE …/pages/{pageId}` | session、mutation | 页面、版本列表与 `presence`；改标题；移到回收站（上传者与管理员） |
+| `GET …/trash`、`POST …/trash/{pageId}/restore`、`DELETE …/trash/{pageId}` | session、mutation | 回收站（谁删的、何时、何时彻底删除、几个版本）；恢复；彻底删除（上传者与管理员） |
 | `POST …/pages/{pageId}/versions` | mutation | 整份上传新版本，查询参数 `baseVersion`；不是最新时 `409 page_changed` 并给出最新版本 |
 | `GET …/pages/{pageId}/versions/{version}/view` | session | 隔离浏览（见“隔离浏览”）；查询参数 `highlight`、`scroll` |
 | `GET …/pages/{pageId}/versions/{version}/file` | session | 导出原文件 |
