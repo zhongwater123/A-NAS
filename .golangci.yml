@@ -286,12 +286,13 @@ linters:
               desc: external implements app's interfaces and db serves app; neither imports it
             - pkg: "github.com/zhongwater123/A-NAS/internal/videocut/protocol$"
               desc: the protocol is the outermost layer
+        # Their tests too: a test that imports VideoCut makes the package
+        # depend on it all the same when it is tested.
         videocut-users:
           list-mode: lax
           files:
             - "**/internal/videocutcompute/*.go"
             - "**/internal/photoservice/*.go"
-            - "!$test"
           deny:
             - pkg: "github.com/zhongwater123/A-NAS/internal/videocut$"
               desc: the compute client and the photo service do not depend on VideoCut

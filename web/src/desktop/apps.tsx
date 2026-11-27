@@ -363,7 +363,7 @@ const definitions = {
     bounds: { x: 220, y: 48, width: 1080, height: 720 },
     launcher: {
       id: "videocut",
-      keywords: "剪辑 视频 成片 配乐 旅行 vlog videocut video",
+      keywords: "剪辑 视频 成片 配乐 旅行 vlog montage videocut video",
       visible: ({ videocut }) => videocut,
     },
     render: ({ session }) => <VideoCutPanel userId={session.user.id} />,

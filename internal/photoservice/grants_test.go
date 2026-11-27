@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -23,8 +22,6 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/photos"
 	"github.com/zhongwater123/A-NAS/internal/photosapi"
 	"github.com/zhongwater123/A-NAS/internal/photoservice"
-	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
-	"github.com/zhongwater123/A-NAS/internal/videocut/external"
 )
 
 // grantSessions adds the accounts in use to the sessions the tests know.
@@ -510,11 +507,9 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 			t.Fatalf("SearchWindows() = %+v", list)
 		}
 	}
-	// The montage center's edit of a film reads the same windows through it.
-	hits, err := external.GrantSearch{Grants: client}.SearchWindows(ctx, grants[0], []string{"sea"}, 4)
-	if err != nil || len(hits) != 1 || len(hits[0]) != 4 || hits[0][0] != (photos.WindowMatch{AssetID: videoID, Window: 5, Score: 10}) {
-		t.Fatalf("montage search = %+v, %v", hits, err)
-	}
+	// VideoCut reads these answers through external.GrantSearch, which its own
+	// tests hold to the codes below (internal/videocut/external); the photo
+	// service does not depend on VideoCut (#639).
 	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, photos.MaxWindowMatches+1); photosapi.GrantErrorCode(err) != photosapi.GrantInvalid {
 		t.Fatalf("SearchWindows() of too many windows = %v", err)
 	}
@@ -541,8 +536,5 @@ func TestTheGrantSocketSearchesWindows(t *testing.T) {
 	}
 	if _, err := client.SearchWindows(ctx, grants[0], []string{"sea"}, 4); photosapi.GrantErrorCode(err) != photosapi.GrantModelMismatch {
 		t.Fatalf("SearchWindows() of another model's windows = %v", err)
-	}
-	if _, err := (external.GrantSearch{Grants: client}).SearchWindows(ctx, grants[0], []string{"sea"}, 4); !errors.Is(err, domain.ErrSearchModel) {
-		t.Fatalf("montage search of another model's windows = %v", err)
 	}
 }

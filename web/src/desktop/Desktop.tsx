@@ -30,7 +30,7 @@ import { SharesProvider, useShares } from "../shares/SharesProvider";
 import { transferStore } from "../transfers/store";
 import { TransferIndicator, TransferToasts } from "../transfers/TransferNotices";
 import { lazyCode } from "../ui/lazyCode";
-import { videoCutEnabled } from "../videocut/lib/status";
+import { videoCutEnabled } from "../videocut/api/status";
 import { useWebSearch } from "../websearch/status";
 import { type WorkspaceAccess, workspaceAccess } from "../workspace/status";
 import { AppWindow } from "./AppWindow";

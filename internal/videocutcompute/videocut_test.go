@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhongwater123/A-NAS/internal/videocut/domain"
 	"github.com/zhongwater123/A-NAS/internal/videocutcompute"
 )
 
@@ -125,7 +124,11 @@ func TestTheVideoCutServicesCallsReachTheWorker(t *testing.T) {
 	}
 	frames := 0
 	for _, raw := range answer.Clips {
-		var clip domain.Clip
+		// The one field this reads of a clip (domain.Clip in VideoCut, which
+		// this leaf package does not import, #639).
+		var clip struct {
+			Share float64 `json:"share"`
+		}
 		if err := json.Unmarshal(raw, &clip); err != nil {
 			t.Fatal(err)
 		}

@@ -101,8 +101,10 @@
       }
     },
     {
-      // 剪辑中心's pure functions (#639): they may take types from its api/, never call it, and use no React.
-      // The site-wide src/api/ stays open to them.
+      // 剪辑中心's pure functions (#639): they may take types from an api/ folder, never call one, and use no React.
+      // The rule sees the import as written, not the file it resolves to: from a folder under lib/, ../../api is
+      // videocut's own, from lib/ itself the site-wide one. So every relative path into an api/ folder, videocut's or
+      // the site-wide src/api/, at any depth, is held to types; neither has anything a pure function may call.
       "files": ["src/videocut/lib/**"],
       "rules": {
         "no-restricted-imports": [
@@ -110,9 +112,9 @@
           {
             "patterns": [
               {
-                "regex": "^\\.\\./(\\.\\./videocut/)?api(/.*)?$",
+                "regex": "^(\\.\\.?/)+(videocut/)?api(/.*)?$",
                 "allowTypeImports": true,
-                "message": "videocut/lib/ takes only types from videocut/api/: use import type."
+                "message": "videocut/lib/ takes only types from an api/ folder: use import type."
               },
               {
                 "regex": "^react(-dom)?(/.*)?$",

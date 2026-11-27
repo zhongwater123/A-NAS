@@ -151,11 +151,11 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 相册实现包 | `internal/photos`：剪辑用到它的值类型（`Grant`、`WindowMatch` 等） | 按文件放行，清单在 `.golangci.yml`；值类型挪进 `photosapi` 后删掉 |
 | 其他模块 | 以上之外的 `internal/...` | `domain`、`db`、`app` 都不能用 |
 
-另外，`internal/videocutcompute` 与 `internal/photoservice` 不引用 `internal/videocut/...`。
+另外，`internal/videocutcompute` 与 `internal/photoservice` 不引用 `internal/videocut/...`，它们的测试也不引用：相册服务的测试只核对授权套接字回答的错误码，这些错误码到剪辑中心错误的对应由 `internal/videocut/external` 的测试核对。
 
-规则在 `.golangci.yml` 的 `videocut-domain`、`videocut-db`、`videocut-app`、`videocut-app-photos`、`videocut-outer`、`videocut-users`，随 `make check` 的 `go-lint` 运行；测试文件不受约束（`app` 的测试会用 `external` 的替身）。`internal/photos` 放行的是 `app` 的 `draftops.go`、`editing.go`、`editjobs.go`、`ports.go`、`projects.go`、`render.go`、`steps.go`；拆层后 `domain` 已不引用它。
+规则在 `.golangci.yml` 的 `videocut-domain`、`videocut-db`、`videocut-app`、`videocut-app-photos`、`videocut-outer`、`videocut-users`，随 `make check` 的 `go-lint` 运行；除 `videocut-users` 外，测试文件不受约束（`app` 的测试会用 `external` 的替身）。`internal/photos` 放行的是 `app` 的 `draftops.go`、`editing.go`、`editjobs.go`、`ports.go`、`projects.go`、`render.go`、`steps.go`；拆层后 `domain` 已不引用它。
 
-**网页**：只有 `api/` 调后端，类型来自生成的 `api.generated.ts`；`lib/` 引用 `api/` 只能是 `import type`，也不引用 React（Oxlint 的 `no-restricted-imports`）。页面现在还直接引用 `api/`，“页面层不直接调接口”的检查等新界面把调用挪进 `app/` 后再加。
+**网页**：只有 `api/` 调后端，类型来自生成的 `api.generated.ts`；桌面判断要不要显示剪辑中心的 `videoCutEnabled` 也在 `api/`（`status.ts`，单独一个小文件，因为桌面一开始就加载它）。`lib/` 引用 `api/` 只能是 `import type`，也不引用 React（Oxlint 的 `no-restricted-imports`）。规则看的是写出来的导入路径，分不出 `../../api` 指向剪辑的 `api/` 还是全站的 `src/api/`，所以对 `lib/` 里任何层级、指向这两个 `api/` 的相对导入都只放行类型。页面现在还直接引用 `api/`，“页面层不直接调接口”的检查等新界面把调用挪进 `app/` 后再加。
 
 **算法（Python）**：`algo/` 只引用标准库、NumPy 和自己，`ops/` 不引用 `worker.py`，由 `ai/tests/test_videocut_layers.py` 检查。
 
