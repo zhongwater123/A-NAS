@@ -1,0 +1,13 @@
+/* Touch screens, marked with data-touch by lib/touch.ts (and by the phone
+   simulator). A long press opens an item's menu, not iOS's callout (save,
+   share, copy), and a tap does not flash a grey highlight; fields keep their
+   callout. Defaults, so in the base layer. */
+@layer base {
+  :root[data-touch] body {
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :root[data-touch] :is(input, textarea, [contenteditable="true"]) {
+    -webkit-touch-callout: default;
+  }
+}

@@ -5,6 +5,39 @@ export interface PickedFile {
   directories: string[];
 }
 
+// chooseFiles opens the system's file picker and hands over what was chosen,
+// if anything. The input waits in the page, hidden, while the picker is open:
+// iOS Safari may never report the choice made in an input that is not part
+// of the document. A browser without the cancel event never says a pick was
+// cancelled; its input, with its listener and the onChosen that listener
+// would call, stays in the page until the next pick removes it.
+let waiting: HTMLInputElement | undefined;
+export function chooseFiles(options: { accept: string; multiple?: boolean }, onChosen: (files: File[]) => void) {
+  waiting?.remove();
+  const input = document.createElement("input");
+  waiting = input;
+  input.type = "file";
+  input.accept = options.accept;
+  input.multiple = options.multiple ?? false;
+  input.hidden = true;
+  const done = () => {
+    input.remove();
+    if (waiting === input) waiting = undefined;
+  };
+  input.addEventListener(
+    "change",
+    () => {
+      const files = Array.from(input.files ?? []);
+      done();
+      if (files.length) onChosen(files);
+    },
+    { once: true },
+  );
+  input.addEventListener("cancel", done, { once: true });
+  document.body.append(input);
+  input.click();
+}
+
 // pickedFromInput reads a file input; a folder input reports each file's
 // path below the chosen folder, the folder included.
 export function pickedFromInput(files: FileList | null): PickedFile[] {

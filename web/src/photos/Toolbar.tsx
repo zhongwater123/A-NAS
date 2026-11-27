@@ -50,7 +50,8 @@ interface Props extends SearchBox {
   selection: ReturnType<typeof useSelection>;
   actions: PhotoActions;
   sidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  // Absent on a phone, which has no sidebar.
+  onToggleSidebar?: () => void;
   setPlace: (place: Place) => void;
   rowHeight: number;
   setRowHeight: (height: number) => void;
@@ -130,15 +131,17 @@ export function Toolbar({
     <header ref={toolbar} className={`${styles.phToolbar}${selection.selected.size ? ` ${styles.selecting}` : ""}`}>
       {selectionBar || (
         <div className={styles.phToolbarRow}>
-          <button
-            type="button"
-            className={styles.phIconButton}
-            aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
-            aria-expanded={sidebarOpen}
-            onClick={onToggleSidebar}
-          >
-            <PanelLeft />
-          </button>
+          {onToggleSidebar && (
+            <button
+              type="button"
+              className={styles.phIconButton}
+              aria-label={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+              aria-expanded={sidebarOpen}
+              onClick={onToggleSidebar}
+            >
+              <PanelLeft />
+            </button>
+          )}
           {title.back && (
             <button
               type="button"
@@ -280,9 +283,14 @@ export function Toolbar({
             </div>
           )}
           {place.kind === "album" && canEditAlbum(caller, place.album) && (
-            <button type="button" className={styles.phButton} onClick={() => setPhotoPicker(place.album)}>
+            <button
+              type="button"
+              className={styles.phButton}
+              aria-label="添加照片"
+              onClick={() => setPhotoPicker(place.album)}
+            >
               <FolderPlus />
-              添加照片
+              <span>添加照片</span>
             </button>
           )}
           {place.kind === "trash" && (
