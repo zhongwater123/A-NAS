@@ -76,8 +76,7 @@ export const spaceName = (space?: Pick<Space, "kind">) => (space?.kind === "shar
 
 // locationOf is where restoring puts an item: its original folder, or the
 // space root when that folder is gone.
-export function locationOf(item: BinItem, space?: Pick<Space, "kind">): { folders: string[]; text: string } {
-  if (item.kind === "page") return { folders: [], text: workspaceName };
+export function locationOf(item: TrashItem, space?: Pick<Space, "kind">): { folders: string[]; text: string } {
   const folders = item.originalGone || !item.originalPath ? [] : item.originalPath.split("/");
   return { folders, text: [spaceName(space), ...folders].join(" / ") };
 }
@@ -192,12 +191,12 @@ export function matches(item: BinItem, spaceId: string, query: string, purgeDay?
 
 // BatchOutcome is what restoring a selection did. renamed and replaced count
 // the restored items that came back beside, or in place of, one of their
-// name; skipped ones stay in the recycle bin.
+// name; skipped ones, files whose name was taken, stay in the recycle bin.
 export interface BatchOutcome {
   done: BinItem[];
   renamed: number;
   replaced: number;
-  skipped: BinItem[];
+  skipped: TrashItem[];
   gone: BinItem[];
   failed: string[];
 }
@@ -238,6 +237,7 @@ export function restoredText(
   return `已恢复“${restored.name}”到 ${location}`;
 }
 
-export function messageOf(error: unknown): string {
-  return errorText(error, "trash");
+// messageOf words an error of the recycle bin, or of 共享工作区 for its pages.
+export function messageOf(error: unknown, item?: BinItem): string {
+  return errorText(error, item?.kind === "page" ? "workspace" : "trash");
 }

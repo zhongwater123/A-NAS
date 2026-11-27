@@ -180,14 +180,7 @@ function Workspace({ userId, admin }: { userId: string; admin: boolean }) {
         <Members container={root} userId={userId} kit={kit} onClose={() => setDialogOpen(undefined)} />
       )}
       {dialogOpen === "trash" && (
-        <Trash
-          container={root}
-          userId={userId}
-          admin={admin}
-          kit={kit}
-          onRestored={refresh}
-          onClose={() => setDialogOpen(undefined)}
-        />
+        <Trash container={root} userId={userId} admin={admin} kit={kit} onClose={() => setDialogOpen(undefined)} />
       )}
       {dialog}
       {toasts}

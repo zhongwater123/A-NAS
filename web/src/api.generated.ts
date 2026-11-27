@@ -14887,6 +14887,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     purgeWorkspacePage: {
@@ -14911,6 +14912,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     restoreWorkspacePage: {
@@ -14937,6 +14939,7 @@ export interface operations {
             };
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     setWorkspaceViewing: {

@@ -67,6 +67,9 @@ export interface WorkspaceStore {
   members: WorkspaceMemberAccount[];
   tokens: AgentToken[];
   uploads: { name: string | null; base?: number; body: string }[];
+  // admin is whether the reader administers the device, which lets them
+  // delete, restore and purge pages others uploaded.
+  admin?: boolean;
 }
 
 export function workspaceStore(pages: WorkspacePage[] = []): WorkspaceStore {
@@ -88,6 +91,9 @@ export function addVersion(store: WorkspaceStore, pageId: string, saved: Omit<Pa
 
 export function workspaceHandlers(store: WorkspaceStore) {
   const find = (pageId: string) => store.pages.find((page) => page.id === pageId);
+  // As the service: only whoever uploaded a page, and administrators, delete,
+  // restore or purge it.
+  const mayManage = (page: WorkspacePage) => Boolean(store.admin) || page.createdBy.id === reader.id;
   return [
     http.get("/api/v1/workspace/pages", ({ response }) => response(200).json({ items: store.pages.map(summaryOf) })),
     http.post("/api/v1/workspace/pages", async ({ request, query, response }) => {
@@ -112,6 +118,7 @@ export function workspaceHandlers(store: WorkspaceStore) {
     http.delete("/api/v1/workspace/pages/{pageId}", ({ params, response }) => {
       const page = find(params.pageId);
       if (!page) return response(404).json(apiError("not_found"));
+      if (!mayManage(page)) return response(403).json(apiError("forbidden"));
       store.pages = store.pages.filter((item) => item !== page);
       store.trash = [{ page, deletedBy: reader, deletedAt: new Date().toISOString() }, ...store.trash];
       return response(204).empty();
@@ -133,12 +140,15 @@ export function workspaceHandlers(store: WorkspaceStore) {
     http.post("/api/v1/workspace/trash/{pageId}/restore", ({ params, response }) => {
       const trashed = store.trash.find((item) => item.page.id === params.pageId);
       if (!trashed) return response(404).json(apiError("not_found"));
+      if (!mayManage(trashed.page)) return response(403).json(apiError("forbidden"));
       store.trash = store.trash.filter((item) => item !== trashed);
       store.pages = [...store.pages, trashed.page];
       return response(200).json(summaryOf(trashed.page));
     }),
     http.delete("/api/v1/workspace/trash/{pageId}", ({ params, response }) => {
-      if (!store.trash.some((item) => item.page.id === params.pageId)) return response(404).json(apiError("not_found"));
+      const trashed = store.trash.find((item) => item.page.id === params.pageId);
+      if (!trashed) return response(404).json(apiError("not_found"));
+      if (!mayManage(trashed.page)) return response(403).json(apiError("forbidden"));
       store.trash = store.trash.filter((item) => item.page.id !== params.pageId);
       return response(204).empty();
     }),

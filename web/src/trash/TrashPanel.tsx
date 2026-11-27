@@ -106,23 +106,30 @@ export function TrashPanel({
   // The same after the dialog for taken names closes with the focus in it.
   const refocusAfterConflicts = useRef(false);
 
-  const fetchTrash = useCallback(
-    () =>
-      Promise.all([listTrash(), listSpaces(), readPages(workspace, userId)])
-        .then(([files, visible, pages]) => {
-          const next: BinItem[] = [...files, ...pages.items];
-          setItems(next);
-          setSpaces(visible);
-          setError("");
-          setPageError(pages.error);
-          setSelected((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
-        })
-        .catch((caught: unknown) => {
-          setError(messageOf(caught));
-        })
-        .finally(() => setLoading(false)),
-    [workspace, userId],
-  );
+  // reads numbers the reads of the bin: one that answers after a later one
+  // started (the account's access to 共享工作区 became known, or 刷新) is
+  // dropped, so an older list never replaces a newer one.
+  const reads = useRef(0);
+  const fetchTrash = useCallback(() => {
+    const read = ++reads.current;
+    const latest = () => read === reads.current;
+    return Promise.all([listTrash(), listSpaces(), readPages(workspace, userId)])
+      .then(([files, visible, pages]) => {
+        if (!latest()) return;
+        const next: BinItem[] = [...files, ...pages.items];
+        setItems(next);
+        setSpaces(visible);
+        setError("");
+        setPageError(pages.error);
+        setSelected((current) => new Set([...current].filter((id) => next.some((item) => item.id === id))));
+      })
+      .catch((caught: unknown) => {
+        if (latest()) setError(messageOf(caught));
+      })
+      .finally(() => {
+        if (latest()) setLoading(false);
+      });
+  }, [workspace, userId]);
   const refresh = useCallback(() => {
     setLoading(true);
     return fetchTrash();
@@ -238,7 +245,7 @@ export function TrashPanel({
       if (item.kind !== "page" && isCode(caught, "name_conflict")) setTaken(item);
       else {
         if (isCode(caught, "not_found")) forget([item]);
-        toast(item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught), "error");
+        toast(messageOf(caught, item), "error");
       }
     } finally {
       setRestoring((current) => new Set([...current].filter((id) => id !== item.id)));
@@ -269,7 +276,7 @@ export function TrashPanel({
       } catch (caught) {
         if (item.kind !== "page" && choice === "ask" && isCode(caught, "name_conflict")) conflicting.push(item);
         else if (isCode(caught, "not_found")) outcome.gone.push(item);
-        else outcome.failed.push(item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught));
+        else outcome.failed.push(messageOf(caught, item));
       }
     }
     setProgress(undefined);
@@ -314,7 +321,7 @@ export function TrashPanel({
       } catch (caught) {
         if (isCode(caught, "not_found")) removed.push(item);
         else {
-          failure = item.kind === "page" ? errorText(caught, "workspace") : messageOf(caught);
+          failure = messageOf(caught, item);
           break;
         }
       }
@@ -511,15 +518,18 @@ export function TrashPanel({
                 )}
 
                 {all.length === 0 ? (
-                  <div className={styles.trEmpty}>
-                    <EmptyBin />
-                    <strong>回收站是空的</strong>
-                    <p>
-                      {workspace
-                        ? "删除的文件、文件夹和共享工作区的页面会先放在这里，到期前可以恢复。"
-                        : "删除的文件和文件夹会先放在这里，到期前可以恢复。"}
-                    </p>
-                  </div>
+                  // Pages that could not be read may be there: the bin is not called empty.
+                  !pageError && (
+                    <div className={styles.trEmpty}>
+                      <EmptyBin />
+                      <strong>回收站是空的</strong>
+                      <p>
+                        {workspace
+                          ? "删除的文件、文件夹和共享工作区的页面会先放在这里，到期前可以恢复。"
+                          : "删除的文件和文件夹会先放在这里，到期前可以恢复。"}
+                      </p>
+                    </div>
+                  )
                 ) : visible.length === 0 ? (
                   <div className={styles.trEmpty}>
                     <strong>没有匹配的项目</strong>

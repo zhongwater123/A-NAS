@@ -231,11 +231,55 @@ describe("TrashPanel", () => {
   it("lists the files when the shared pages cannot be read", async () => {
     serve([plan]);
     server.use(
-      http.get("/api/v1/workspace/trash", ({ response }) => response(403).json(apiError("workspace_forbidden"))),
+      http.get("/api/v1/workspace/trash", ({ response }) => response(503).json(apiError("workspace_unavailable"))),
     );
     render(<Bin workspace />);
-    expect(await screen.findByText("无法读取共享工作区的页面：管理员没有让你使用共享工作区")).toBeTruthy();
+    expect(
+      await screen.findByText("无法读取共享工作区的页面：共享工作区暂时不可用（数据盘未就绪），请稍后再试"),
+    ).toBeTruthy();
     expect(names()).toEqual(["计划.docx"]);
+  });
+
+  it("does not call the bin empty when the shared pages could not be read", async () => {
+    serve([]);
+    server.use(
+      http.get("/api/v1/workspace/trash", ({ response }) => response(503).json(apiError("workspace_unavailable"))),
+    );
+    render(<Bin workspace />);
+    expect(await screen.findByText(/^无法读取共享工作区的页面：/)).toBeTruthy();
+    expect(screen.queryByText("回收站是空的")).toBeNull();
+  });
+
+  it("keeps the shared pages when a read started before them answers last", async () => {
+    // The window opens before the desktop knows that alice uses 共享工作区:
+    // its first read, without pages, answers only after the second.
+    serve([plan]);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    let firstAnswered = false;
+    server.use(
+      http.get("/api/v1/trash", async ({ response }) => {
+        reads += 1;
+        if (reads === 1) {
+          await held;
+          firstAnswered = true;
+        }
+        return response(200).json({ items: [plan] });
+      }),
+    );
+    const store = workspaceStore();
+    store.trash = [{ page: workspacePage("page_1", "需求文档", [version(1)]), deletedBy: reader, deletedAt: at(-day) }];
+    server.use(...workspaceHandlers(store));
+    const { rerender } = render(<Bin />);
+    rerender(<Bin workspace />);
+    await waitFor(() => expect(names()).toEqual(["计划.docx", "需求文档"]));
+    release();
+    await waitFor(() => expect(firstAnswered).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(names()).toEqual(["计划.docx", "需求文档"]);
   });
 
   it("restores to the original folder at once and shows where it went", async () => {
