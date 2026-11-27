@@ -1,5 +1,5 @@
 import { CircleAlert, RefreshCw } from "lucide-react";
-import { type FormEvent, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 import { useBabies } from "../family/useBabies";
 import { useDialogs, useToasts } from "../ui/feedback";
@@ -105,13 +105,18 @@ export function PhotosPanel({ userId, userName, isAdmin, intent, onIntentHandled
   // The window's width decides whether the sidebar docks; the toolbar's
   // height is where the photos start.
   const librariesLoaded = libraries !== undefined;
+  // While photos are chosen the toolbar turns into a shorter selection bar
+  // (on a phone the row of places goes too). The photos keep their place
+  // under the finger: the inset only grows then, and the toolbar's own
+  // height comes back as the selection ends.
+  const measure = useEffectEvent(() => {
+    setWidth(root.current?.clientWidth || 1000);
+    const inset = (toolbar.current?.offsetHeight || 56) + 8;
+    setTopInset((current) => (selection.selected.size > 0 ? Math.max(current, inset) : inset));
+  });
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
-    const measure = () => {
-      setWidth(element.clientWidth || 1000);
-      setTopInset((toolbar.current?.offsetHeight || 56) + 8);
-    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
