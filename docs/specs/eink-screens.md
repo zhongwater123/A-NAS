@@ -141,4 +141,6 @@
 - 规格：[家庭待办](family-todos.md)、[虚拟伙伴](virtual-companion.md)、[设置](settings.md)、[本地控制台屏幕保护程序](local-console-screensaver.md)
 - 术语：[墨水屏、设备令牌](../../CONTEXT.md)
 - 问题：[#503](https://github.com/zhongwater123/A-NAS/issues/503)、[#630](https://github.com/zhongwater123/A-NAS/issues/630)
-- 代码、测试：实现的 PR 补上
+- 接口契约：[路径](../../api/paths/eink.yaml)、[组件](../../api/components/eink.yaml)
+- 代码：[看板](../../internal/family/eink_board.go)、[屏与设备令牌](../../internal/family/eink_screens.go)、[刷新规则](../../internal/eink/refresh.go)、[出图](../../internal/eink/draw.go)、[设备与管理接口](../../internal/familyapi/eink.go)、[device 姿态](../../internal/httpapi/device.go)、[设置页](../../web/src/settings/EinkSection.tsx)
+- 测试：[看板](../../internal/family/eink_board_test.go)、[屏的存储](../../internal/family/eink_screens_test.go)、[刷新规则](../../internal/eink/refresh_test.go)、[出图](../../internal/eink/draw_test.go)、[接口契约](../../internal/httpapi/eink_test.go)、[设置页](../../web/src/settings/EinkSection.test.tsx)

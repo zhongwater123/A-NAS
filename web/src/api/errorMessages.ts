@@ -149,6 +149,13 @@ const domains = {
     conflict: "这件事已经处理或忽略了，不能再推迟",
     not_found: "这件事已不存在",
   },
+  eink: {
+    family_unavailable: "墨水屏暂时不可用（数据盘未就绪），请稍后再试",
+    validation_failed: "名字要 1–6 个字",
+    conflict: "已经有一块屏叫这个名字",
+    not_found: "这块屏已经移除了",
+    forbidden: "只有管理员能管理墨水屏",
+  },
   webSearch: {
     web_search_disabled: "管理员已关闭网页搜索",
     torrent_search_disabled: "管理员已关闭种子搜索",

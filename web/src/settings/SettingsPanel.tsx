@@ -11,6 +11,7 @@ import {
   ScrollText,
   Search,
   SquareTerminal,
+  Tablet,
   UsersRound,
   Wifi,
   X,
@@ -36,6 +37,7 @@ import { hasNewVersion, useSystemUpdate, waitsForRestart } from "../systemupdate
 import { useToasts } from "../ui/feedback";
 import { AccountSection } from "./AccountSection";
 import { AssistantSection } from "./AssistantSection";
+import { EinkSection } from "./EinkSection";
 import { roleLabel } from "./labels";
 import { type LogsPreset, LogsSection } from "./logs/LogsSection";
 import { NetworkSection } from "./NetworkSection";
@@ -68,6 +70,7 @@ export type SettingsSection =
   | "terminal"
   | "task-manager"
   | "web-search"
+  | "eink"
   | "assistant";
 
 interface SectionLink {
@@ -90,6 +93,7 @@ const sectionGroups: SectionLink[][] = [
     { id: "users", label: "用户与权限", icon: UsersRound, adminOnly: true },
     { id: "personalization", label: "个性化", icon: Palette, adminOnly: true },
     { id: "web-search", label: "网页搜索", icon: Globe, adminOnly: true },
+    { id: "eink", label: "墨水屏", icon: Tablet, adminOnly: true },
     { id: "assistant", label: "VNAS", icon: Bot, adminOnly: true },
   ],
   [
@@ -289,6 +293,7 @@ export function SettingsPanel({
               {current === "system-update" && <SystemUpdateSection onOpenLogs={() => openLogs("system")} />}
               {current === "personalization" && <PersonalizationSection />}
               {current === "web-search" && <WebSearchSection />}
+              {current === "eink" && <EinkSection />}
               {current === "network" && <NetworkSection />}
               {current === "assistant" && <AssistantSection onKeyChange={onAssistantKeyChange} />}
               {current === "users" && (
