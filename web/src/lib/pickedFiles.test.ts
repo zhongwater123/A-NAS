@@ -72,4 +72,20 @@ describe("choosing files", () => {
     expect(click).toHaveBeenCalledTimes(2);
     click.mockRestore();
   });
+
+  it("removes the input and hands over nothing when the pick is cancelled or empty", () => {
+    const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => {});
+    const chosen = vi.fn();
+    chooseFiles({ accept: "image/*" }, chosen);
+    document.querySelector("body > input[type=file]")!.dispatchEvent(new Event("cancel"));
+    expect(document.querySelector("body > input[type=file]")).toBeNull();
+
+    chooseFiles({ accept: "image/*" }, chosen);
+    const input = document.querySelector<HTMLInputElement>("body > input[type=file]")!;
+    Object.defineProperty(input, "files", { value: [] });
+    input.dispatchEvent(new Event("change"));
+    expect(document.querySelector("body > input[type=file]")).toBeNull();
+    expect(chosen).not.toHaveBeenCalled();
+    click.mockRestore();
+  });
 });

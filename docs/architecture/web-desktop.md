@@ -10,7 +10,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 |---|---|
 | `main.tsx`、`App.tsx` | 入口：根错误边界，登录与桌面之间的切换 |
 | `api.generated.ts`、`api.validators.generated.ts` | `make api` 由契约生成，不手改 |
-| `styles/` | 全局样式：`index.css` 声明层顺序并引入其余文件；`tokens.css` 是[令牌](#令牌)；`base.css` 是重置；`utilities.css` 是各窗口共用、尚未做成 `ui/` 组件的几个类；`touch.css` 是触屏上的输入框字号与长按（[手机与触屏](#手机与触屏)） |
+| `styles/` | 全局样式：`index.css` 声明层顺序并引入其余文件；`tokens.css` 是[令牌](#令牌)；`base.css` 是重置；`utilities.css` 是各窗口共用、尚未做成 `ui/` 组件的几个类；`touch.css` 是触屏上长按不弹系统菜单、点按不闪高亮（[手机与触屏](#手机与触屏)） |
 | `api/` | `client.ts`：生成客户端的封装，包括请求、`APIError`、CSRF、写入闸门与带进度的上传；`errorMessages.ts`：错误码到文案的表（[规格](../specs/web-errors-and-time.md)） |
 | `desktop/` | 桌面外壳：窗口注册表 `apps.tsx`、窗口状态、`AppWindow`、程序坞、系统快捷栏、状态栏、桌面图标、通知、壁纸与屏保；外壳读取的接口在 `desktop/api.ts`，样式在 `desktop.module.css`（开机画面与根错误边界的兜底页也用它） |
 | 功能目录 | 每个应用窗口一个目录：`files`、`trash`、`settings`、`appcenter`、`docker`、`media`、`music`、`photos`、`backup`、`transfers`、`shares`、`assistant`、`family`、`todos`（家庭待办，另有外壳上的待办提醒）、`scoring`（可移除模块照片打分，模块未安装时不显示）、`workspace`（共享工作区，管理员加入的成员才显示；隔离框架里的辅助脚本在 `workspace/frame/`，由 `vite.frame.config.ts` 单独构建）；设置窗口的分区在 `settings/` 下（如 `settings/logs`、`settings/taskmanager`）；桌面上的 `feedback` |
@@ -69,7 +69,7 @@ Web 桌面是 `web/` 下的 React + TypeScript 单页应用（[ADR 0003](../adr/
 - **布局按窗口宽度：** 窗口用容器查询（或像相册那样按测得的宽度加类名）适应窄宽度，不读屏幕宽度。主要操作（例如相册的“上传”）在 360px 宽时仍要在第一行可见；放不下的次要控件换行或收起，不能被挤出窗口。
 - **侧栏：** 带侧栏的窗口在手机布局下（`usePhoneLayout()`）不显示侧栏和开关它的按钮，侧栏里的入口改成顶栏下的一行，两边从同一个函数得到入口（相册的 `placeTabs()`：图库切换加“图库 · 相册 · AI 聚合 · 回收站”标签，放不下时横向滑动）；只起说明作用的卡片（如 AI 整理进度）不搬过去。窗口一打开就铺满，所以手机上没有最大化按钮。
 - **触屏：** `lib/touch.ts` 在 `<html>` 上标 `data-touch`，样式写 `:root[data-touch]`，代码用 `touchScreen()`，两边不各写媒体查询；它还记录每次按下是手指还是鼠标（`lastPointerWasTouch()`，按键会清掉）。
-- **手势：** 列表行用 `ui/rowGestures.ts`：鼠标单击选中、双击打开，手指点按就打开；能用鼠标拖动的行在触屏上不拖动（会抢走长按和滚动）。长按是 `contextmenu`，打开行菜单或进入多选，之后点按增减所选。安卓、Windows、ChromeOS 的浏览器长按自带 `contextmenu`，iOS Safari 没有，由只在 iOS 上加载的 `lib/longPress.ts` 补上并吞掉随后的那次点击。框选只给鼠标；只在悬停时出现的控件在触屏上要么常显，要么不接收点按。行菜单目前是手写的，没有用 radix 的 `ContextMenu`（它自带触屏长按），迁移另行处理。查看照片的横滑用 `lib/swipe.ts` 的同一条阈值。
+- **手势：** 列表行用 `ui/rowGestures.ts`：鼠标单击选中、双击打开，手指点按就打开；能用鼠标拖动的行在触屏上不拖动（会抢走长按和滚动）。长按是 `contextmenu`，打开行菜单或进入多选，之后点按增减所选。安卓、Windows、ChromeOS 的浏览器长按自带 `contextmenu`，iOS Safari 没有，由只在 iOS 上加载的 `lib/longPress.ts` 补上并吞掉随后的那次点击。框选只给鼠标；只在悬停时出现的控件在触屏上要么常显，要么不接收点按。回收站的行菜单用 radix 的 `ContextMenu`（它自带触屏长按）；文件管理与音乐的行菜单还是手写的，迁移见 #672。查看照片的横滑用 `lib/swipe.ts` 的同一条阈值。
 - **输入框：** iOS Safari 遇到小于 16px 的输入框会在聚焦时放大整页，桌面不滚动，页面就停在被裁切的样子。`installTouchInput` 只在 iOS 上给 viewport 加 `maximum-scale=1`：聚焦不再放大，双指缩放仍可用；其他设备保持窗口自己的字号。
 - **选择文件：** 临时创建的 `<input type=file>` 要放进页面再点（`lib/pickedFiles.ts` 的 `chooseFiles`），否则 iOS Safari 可能不报告用户选了什么。
 - **检查：** 开发服务器上的 `/phone.html` 按几种手机浏览器的可视区并排嵌入桌面，横竖屏可切换；它的“触屏”开关让桌面以 `?touch` 载入，开发构建因此加载 `lib/touchSimulator.ts`：标上 `data-touch`，鼠标点击按点按、按住半秒按长按处理。设备的构建不含这个模块。逐个窗口确认没有控件超出窗口、主要操作可点；真机至少各看一次 iPhone Safari 与安卓 Chrome。

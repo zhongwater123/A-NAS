@@ -442,6 +442,19 @@ describe("file manager", () => {
         ).toEqual(["notes.txt", "plan.txt"]),
       );
       expect(screen.queryByRole("dialog", { name: /^预览/ })).toBeNull();
+      // Taking both out ends the choosing: a tap opens again. plan.txt was
+      // tapped a moment ago, and a second tap on it this soon would be one
+      // double tap (ui/rowGestures.ts), so it waits that out.
+      await user.pointer({ keys: "[TouchA]", target: row("notes.txt") });
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      await user.pointer({ keys: "[TouchA]", target: row("plan.txt") });
+      await waitFor(() =>
+        expect(screen.getAllByRole("row").filter((item) => item.getAttribute("aria-selected") === "true")).toHaveLength(
+          0,
+        ),
+      );
+      await user.pointer({ keys: "[TouchA]", target: row("beach.jpg") });
+      expect(await screen.findByRole("dialog", { name: "预览 beach.jpg" })).toBeTruthy();
     } finally {
       uninstall();
       vi.unstubAllGlobals();

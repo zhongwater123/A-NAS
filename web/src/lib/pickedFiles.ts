@@ -8,8 +8,9 @@ export interface PickedFile {
 // chooseFiles opens the system's file picker and hands over what was chosen,
 // if anything. The input waits in the page, hidden, while the picker is open:
 // iOS Safari may never report the choice made in an input that is not part
-// of the document. A browser without the cancel event leaves the input of a
-// cancelled pick, holding what onChosen holds, until the next pick removes it.
+// of the document. A browser without the cancel event never says a pick was
+// cancelled; its input, with its listener and the onChosen that listener
+// would call, stays in the page until the next pick removes it.
 let waiting: HTMLInputElement | undefined;
 export function chooseFiles(options: { accept: string; multiple?: boolean }, onChosen: (files: File[]) => void) {
   waiting?.remove();

@@ -15,7 +15,7 @@ import {
 import { KeyboardEvent, useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { type ReactZoomPanPinchContentRef, TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 
-import { swipeStep } from "../lib/swipe";
+import { type SwipeStart, swipeEnd, swipeStart } from "../lib/swipe";
 import { displayURL, getPhoto, motionURL, type PhotoAsset, previewURL, thumbnailURL } from "./api";
 import { type Caller, canChange, dayLabel, momentOf, reducedMotion } from "./model";
 import { type DetailsActions, PhotoDetails } from "./PhotoDetails";
@@ -113,7 +113,7 @@ export function Viewer({
   const [liveError, setLiveError] = useState(false);
   const [zoomed, setZoomed] = useState(false);
   // Where a one-finger swipe across the photo began.
-  const swipe = useRef<{ x: number; y: number; at: number } | undefined>(undefined);
+  const swipe = useRef<SwipeStart | undefined>(undefined);
   const motion = !reducedMotion();
   const editable = asset ? canChange(caller, asset) : false;
 
@@ -410,21 +410,12 @@ export function Viewer({
           // in a phone's gallery; a zoomed photo pans instead, and the
           // video's controls keep their own drags.
           onTouchStart={(event) => {
-            const target = event.target as HTMLElement;
-            swipe.current =
-              event.touches.length === 1 && !zoomed && !target.closest("button, input, [role=slider]")
-                ? { x: event.touches[0].clientX, y: event.touches[0].clientY, at: event.timeStamp }
-                : undefined;
+            const onControl = Boolean((event.target as HTMLElement).closest("button, input, [role=slider]"));
+            swipe.current = swipeStart(event.touches, event.timeStamp, zoomed || onControl);
           }}
           onTouchEnd={(event) => {
-            const start = swipe.current;
+            const step = zoomed ? 0 : swipeEnd(swipe.current, event.changedTouches[0], event.timeStamp);
             swipe.current = undefined;
-            const end = event.changedTouches[0];
-            if (!start || !end || zoomed) return;
-            const dx = end.clientX - start.x;
-            const dy = end.clientY - start.y;
-            if (Math.abs(dx) <= Math.abs(dy) * 1.5) return;
-            const step = swipeStep(dx, (dx / Math.max(1, event.timeStamp - start.at)) * 1000);
             if (step) go(step);
           }}
         >
