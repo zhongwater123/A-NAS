@@ -1,7 +1,7 @@
 # 共享工作区
 
 状态：draft
-更新时间：2026-11-26
+更新时间：2026-11-27
 
 ## 目标
 
@@ -37,11 +37,12 @@
 
 ### agent 的连接
 
-- 成员在窗口里点“连接 agent”，给这个 agent 起个名字（例如“办公电脑”），选 Claude Code 或 Codex，得到一行命令。命令里的地址是浏览器当前打开桌面用的地址，令牌只显示这一次。
+- 成员在窗口里点“连接 agent”，选 Claude Code 或 Codex，名字预先填好浏览器所在电脑的系统（“Mac 电脑”“Windows 电脑”“Linux 电脑”，可以改），点“生成提示词”，复制得到的一段话发给自己的 agent，不用再说别的。令牌只显示这一次。
+- 提示词里写明共享工作区是什么、令牌从哪来、能在哪撤销、不要在回复里重复它；agent 按自己所在的系统接好：Claude Code 先去掉以前加过的 `a-nas`，再用一行在 macOS、Linux、Windows 上都一样的命令加上；Codex 把地址与令牌写进自己的配置文件 `config.toml`。接好后 agent 试连一次（对话框随即显示“已连接”），告诉成员开一个新对话就能用，以及之后怎么选中元素、怎么说。连不上时按回答分清令牌不对（`401`）、还不能用共享工作区（`403`）与网络不通。
 - 一个 agent 一个令牌，每个账号最多 20 个。令牌只能用于共享工作区，碰不到 NAS 的其他功能。
 - “设置 → 我的账号 → 已连接的 agent”列出名字、种类、上次使用时间，可以撤销。90 天没用过的令牌自动失效。
 - 令牌在这些时候不能再用：成员撤销它；管理员停用这个账号或重置它的密码（令牌一并删除，重新启用或改密后也不会恢复）；账号被删除；管理员把这个成员从“成员”里去掉（去掉期间调用被拒绝）。
-- 地址只能是 IP 地址或 `localhost`，与终端、Docker 的写操作相同（防 DNS 重绑定）；按主机名打开桌面时，命令里换成 NAS 的 IP。
+- 提示词里的地址是浏览器当前打开桌面用的地址。它只能是 IP 地址或 `localhost`，与终端、Docker 的写操作相同（防 DNS 重绑定）；按主机名打开桌面时，对话框说明要用 NAS 的 IP 地址打开桌面，不生成令牌。
 
 ### 窗口与页面的标签页
 
@@ -135,11 +136,27 @@
 
 ### 连接 Claude Code
 
-- Given：A 能使用共享工作区，电脑上装有 Claude Code。
-- When：A 点“连接 agent”，名字填“办公电脑”，选 Claude Code，复制命令到终端运行，再在 Claude Code 里随便问一句共享工作区的事。
+- Given：A 能使用共享工作区，Windows 电脑上装有 Claude Code。
+- When：A 点“连接 agent”，名字改成“办公电脑”，选 Claude Code，点“生成提示词”，复制，粘贴给 Claude Code，别的什么都不说。
 - Then：
+  - Claude Code 运行提示词里的命令（需要时请 A 批准），确认已连接，告诉 A 开一个新对话就能用；
   - 对话框在 agent 第一次调用后显示“已连接”；
-  - “设置 → 我的账号 → 已连接的 agent”出现“办公电脑 · Claude Code · 刚刚使用”。
+  - “设置 → 我的账号 → 已连接的 agent”出现“办公电脑 · Claude Code · 刚刚使用”；
+  - A 开一个新对话，选中元素后说“把这个改小”，Claude Code 用共享工作区的工具去改。
+
+### 在 Mac 上连接 Codex
+
+- Given：B 用 Mac，装有 Codex，以前用别的令牌接过 `a-nas`。
+- When：B 选 Codex，名字留着“Mac 电脑”，生成提示词，复制给 Codex。
+- Then：
+  - Codex 在 `~/.codex/config.toml` 里换掉旧的 `[mcp_servers.a-nas]`，写上地址与令牌，试连一次，回答里有 `workspace_context`；
+  - B 的对话框显示“已连接”；B 重新开一个 Codex 会话后就能用，不用设环境变量，Codex 的桌面版与编辑器插件读同一份配置。
+
+### 按主机名打开桌面时连接 agent
+
+- Given：A 用一个主机名打开了桌面。
+- When：A 点“连接 agent”。
+- Then：对话框说明“agent 只能按 IP 地址连接 NAS：用 NAS 的 IP 地址打开桌面，再生成提示词”，“生成提示词”不可用，不签发令牌。
 
 ### 撤销一个 agent
 
@@ -182,7 +199,8 @@
 - **活动记录**：上传、保存新版本、改名、删除页面，以及管理员改“成员”，分别记为 `workspace.page_created`、`workspace.page_saved`、`workspace.page_renamed`、`workspace.page_deleted`、`workspace.member_added`、`workspace.member_removed`，归入[日志](logs.md)的“共享工作区”类别，只给操作者本人看。创建、撤销 agent 令牌记为 `user.agent_token_created`、`user.agent_token_revoked`。
 - **账号删除**：被删账号从“成员”里去掉，它的令牌随账号删除；它上传和保存的页面与版本保留，显示删除时的名字（[重新启用与删除账号](account-enable-and-delete.md)）。
 - **退回旧版本**：退回没有共享工作区的版本时，旧版本删除 agent 令牌表，成员升级后要重新连接 agent；页面数据留在数据卷上共享工作区自己的子卷里，再升级后照常可用。
-- **codex**：连接命令按 codex 源码中的 `codex mcp add --url … --bearer-token-env-var …` 写成，尚未用 codex 实测。
+- **codex**：`codex mcp add` 只能从环境变量读令牌，而 Codex 的桌面版与编辑器插件读不到终端里设的环境变量，所以提示词让 Codex 把令牌写在 `config.toml` 的 `http_headers` 里（Codex 源码 `codex-rs/config/src/mcp_types.rs`），与 Claude Code 把 `--header` 存在自己的配置里相同。尚未用真实的 Codex 实测。
+- **新对话**：Claude Code 的文档只写明新加的 MCP 服务在之后开始的对话里可用，Codex 也在会话开始时读配置，所以提示词让 agent 告诉成员开一个新对话。
 
 ## 验收证据
 
