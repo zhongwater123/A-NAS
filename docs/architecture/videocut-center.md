@@ -201,7 +201,7 @@ internal/videocutcompute/   计算工人的客户端与消息类型
 | 区域 | 要改的地方 |
 |---|---|
 | 单元与账号 | 新单元；`deploy/sysusers.d/a-nas.conf`；`anas-host-agent.service`（会话套接字的环境变量、组、`RuntimeDirectory`）；`anas-api.service` 的 `SupplementaryGroups` 加 `a-nas-videocut`（否则连不上 0750 的 `/run/a-nas-videocut`） |
-| 包脚本 | preinst 检查 UID 31005 冲突、备份 `videocut.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（`ops/`、`algo/`；模板只装到 `assistant/videocut-prompts/`） |
+| 包脚本 | preinst 检查 UID 31005 冲突、停掉改名前的规划发起方 `anas-montage-planner`、备份 `videocut.db`、备份前停服务；postinst 重启服务；prerm 停服务；`build-packages.sh` 的 wants，以及安装 `ai/anas_videocut`（`ops/`、`algo/`；模板只装到 `assistant/videocut-prompts/`） |
 | 体检与门禁 | `deploy/site/a-nas-check.sh` 的 UID、单元、数据库三处循环（数据库就绪看服务日志里的 `videocut service ready`）；`make ops-check` |
 | 系统测试 | 服务在跑；只读重挂前后停起服务；剪辑一节；产品服务的附加组 |
 | anas-api | `cmd/anas-api/videocut.go`、`config.go` 的套接字默认值、`main.go`、`deletion.go`（`accounts.ForgetStep("videocut")`） |

@@ -37,6 +37,15 @@ if [[ -d /run/systemd/system && -L /spike ]]; then
     'anas-assistant-curator@*.service' 'anas-assistant-net@*.service' 2>/dev/null || true
 fi
 
+# VideoCut's planner was anas-montage-planner.service before #669. A release
+# of that time stops it in its prerm only on removal, and the runtime package
+# that also stops it is not upgraded with a-nas, so it stops here while its
+# unit is still installed: otherwise it runs on as root after dpkg removes the
+# unit, until the next boot. Taking it back to such a release starts it again.
+if [[ -d /run/systemd/system ]]; then
+  systemctl stop anas-montage-planner.service 2>/dev/null || true
+fi
+
 # The databases a release writes: the system disk's, and the data volume's
 # stores while it is mounted. Each is copied before every upgrade, rollback
 # or installation that finds it: one left by a removed release, or by an

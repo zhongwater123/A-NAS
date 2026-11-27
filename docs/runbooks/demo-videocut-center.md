@@ -188,6 +188,7 @@
    rm -rf /var/lib/anas-montage-planner /var/cache/a-nas-montage-music
    ```
 
+   - 确认：先看 `systemctl is-active anas-montage-planner`，预期不是 `active`（新版 `a-nas` 的 preinst 在升级时停掉了旧的规划发起方）。是 `active` 时先 `systemctl stop anas-montage-planner` 再删，否则它会重新写出 `state.json`。
    - `/var/lib/anas-montage-planner/state.json` 是旧规划发起方给每位成员计的轮数；新的在 `/var/lib/anas-videocut-planner/`。`/var/cache/a-nas-montage-music` 是旧配乐 Worker 的编译缓存（[启用配乐分析](enable-videocut-music.md)第 4 步也删它）。
    - 运行目录 `/run/a-nas-montage*`、`/run/anas-assistant-montage` 在内存里，重启后自然消失，不用删。
    - 验证：两个目录都不在了，`systemctl is-active anas-videocut-planner` 在有模型密钥时仍是 `active`。
