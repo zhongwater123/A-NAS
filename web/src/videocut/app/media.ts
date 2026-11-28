@@ -1,4 +1,17 @@
 // Where the page loads a project's media from: frames for shot cards and
 // candidates, and the exported film. The page gets these from here, never
 // from api/.
-export { filmURL, frameURL } from "../api/client";
+import { filmURL, frameURL as served } from "../api/client";
+
+export { filmURL };
+
+// In the Fake preview's build the stand-ins answer fetch, which an <img>
+// does not use, so a frame is drawn here instead: the video and the time it
+// shows, enough to tell one frame from another.
+function drawnFrame(_workId: string, assetId: string, t = 0): string {
+  const label = `${assetId} · ${(t / 1000).toFixed(1)}s`.replace(/[<&>]/g, "");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><rect width="320" height="180" fill="#2a2f37"/><text x="160" y="96" fill="#9aa1ab" font-size="16" text-anchor="middle">${label}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+export const frameURL = import.meta.env.VITE_VIDEOCUT_STANDINS === "1" ? drawnFrame : served;

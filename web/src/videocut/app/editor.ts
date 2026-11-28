@@ -37,8 +37,10 @@ export function useEditor(workId: string) {
     try {
       const timeline = await call(revision);
       client.setQueryData(keys.timeline(workId), timeline);
-      // What a slot may take changes with the film: a beat taken out is a candidate again.
-      void client.invalidateQueries({ queryKey: [...keys.work(workId), "candidates"] });
+      // What a slot may take changes with the film: a beat taken out is a
+      // candidate again, and the one put in is not. The lock holds until the
+      // candidates are read again, so a stale one cannot be clicked.
+      await client.invalidateQueries({ queryKey: [...keys.work(workId), "candidates"] });
       const first = timeline.changedSlots?.[0];
       const shot = timeline.shots.find((s) => s.slot === first);
       if (shot) store.set({ playhead: shot.start });
