@@ -4,6 +4,7 @@ export const shared = {
   back: "返回",
   download: "下载",
   workGone: "作品已不存在",
+  loadFailed: "没能读取作品",
   windowTooSmall: "请放大窗口",
   busy: "上一步还在处理",
   readOnly: "导出中，暂不能修改",

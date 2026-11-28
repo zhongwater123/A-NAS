@@ -114,7 +114,8 @@
 
 .inspector {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* One child, bounded, so a long panel scrolls inside instead of being cut. */
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   padding: var(--space-3);
   border-left: 1px solid var(--vn-line);

@@ -61,6 +61,63 @@ describe("Venus's shell", () => {
   });
 });
 
+describe("what the shell tells once", () => {
+  function madeFilm(key: string) {
+    const { project } = fake.create(key, [file("e.mp4")]);
+    fake.generate(project.id, "g");
+    while (fake.step(project.id).state !== "ready");
+    return project;
+  }
+
+  it("offers the download of a film exported while the page was not open, once", async () => {
+    const project = madeFilm("k3");
+    fake.export(project.id, "e");
+    fake.step(project.id);
+    localStorage.clear();
+    const first = render(<VideoCutPanel poll={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: project.name }));
+    expect(await screen.findByText("成片已导出，点此下载")).toBeInTheDocument();
+    first.unmount();
+    render(<VideoCutPanel poll={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: project.name }));
+    await screen.findByRole("region", { name: "M6-1" });
+    expect(screen.queryByText("成片已导出，点此下载")).toBeNull();
+  });
+
+  it("takes a project's banner away when the member leaves it", async () => {
+    const { project } = fake.create("k4", [file("f.mp4")]);
+    fake.options.advanceOnRead = false;
+    fake.generate(project.id, "g");
+    fake.interrupt(project.id);
+    render(<VideoCutPanel poll={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: project.name }));
+    expect(await screen.findByText("上传中断，重新选择文件继续")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "返回" }));
+    await screen.findByRole("region", { name: "M2-1" });
+    expect(screen.queryByText("上传中断，重新选择文件继续")).toBeNull();
+  });
+
+  it("says a project is gone only when the server says not found", async () => {
+    const project = madeFilm("k5");
+    server.use(
+      http.get("/api/v1/videocut/projects/{projectId}", ({ response }) =>
+        response(503).json({ error: { code: "videocut_unavailable", message: "x" } }),
+      ),
+    );
+    render(<VideoCutPanel poll={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: project.name }));
+    expect(await screen.findByText("没能读取作品", {}, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.queryByText("作品已不存在")).toBeNull();
+    server.use(
+      http.get("/api/v1/videocut/projects/{projectId}", ({ response }) =>
+        response(404).json({ error: { code: "not_found", message: "x" } }),
+      ),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByText("作品已不存在")).toBeInTheDocument();
+  });
+});
+
 describe("useEditor", () => {
   async function readyWork() {
     const { project } = fake.create("k2", [file("c.mp4")]);

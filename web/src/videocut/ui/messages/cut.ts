@@ -16,7 +16,8 @@ export const cut = {
   noCandidates: "这一镜没有可替换的片段",
   beats: (n: number) => `${n} 拍`,
   exported: "导出完成，正在下载",
-  downloadBlocked: "下载被浏览器拦截，点此下载",
+  downloadFallback: "没有开始下载？点此下载",
+  downloadReady: "成片已导出，点此下载",
   exportFailed: "导出失败",
   done: {
     replace: (slot: number) => `已替换镜头 ${slot}`,
