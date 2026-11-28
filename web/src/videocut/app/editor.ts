@@ -8,7 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { APIError } from "../../api/client";
 import { errorText } from "../../api/errorMessages";
-import { editTimeline, type Timeline, undoTimeline } from "../api/client";
+import { type Edit, editTimeline, type Timeline, undoTimeline } from "../api/client";
 import { messages } from "../ui/messages";
 import { useToast } from "../ui/Toast";
 import { readOnly, useCut, useCutStore } from "./cutStore";
@@ -53,21 +53,16 @@ export function useEditor(workId: string) {
     }
   };
 
+  const edit = (done: string, change: Edit) => run(done, (revision) => editTimeline(workId, revision, change));
+
   return {
-    replace: (slot: number, beat: string) =>
-      run(messages.done.replace(slot), (revision) => editTimeline(workId, revision, { kind: "replace", slot, beat })),
-    remove: (slot: number) =>
-      run(messages.done.remove(slot), (revision) => editTimeline(workId, revision, { kind: "remove", slot })),
+    replace: (slot: number, beat: string) => edit(messages.done.replace(slot), { kind: "replace", slot, beat }),
+    remove: (slot: number) => edit(messages.done.remove(slot), { kind: "remove", slot }),
     setInPoint: (slot: number, from: number) =>
-      run(messages.done.set_in_point(slot), (revision) =>
-        editTimeline(workId, revision, { kind: "set_in_point", slot, from }),
-      ),
+      edit(messages.done.set_in_point(slot), { kind: "set_in_point", slot, from }),
     reorderParts: (from: number, to: number) =>
-      run(messages.done.reorder_parts(), (revision) =>
-        editTimeline(workId, revision, { kind: "reorder_parts", from, to }),
-      ),
-    place: (slot: number, assetId: string) =>
-      run(messages.done.place(slot), (revision) => editTimeline(workId, revision, { kind: "place", slot, assetId })),
+      edit(messages.done.reorder_parts(), { kind: "reorder_parts", from, to }),
+    place: (slot: number, assetId: string) => edit(messages.done.place(slot), { kind: "place", slot, assetId }),
     undo: () => run(messages.undone, (revision) => undoTimeline(workId, revision)),
     canUndo,
     busy,

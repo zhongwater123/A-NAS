@@ -4,16 +4,20 @@
 // and the player, not the shot track, moves to its start.
 import { useEffect } from "react";
 
+import type { Shot } from "../api/client";
 import { useCut, useCutStore } from "./cutStore";
 import { useTimeline } from "./features";
+
+// startOf is where the shot in slot starts, if the film has one there.
+const startOf = (shots: Shot[] | undefined, slot: number | null) => shots?.find((s) => s.slot === slot)?.start;
 
 export function usePlayer(workId: string) {
   const store = useCutStore();
   const playhead = useCut((state) => state.playhead);
-  const shots = useTimeline(workId, false).data?.shots ?? [];
+  const shots = useTimeline(workId, false).data?.shots;
   const seekToSlot = (slot: number) => {
-    const shot = shots.find((s) => s.slot === slot);
-    if (shot) store.set({ playhead: shot.start });
+    const start = startOf(shots, slot);
+    if (start !== undefined) store.set({ playhead: start });
   };
   return { playhead, seekToSlot };
 }
@@ -24,7 +28,7 @@ export function useFollowSelection(workId: string) {
   const selected = useCut((state) => state.selectedSlot);
   const shots = useTimeline(workId, false).data?.shots;
   useEffect(() => {
-    const shot = shots?.find((s) => s.slot === selected);
-    if (shot) store.set({ playhead: shot.start });
+    const start = startOf(shots, selected);
+    if (start !== undefined) store.set({ playhead: start });
   }, [selected, shots, store]);
 }
