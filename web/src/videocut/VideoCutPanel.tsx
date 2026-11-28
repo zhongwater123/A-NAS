@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { use, useMemo, useRef, useState } from "react";
 
+import { APIError } from "../api/client";
 import { useWorkEvents } from "./app/events";
 import { NavContext, type Route } from "./app/nav";
 import { ShownProvider, useWindowShown } from "./app/shown";
@@ -15,6 +16,7 @@ import { Empty } from "./ui/Empty";
 import { messages } from "./ui/messages";
 import { ToastProvider } from "./ui/Toast";
 import styles from "./ui/venus.module.css";
+import { WindowRoot } from "./ui/windowRoot";
 
 // VideoCutPanel is the 剪辑中心 window as Venus (docs/specs/venus.md): the
 // start page, or a project opened, which shows the prepare or the film page
@@ -49,14 +51,16 @@ export function VideoCutPanel({ poll = 5_000 }: { poll?: number }) {
         <Poll.Provider value={poll}>
           <NavContext.Provider value={nav}>
             <div className={styles.root} ref={root}>
-              <ToastProvider>
-                <BannerProvider>
-                  <div className={layout.content}>
-                    {route.page === "start" ? <StartPage /> : <WorkRoute key={route.workId} workId={route.workId} />}
-                  </div>
-                  <div className={layout.tooSmall}>{messages.windowTooSmall}</div>
-                </BannerProvider>
-              </ToastProvider>
+              <WindowRoot.Provider value={root}>
+                <ToastProvider>
+                  <BannerProvider>
+                    <div className={layout.content}>
+                      {route.page === "start" ? <StartPage /> : <WorkRoute key={route.workId} workId={route.workId} />}
+                    </div>
+                    <div className={layout.tooSmall}>{messages.windowTooSmall}</div>
+                  </BannerProvider>
+                </ToastProvider>
+              </WindowRoot.Provider>
             </div>
           </NavContext.Provider>
         </Poll.Provider>
@@ -68,7 +72,22 @@ export function VideoCutPanel({ poll = 5_000 }: { poll?: number }) {
 function WorkRoute({ workId }: { workId: string }) {
   const work = useWork(workId);
   useWorkEvents(work.data);
-  if (work.isError) return <Empty text={messages.workGone} />;
-  if (!work.data) return null;
+  // Only the server's not_found says the project is gone; a failed read
+  // keeps what was read before, or offers to read again.
+  const gone = work.error instanceof APIError && work.error.status === 404;
+  if (gone) return <Empty text={messages.workGone} />;
+  if (!work.data) {
+    if (!work.isError) return null;
+    return (
+      <Empty
+        text={messages.loadFailed}
+        action={
+          <button type="button" onClick={() => void work.refetch()}>
+            {messages.retry}
+          </button>
+        }
+      />
+    );
+  }
   return pageOf(work.data.state) === "prepare" ? <PreparePage work={work.data} /> : <CutPage work={work.data} />;
 }

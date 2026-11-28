@@ -17,7 +17,7 @@ import styles from "../layout.module.css";
 // the shared state, the 生成中 tracks and the folding inspector are the
 // skeleton's; each feature replaces its slot.
 export function CutPage({ work }: { work: Project }) {
-  const [store] = useState(() => createCutStore({ mode: cutModeOf(work.state) }));
+  const [store] = useState(() => createCutStore({ mode: cutModeOf(work.state), sample: work.sample }));
   // The page's mode is the project's state, and only the shell writes it.
   useEffect(() => store.set({ mode: cutModeOf(work.state) }), [store, work.state]);
   return (

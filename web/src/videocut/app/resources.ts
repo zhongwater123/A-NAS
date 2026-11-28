@@ -23,9 +23,17 @@ export function singlePlayer() {
   };
 }
 
-/** The desktop's one hover preview and one song preview (桌面级, one each). */
-export const hoverPreview = singlePlayer();
-export const songPreview = singlePlayer();
+// One hover preview and one song preview in the whole page: a new one stops
+// the last. A page uses them through usePreview, so they stop when it goes.
+const hoverPreview = singlePlayer();
+const songPreview = singlePlayer();
+
+/** The hover preview or the song preview, stopped and cleared when the page using it goes (页面级). */
+export function usePreview(which: "hover" | "song") {
+  const player = which === "hover" ? hoverPreview : songPreview;
+  useEffect(() => () => player.stop(), [player]);
+  return player;
+}
 
 // pool runs at most parallel tasks at once, the rest in turn.
 export function pool(parallel: number) {

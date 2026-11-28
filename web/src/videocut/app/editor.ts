@@ -28,7 +28,7 @@ export function useEditor(workId: string) {
   const run = async (done: string, call: (revision: number) => Promise<Timeline>): Promise<boolean> => {
     const state = store.get();
     if (readOnly(state)) {
-      toast(state.busy ? messages.busy : messages.readOnly);
+      toast(state.busy ? messages.busy : state.sample ? messages.sampleReadOnly : messages.readOnly);
       return false;
     }
     const revision = client.getQueryData<Timeline>(keys.timeline(workId))?.revision;
