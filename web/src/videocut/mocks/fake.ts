@@ -92,6 +92,10 @@ interface Stored {
   timeline?: VideoCutTimeline;
   undo?: VideoCutTimeline;
   assets: VideoCutProjectAsset[];
+  // The beats replace took out of each slot, latest first: candidates again.
+  replaced?: Map<number, VideoCutCandidate[]>;
+  // replaced as it was before the last edit, for its undo.
+  undoReplaced?: Map<number, VideoCutCandidate[]>;
   // Retries made since the project last failed, kept once the failure clears.
   retries?: number;
 }
@@ -213,6 +217,15 @@ export class VenusFake {
     const stored = this.find(id);
     this.advance(stored);
     return stored.project;
+  }
+
+  // made creates a project from files and steps it until its film is made.
+  made(requestKey: string, files: VideoCutLocalFile[]): VideoCutProject {
+    const { project } = this.create(requestKey, files);
+    this.generate(project.id, requestKey);
+    for (let i = 0; i < 20 && project.state !== "ready"; i++) this.step(project.id);
+    if (project.state !== "ready") throw new Error(`fake: ${project.id} stopped at ${project.state}`);
+    return project;
   }
 
   private touch(stored: Stored) {
@@ -533,6 +546,7 @@ export class VenusFake {
           part: part.index,
           start: span.start,
           end: span.end,
+          musicBeats: part.label === "副歌" ? 1 : 2,
           beat: `${assetId}/${span.slot}`,
           assetId,
           from: 0,
@@ -559,10 +573,10 @@ export class VenusFake {
     const shot = timeline.shots.find((s) => s.slot === slot);
     if (!shot) throw new FakeError(404, "not_found");
     const used = new Set(timeline.shots.map((s) => s.beat));
-    const items: VideoCutCandidate[] = [];
+    const items: VideoCutCandidate[] = (this.find(id).replaced?.get(slot) ?? []).filter((c) => !used.has(c.beat));
     for (let k = 1; items.length < CANDIDATES && k <= CANDIDATES * 2; k++) {
       const beat = `${shot.assetId}/${slot}-${k}`;
-      if (used.has(beat)) continue;
+      if (used.has(beat) || items.some((c) => c.beat === beat)) continue;
       items.push({ beat, assetId: shot.assetId, from: k, to: k + SLOT_SECONDS, duration: SLOT_SECONDS, fitted: false });
     }
     return { slot, items };
@@ -579,15 +593,26 @@ export class VenusFake {
       if (!shot) throw new FakeError(422, "edit_refused");
       return shot;
     };
+    const replacedBefore = new Map(stored.replaced);
     let changed: number[];
     switch (edit.kind) {
       case "replace": {
         const shot = at(edit.slot);
+        // The candidate's piece, as 取段规则 picked it; a search result's from its start.
+        const picked = this.candidates(id, edit.slot).items.find((c) => c.beat === edit.beat);
+        const { beat, assetId, from, to, fitted } = shot;
+        const out = { beat, assetId, from, to, fitted, duration: to - from };
+        stored.replaced ??= new Map();
+        stored.replaced.set(edit.slot, [
+          out,
+          ...(stored.replaced.get(edit.slot) ?? []).filter((c) => c.beat !== out.beat),
+        ]);
         Object.assign(shot, {
           beat: edit.beat,
-          assetId: edit.beat.split("/")[0],
-          from: 0,
-          to: SLOT_SECONDS,
+          assetId: picked?.assetId ?? edit.beat.split("/")[0],
+          from: picked?.from ?? 0,
+          to: picked?.to ?? SLOT_SECONDS,
+          fitted: picked?.fitted ?? false,
           anchor: true,
         });
         changed = [edit.slot];
@@ -622,9 +647,12 @@ export class VenusFake {
       }
       case "reorder_parts":
         changed = reorder(before.parts, shots, edit.from, edit.to);
+        // The shots moved to other slots: what each slot gave up is no longer its own.
+        stored.replaced = undefined;
         break;
     }
     stored.undo = before;
+    stored.undoReplaced = replacedBefore;
     stored.timeline = { ...before, revision: before.revision + 1, shots, canUndo: true, changedSlots: changed };
     if (stored.project.state === "exported") stored.project.state = "ready";
     this.touch(stored);
@@ -640,6 +668,8 @@ export class VenusFake {
     const changed = now.changedSlots;
     stored.timeline = { ...stored.undo, revision: now.revision + 1, canUndo: false, changedSlots: changed };
     stored.undo = undefined;
+    stored.replaced = stored.undoReplaced;
+    stored.undoReplaced = undefined;
     // Changed again after an export: 已完成, as an edit leaves it.
     if (stored.project.state === "exported") stored.project.state = "ready";
     this.touch(stored);

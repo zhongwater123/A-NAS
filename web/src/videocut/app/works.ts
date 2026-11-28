@@ -16,6 +16,7 @@ export const keys = {
   work: (id: string) => ["videocut", "work", id] as const,
   timeline: (id: string) => ["videocut", "work", id, "timeline"] as const,
   song: (id: string) => ["videocut", "work", id, "song"] as const,
+  allCandidates: (id: string) => ["videocut", "work", id, "candidates"] as const,
   candidates: (id: string, slot: number) => ["videocut", "work", id, "candidates", slot] as const,
   imported: (id: string) => ["videocut", "work", id, "imported"] as const,
   catalog: ["videocut", "catalog"] as const,

@@ -28,7 +28,7 @@
 
 在那个目录必须遵守的约定。Claude Code 读其中的文件时自动加载；Codex 只加载从仓库根到会话启动目录这一路上的文件，所以在根目录启动时要自己去读。
 
-- [web/AGENTS.md](web/AGENTS.md)：Web 桌面。[api/AGENTS.md](api/AGENTS.md)：产品 API 契约。
+- [web/AGENTS.md](web/AGENTS.md)：Web 桌面。[web/src/videocut/AGENTS.md](web/src/videocut/AGENTS.md)：剪辑中心的网页，分头开发时各守的约定。[api/AGENTS.md](api/AGENTS.md)：产品 API 契约。
 - [deploy/AGENTS.md](deploy/AGENTS.md)：软件包、systemd 单元与设备镜像。
 - [internal/hostops/AGENTS.md](internal/hostops/AGENTS.md)：Host Agent 的 root 一侧，适用于 `.golangci.yml` 中 `host-agent` 规则列出的全部包。
 - [internal/files/AGENTS.md](internal/files/AGENTS.md)：文件服务与文件代理的客户端。[internal/appstore/AGENTS.md](internal/appstore/AGENTS.md)：应用中心与容器代理。

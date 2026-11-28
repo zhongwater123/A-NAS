@@ -7,11 +7,15 @@ import { useEditor } from "../../app/editor";
 import { useSongStructure, useTimeline } from "../../app/features";
 import { useNav } from "../../app/nav";
 import { useFollowSelection } from "../../app/player";
+import { useShortcuts } from "../../app/shortcuts";
 import { type CutMode, cutModeOf, isMaking, statusOf } from "../../lib/pages";
+import { clock } from "../../lib/time";
 import { ActionLock } from "../../ui/lock";
 import { messages } from "../../ui/messages";
 import { Slot } from "../../ui/Slot";
 import styles from "../layout.module.css";
+import { ThisShot } from "./ThisShot";
+import { UndoButton } from "./UndoButton";
 
 // The film page (M5–M9): top bar, player, inspector and tracks. The layout,
 // the shared state, the 生成中 tracks and the folding inspector are the
@@ -37,30 +41,13 @@ function Film({ work }: { work: Project }) {
   const status = statusOf(mode);
   const label = status && messages.status[status];
 
-  // Ctrl+Z (⌘Z) undoes, from anywhere on the page but a text field; the
-  // shortcut goes with the page (页面级).
+  // Ctrl+Z (⌘Z) undoes (app/shortcuts.ts).
   const page = useRef<HTMLDivElement>(null);
-  const latest = useRef(editor);
-  useEffect(() => {
-    latest.current = editor;
+  useShortcuts(page, {
+    undo: () => {
+      if (editor.canUndo) void editor.undo();
+    },
   });
-  useEffect(() => {
-    const element = page.current;
-    if (!element) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      const typing =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement;
-      const undo = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z";
-      if (typing || !undo) return;
-      event.preventDefault();
-      if (latest.current.canUndo) void latest.current.undo();
-    };
-    element.addEventListener("keydown", onKeyDown);
-    return () => element.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   return (
     <ActionLock.Provider value={editor.locked}>
@@ -72,7 +59,7 @@ function Film({ work }: { work: Project }) {
           <h1>{work.name}</h1>
           {label && <span className={styles.status}>{label}</span>}
           <span className={styles.spacer} />
-          <Slot id="M6-5" />
+          <UndoButton workId={work.id} />
           <Slot id="M9-1" />
           <Slot id="M9-3" />
         </header>
@@ -92,7 +79,7 @@ function Film({ work }: { work: Project }) {
             </button>
           </div>
           <aside className={styles.inspector} data-open={inspectorOpen} aria-label={messages.inspector}>
-            <Inspector mode={mode} />
+            <Inspector mode={mode} workId={work.id} />
           </aside>
           {mode === "exporting" && (
             <div className={styles.overlay}>
@@ -105,8 +92,6 @@ function Film({ work }: { work: Project }) {
     </ActionLock.Provider>
   );
 }
-
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 function Center({ mode }: { mode: CutMode }) {
   if (mode === "generating") return <Slot id="M5-1" />;
@@ -126,10 +111,10 @@ function Clock() {
 
 // The inspector shows 这一镜 while a shot is selected, the assistant
 // otherwise, and the settings read only while the film is being made.
-function Inspector({ mode }: { mode: CutMode }) {
+function Inspector({ mode, workId }: { mode: CutMode; workId: string }) {
   const selected = useCut((state) => state.selectedSlot);
   if (isMaking(mode)) return <Slot id="M5-2" />;
-  if (selected !== null) return <Slot id="M7">{messages.shot(selected)}</Slot>;
+  if (selected !== null) return <ThisShot workId={workId} slot={selected} />;
   return <Slot id="M8" />;
 }
 
