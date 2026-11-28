@@ -2,12 +2,12 @@ import { PanelRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { Project } from "../../api/client";
-import { CutProvider, createCutStore, readOnly, useCut, useCutStore } from "../../app/cutStore";
+import { CutProvider, createCutStore, useCut, useCutStore } from "../../app/cutStore";
 import { useEditor } from "../../app/editor";
 import { useSongStructure, useTimeline } from "../../app/features";
 import { useNav } from "../../app/nav";
-import { useFollowSelection, usePlayer } from "../../app/player";
-import { type CutMode, cutModeOf, statusLabel } from "../../lib/pages";
+import { useFollowSelection } from "../../app/player";
+import { type CutMode, cutModeOf, isMaking, statusLabel } from "../../lib/pages";
 import { ActionLock } from "../../ui/lock";
 import { messages } from "../../ui/messages";
 import { Slot } from "../../ui/Slot";
@@ -30,9 +30,8 @@ export function CutPage({ work }: { work: Project }) {
 function Film({ work }: { work: Project }) {
   const nav = useNav();
   const mode = useCut((state) => state.mode);
-  const locked = useCut(readOnly);
   const editor = useEditor(work.id);
-  useTimeline(work.id, mode !== "generating" && mode !== "failed");
+  useTimeline(work.id, !isMaking(mode));
   useFollowSelection(work.id);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const label = statusLabel(mode);
@@ -59,7 +58,7 @@ function Film({ work }: { work: Project }) {
   }, []);
 
   return (
-    <ActionLock.Provider value={locked}>
+    <ActionLock.Provider value={editor.locked}>
       <div className={styles.cut} ref={page}>
         <header className={styles.topBar}>
           <button type="button" className={styles.back} onClick={nav.toStart}>
@@ -74,7 +73,7 @@ function Film({ work }: { work: Project }) {
         </header>
         <div className={styles.cutMain}>
           <div className={styles.center}>
-            <Center mode={mode} workId={work.id} />
+            <Center mode={mode} />
           </div>
           <div className={styles.rail}>
             <button
@@ -104,22 +103,27 @@ function Film({ work }: { work: Project }) {
 
 const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
-function Center({ mode, workId }: { mode: CutMode; workId: string }) {
-  const { playhead } = usePlayer(workId);
+function Center({ mode }: { mode: CutMode }) {
   if (mode === "generating") return <Slot id="M5-1" />;
   if (mode === "failed") return <Slot id="M5-3" />;
   return (
     <Slot id="M6-1">
-      <output aria-label={messages.playhead}>{clock(playhead)}</output>
+      <Clock />
     </Slot>
   );
+}
+
+// Clock redraws when the shown second changes, not on every frame of the playhead.
+function Clock() {
+  const text = useCut((state) => clock(state.playhead));
+  return <output aria-label={messages.playhead}>{text}</output>;
 }
 
 // The inspector shows 这一镜 while a shot is selected, the assistant
 // otherwise, and the settings read only while the film is being made.
 function Inspector({ mode }: { mode: CutMode }) {
   const selected = useCut((state) => state.selectedSlot);
-  if (mode === "generating" || mode === "failed") return <Slot id="M5-2" />;
+  if (isMaking(mode)) return <Slot id="M5-2" />;
   if (selected !== null) return <Slot id="M7">{messages.shot(selected)}</Slot>;
   return <Slot id="M8" />;
 }
@@ -128,7 +132,7 @@ function Inspector({ mode }: { mode: CutMode }) {
 // parts are drawn from the song, the music shows, and the shots say they
 // come once it is made (M5-1).
 function Tracks({ mode, workId }: { mode: CutMode; workId: string }) {
-  const making = mode === "generating" || mode === "failed";
+  const making = isMaking(mode);
   return (
     <div className={styles.tracks}>
       <Slot id="M6-3">
@@ -142,7 +146,7 @@ function Tracks({ mode, workId }: { mode: CutMode; workId: string }) {
 
 function Parts({ workId, making }: { workId: string; making: boolean }) {
   const store = useCutStore();
-  const song = useSongStructure(workId);
+  const song = useSongStructure(workId, making);
   const timeline = useTimeline(workId, false);
   const parts = (making ? song.data?.parts : timeline.data?.parts) ?? [];
   return (

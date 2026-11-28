@@ -2,7 +2,7 @@
 // as the export's failure with 重试 (M9-4). Radix's Toast keeps them
 // announced and keyboard reachable.
 import { Toast } from "radix-ui";
-import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useState } from "react";
 
 import styles from "./venus.module.css";
 
@@ -25,9 +25,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((all) => [...all, { id: next, text, action }]);
   }, []);
   const drop = (id: number) => setToasts((all) => all.filter((toast) => toast.id !== id));
-  const value = useMemo(() => show, [show]);
   return (
-    <ToastContext.Provider value={value}>
+    <ToastContext.Provider value={show}>
       <Toast.Provider swipeDirection="down">
         {children}
         {toasts.map((toast) => (
