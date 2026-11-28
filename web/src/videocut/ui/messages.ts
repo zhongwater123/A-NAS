@@ -1,0 +1,43 @@
+// Every sentence Venus shows, by key (PRD appendix A): feature code names a
+// key and never writes its own Chinese. Change a sentence here only. The
+// skeleton fills what it says itself; each feature adds its own as it lands.
+export const messages = {
+  title: "剪辑中心",
+  back: "返回",
+  inspector: "检查器",
+  playhead: "播放头",
+  shot: (slot: number) => `镜头 ${slot}`,
+  startGenerating: "开始生成",
+  download: "下载",
+  workGone: "作品已不存在",
+  windowTooSmall: "请放大窗口",
+  noWorks: "还没有作品",
+  shotsAfterGenerating: "生成完成后出现",
+  queued: "排队中 · 上一条完成后自动开始",
+  uploadInterrupted: "上传中断，重新选择文件继续",
+  slow: "比预计慢，仍在处理",
+  undone: "已撤销",
+  pickShotFirst: "先在时间轴上点一个镜头",
+  busy: "上一步还在处理",
+  readOnly: "导出中，暂不能修改",
+  exported: "导出完成，正在下载",
+  downloadBlocked: "下载被浏览器拦截，点此下载",
+  exportFailed: "导出失败",
+  retry: "重试",
+  tooManyRetries: "多次失败，请联系我们",
+  skipped: (count: number) => `${count} 段无法分析，已跳过`,
+  generated: "成片已生成",
+  done: {
+    replace: (slot: number) => `已替换镜头 ${slot}`,
+    remove: (slot: number) => `已删除镜头 ${slot}`,
+    set_in_point: (slot: number) => `已调整镜头 ${slot} 的入点`,
+    reorder_parts: () => "已调整段落顺序",
+    place: (slot: number) => `已放入镜头 ${slot}`,
+  },
+  failure: {
+    network: "网络中断",
+    corrupt_file: "文件损坏",
+    busy: "服务繁忙",
+    too_few_assets: "素材不足",
+  },
+} as const;

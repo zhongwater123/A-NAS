@@ -1,0 +1,255 @@
+/* The three pages' layouts. They follow the window's own size, not the
+   screen's (container queries on .root, docs/specs/venus.md#窗口大小): the
+   desktop's windows are dragged to any size. The spec's sizes are the
+   window's; the content the queries measure is 2px narrower (the frame) and
+   51px lower (the frame and the title bar), so a window of 1200 × 800
+   measures 1198 × 749 here. */
+.page {
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr);
+  height: 100%;
+}
+
+.topBar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--vn-line);
+}
+
+.topBar h1 {
+  margin: 0;
+  font-size: var(--vn-text-14);
+  font-weight: 600;
+}
+
+.status {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgba(242, 134, 43, 0.16);
+  color: var(--vn-brand);
+  font-size: var(--vn-text-12);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.back {
+  border: 0;
+  background: none;
+  color: var(--vn-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Start: the import panel in the middle, the cards below. */
+.start {
+  display: grid;
+  grid-template-rows: minmax(160px, 1fr) auto;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  overflow: auto;
+}
+
+.row {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Prepare: by day on the left, the settings on the right. */
+.prepare {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
+  min-height: 0;
+}
+
+.prepareBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.column {
+  display: grid;
+  grid-auto-rows: min-content;
+  gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Film: the player takes what the tracks and the inspector leave, and the
+   page never scrolls. */
+.cut {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+.cutMain {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 0;
+}
+
+.center {
+  display: grid;
+  min-height: 0;
+  padding: var(--space-3);
+}
+
+.inspector {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  padding: var(--space-3);
+  border-left: 1px solid var(--vn-line);
+  background: var(--vn-surface);
+}
+
+.rail {
+  display: none;
+}
+
+.tracks {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--vn-line);
+}
+
+.parts {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.part {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--vn-line);
+  border-radius: var(--radius-xs);
+  background: var(--vn-raised);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.shots {
+  display: flex;
+  width: 100%;
+  gap: var(--space-1);
+  min-height: 96px;
+  overflow-x: auto;
+}
+
+.shot {
+  flex: 0 0 72px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-xs);
+  background: var(--vn-raised);
+  color: inherit;
+  font: inherit;
+}
+
+.shot[aria-pressed="true"] {
+  border-color: var(--vn-brand);
+}
+
+.overlay {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  z-index: 10;
+  transform: translateX(-50%);
+}
+
+.tooSmall {
+  display: none;
+  place-items: center;
+  height: 100%;
+  color: var(--vn-muted);
+}
+
+.content {
+  height: 100%;
+}
+
+/* 1024–1199: the inspector folds into a column of icons and opens over the
+   player's right side, moving nothing. */
+@container venus (max-width: 1197px) {
+  .cutMain {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+  .rail {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    padding: var(--space-2);
+    border-left: 1px solid var(--vn-line);
+  }
+  .inspector {
+    position: absolute;
+    top: 0;
+    right: 44px;
+    bottom: 0;
+    z-index: 5;
+    width: 320px;
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.35);
+  }
+  .inspector:not([data-open="true"]) {
+    display: none;
+  }
+}
+
+/* 900–1023: the parts join the tracks' tool row. */
+@container venus (max-width: 1021px) {
+  .parts {
+    font-size: var(--vn-text-11);
+  }
+  .prepareBody {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+/* Under 800 high the tracks give way first. */
+@container venus (max-height: 748px) {
+  .shots {
+    min-height: 72px;
+  }
+}
+
+/* Under 900 the top bar is compact; the shot track scrolls inside itself. */
+@container venus (max-width: 897px) {
+  .topBar {
+    gap: var(--space-2);
+  }
+  .shot {
+    flex-basis: 56px;
+  }
+}
+
+/* Under 720 the window says only to make it larger. */
+@container venus (max-width: 717px) {
+  .content {
+    display: none;
+  }
+  .tooSmall {
+    display: grid;
+  }
+}

@@ -1,0 +1,167 @@
+/* Venus's look (PRD M10-3, from the prototype v3's :root): its brand orange,
+   the magenta of what cannot be undone, and a type scale of 11 to 16. The
+   variables are set on the window's root (.root), so they stay in it. */
+.root {
+  --vn-brand: #f2862b;
+  --vn-danger: #e23d6e;
+  --vn-bg: #14161a;
+  --vn-surface: #1d2026;
+  --vn-raised: #262a31;
+  --vn-line: rgba(255, 255, 255, 0.08);
+  --vn-text: #eef0f3;
+  --vn-muted: #9aa1ab;
+  --vn-text-11: 11px;
+  --vn-text-12: 12px;
+  --vn-text-13: 13px;
+  --vn-text-14: 14px;
+  --vn-text-16: 16px;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--vn-bg);
+  color: var(--vn-text);
+  font-size: var(--vn-text-13);
+  container-type: size;
+  container-name: venus;
+}
+
+.slot {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  min-height: 48px;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--vn-line);
+  border-radius: var(--radius-sm);
+  color: var(--vn-muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.slotId {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-2);
+  font-size: var(--vn-text-11);
+  letter-spacing: 0.04em;
+}
+
+.empty {
+  display: grid;
+  gap: var(--space-3);
+  place-items: center;
+  padding: var(--space-6);
+  color: var(--vn-muted);
+}
+
+.action {
+  min-width: 72px;
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--vn-line);
+  border-radius: var(--radius-sm);
+  background: var(--vn-raised);
+  color: var(--vn-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.danger {
+  border-color: transparent;
+  background: var(--vn-danger);
+  color: #fff;
+}
+
+.toasts {
+  position: absolute;
+  bottom: var(--space-6);
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform: translateX(-50%);
+}
+
+.toast {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.82);
+  color: #fff;
+}
+
+.toastAction {
+  border: 0;
+  background: none;
+  color: var(--vn-brand);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The banner overlays the page: absolute, so nothing under it moves. */
+.banners {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  z-index: 20;
+  display: grid;
+  gap: var(--space-1);
+  transform: translateX(-50%);
+}
+
+.banner {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--vn-raised);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.banner button {
+  border: 0;
+  background: none;
+  color: var(--vn-brand);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dialogBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.dialog {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 41;
+  display: grid;
+  gap: var(--space-3);
+  width: min(440px, calc(100% - 32px));
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--vn-surface);
+  color: var(--vn-text);
+  transform: translate(-50%, -50%);
+}
+
+.dialogActions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}

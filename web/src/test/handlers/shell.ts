@@ -70,6 +70,8 @@ export function shellHandlers(options: ShellOptions = {}) {
         ? response(204).empty()
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
+    // 剪辑中心's start page: no projects, as a member who never used it.
+    http.get("/api/v1/videocut/projects", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/workspace", ({ response }) =>
       options.workspace
         ? response(200).json(options.workspace)
