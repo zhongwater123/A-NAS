@@ -15,6 +15,7 @@ import {
   type LocalFile,
   listCandidates,
   listImported,
+  type Project,
   resumeUpload,
   retry,
   updateSelection,
@@ -32,8 +33,13 @@ export const useTimeline = (workId: string, enabled = true) =>
   useQuery({ queryKey: keys.timeline(workId), queryFn: ({ signal }) => getTimeline(workId, signal), enabled });
 
 /** The parts and slots the song makes, before the timeline is (the tracks of 生成中). */
-export const useSongStructure = (workId: string) =>
-  useQuery({ queryKey: keys.song(workId), queryFn: ({ signal }) => getSongStructure(workId, signal), retry: false });
+export const useSongStructure = (workId: string, enabled = true) =>
+  useQuery({
+    queryKey: keys.song(workId),
+    queryFn: ({ signal }) => getSongStructure(workId, signal),
+    retry: false,
+    enabled,
+  });
 
 /** A slot's candidates, at most six (M7-1). */
 export const useCandidates = (workId: string, slot: number | null) =>
@@ -47,13 +53,18 @@ export const useCandidates = (workId: string, slot: number | null) =>
 export const useImported = (workId: string) =>
   useQuery({ queryKey: keys.imported(workId), queryFn: ({ signal }) => listImported(workId, signal) });
 
+// useWorkMutation is an operation that answers with the project: the
+// answer goes into the cache, so the shell moves on without the next read.
+function useWorkMutation<T = void>(call: (input: T) => Promise<Project>) {
+  const setWork = useSetWork();
+  return useMutation({ mutationFn: call, onSuccess: setWork });
+}
+
 /** 勾选 and 星标 (M3-3), saved as they change. */
 export function useSelection(workId: string) {
-  const setWork = useSetWork();
-  const mutation = useMutation({
-    mutationFn: (files: { fileId: string; selected?: boolean; starred?: boolean }[]) => updateSelection(workId, files),
-    onSuccess: setWork,
-  });
+  const mutation = useWorkMutation((files: { fileId: string; selected?: boolean; starred?: boolean }[]) =>
+    updateSelection(workId, files),
+  );
   return {
     select: (fileId: string, selected: boolean) => mutation.mutateAsync([{ fileId, selected }]),
     star: (fileId: string, starred: boolean) => mutation.mutateAsync([{ fileId, starred }]),
@@ -63,19 +74,16 @@ export function useSelection(workId: string) {
 
 /** The song, aspect and style (M4), saved as they change. */
 export function useSettings(workId: string) {
-  const setWork = useSetWork();
-  const mutation = useMutation({
-    mutationFn: (change: { aspect?: string; style?: string; builtinSong?: string }) => updateSettings(workId, change),
-    onSuccess: setWork,
-  });
+  const mutation = useWorkMutation((change: { aspect?: string; style?: string; builtinSong?: string }) =>
+    updateSettings(workId, change),
+  );
   return { set: mutation.mutateAsync, saving: mutation.isPending };
 }
 
 /** 开始生成 (M4-5) and retrying a failed project (M5-3). */
 export function useGenerate(workId: string) {
-  const setWork = useSetWork();
-  const start = useMutation({ mutationFn: () => generate(workId), onSuccess: setWork });
-  const again = useMutation({ mutationFn: () => retry(workId), onSuccess: setWork });
+  const start = useWorkMutation(() => generate(workId));
+  const again = useWorkMutation(() => retry(workId));
   return { start: start.mutateAsync, retry: again.mutateAsync, starting: start.isPending || again.isPending };
 }
 
@@ -85,8 +93,7 @@ export function useGenerate(workId: string) {
  * feature's; the skeleton has going on after an interruption.
  */
 export function useUpload(workId: string) {
-  const setWork = useSetWork();
-  const resume = useMutation({ mutationFn: () => resumeUpload(workId), onSuccess: setWork });
+  const resume = useWorkMutation(() => resumeUpload(workId));
   return { resume: resume.mutateAsync };
 }
 

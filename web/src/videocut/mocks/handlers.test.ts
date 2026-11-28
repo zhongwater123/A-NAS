@@ -6,31 +6,33 @@ import { http, server } from "../../test/server";
 import { SAMPLE_ID, VenusFake } from "./fake";
 import { videocutHandlers } from "./handlers";
 
-// The operations the desktop's own handlers answer (test/handlers/shell.ts).
-const DESKTOP = new Set(["GET /api/v1/videocut", "GET /api/v1/videocut/notices"]);
 const METHODS = new Set(["get", "put", "post", "patch", "delete", "head", "options", "trace"]);
 
-// contractOperations reads the bundled contract for VideoCut's operations; tests run in web/.
-function contractOperations(): string[] {
-  const bundle = parse(readFileSync("../api/openapi.bundle.yaml", "utf8")) as { paths: Record<string, object> };
+// notServed reads the bundled contract (tests run in web/) for VideoCut's
+// operations that still declare 501: the ones VideoCut does not serve yet,
+// which the stand-ins answer.
+function notServed(): string[] {
+  const bundle = parse(readFileSync("../api/openapi.bundle.yaml", "utf8")) as {
+    paths: Record<string, Record<string, { responses?: Record<string, unknown> }>>;
+  };
   return Object.entries(bundle.paths)
-    .filter(([path]) => path === "/api/v1/videocut" || path.startsWith("/api/v1/videocut/"))
+    .filter(([path]) => path.startsWith("/api/v1/videocut/"))
     .flatMap(([path, item]) =>
-      Object.keys(item)
-        .filter((key) => METHODS.has(key))
-        .map((method) => `${method.toUpperCase()} ${path}`),
+      Object.entries(item)
+        .filter(([method, operation]) => METHODS.has(method) && operation.responses?.["501"] !== undefined)
+        .map(([method]) => `${method.toUpperCase()} ${path}`),
     );
 }
 
 describe("Venus's stand-ins", () => {
-  it("answer every operation of VideoCut's contract", () => {
+  it("answer every operation VideoCut does not serve yet, and no other", () => {
     const served = videocutHandlers(new VenusFake(), http).map(({ info }) => {
       const path = String(info.path)
         .replace(window.location.origin, "")
         .replace(/:(\w+)/g, "{$1}");
       return `${String(info.method)} ${path}`;
     });
-    const wanted = contractOperations().filter((operation) => !DESKTOP.has(operation));
+    const wanted = notServed();
     expect(wanted).toContain("POST /api/v1/videocut/projects/{projectId}/timeline/edits");
     expect(served.sort()).toEqual(wanted.sort());
   });

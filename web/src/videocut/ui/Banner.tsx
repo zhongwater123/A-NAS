@@ -24,7 +24,12 @@ export function BannerProvider({ children }: { children: ReactNode }) {
   const show = useCallback((item: BannerItem) => {
     setItems((all) => [...all.filter((other) => other.key !== item.key), item]);
   }, []);
-  const hide = useCallback((key: string) => setItems((all) => all.filter((item) => item.key !== key)), []);
+  // Hiding what is not shown leaves the list as it is, so nothing redraws.
+  const hide = useCallback(
+    (key: string) =>
+      setItems((all) => (all.some((item) => item.key === key) ? all.filter((item) => item.key !== key) : all)),
+    [],
+  );
   const value = useMemo(() => ({ show, hide }), [show, hide]);
   return (
     <BannerContext.Provider value={value}>

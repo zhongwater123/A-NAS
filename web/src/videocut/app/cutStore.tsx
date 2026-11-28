@@ -38,6 +38,8 @@ export function createCutStore(initial: Partial<CutState> = {}): CutStore {
   return {
     get: () => state,
     set: (change) => {
+      const keys = Object.keys(change) as (keyof CutState)[];
+      if (keys.every((key) => Object.is(state[key], change[key]))) return;
       state = { ...state, ...change };
       for (const listener of listeners) listener();
     },

@@ -9,34 +9,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { exportFilm, filmURL, type Project } from "../api/client";
+import { hasFilm } from "../lib/pages";
 import { useBanner } from "../ui/Banner";
 import { messages } from "../ui/messages";
 import { useToast } from "../ui/Toast";
+import { toldList } from "./told";
 import { keys } from "./works";
 
 const making = new Set<Project["state"]>(["uploading", "queued", "generating"]);
-const TOLD = "videocut-told";
 const BANNERS = ["upload", "queue", "download"];
-
-function toldBefore(key: string): boolean {
-  try {
-    return (JSON.parse(localStorage.getItem(TOLD) ?? "[]") as string[]).includes(key);
-  } catch {
-    return false;
-  }
-}
-
-// tell answers whether key is news on this device, and remembers it.
-function tell(key: string): boolean {
-  if (toldBefore(key)) return false;
-  try {
-    const told = JSON.parse(localStorage.getItem(TOLD) ?? "[]") as string[];
-    localStorage.setItem(TOLD, JSON.stringify([...told, key].slice(-200)));
-  } catch {
-    // Without storage it may be told again on the next visit.
-  }
-  return true;
-}
+const { tell } = toldList("videocut-told");
 
 // download starts the exported film's download. A browser may block it
 // without saying so, so the banner keeps a link to start it by hand.
@@ -73,7 +55,7 @@ export function useWorkEvents(work: Project | undefined) {
     else banner.hide("queue");
 
     if (last && making.has(last.state) && work.state === "ready") toast(messages.generated);
-    if (work.progress.skipped > 0 && ["ready", "exporting", "exported"].includes(work.state)) {
+    if (work.progress.skipped > 0 && hasFilm(work.state)) {
       if (tell(`skipped:${work.id}`)) toast(messages.skipped(work.progress.skipped));
     }
 

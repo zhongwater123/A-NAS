@@ -4,30 +4,14 @@
 import { useEffect, useState } from "react";
 
 import { listNotices, type VideoCutNotice } from "../api/client";
+import { toldList } from "./told";
 
 export type { VideoCutNotice };
 
 const POLL_MS = 60_000;
-const SEEN = "videocut-notices-seen";
+const seen = toldList("videocut-notices-seen");
 
 const key = (notice: VideoCutNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
-
-function seen(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(SEEN) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function remember(keys: string[]) {
-  try {
-    const all = [...seen(), ...keys].slice(-200);
-    localStorage.setItem(SEEN, JSON.stringify(all));
-  } catch {
-    // Without storage a notice may show again on the next visit.
-  }
-}
 
 // useNotices is the notices not told on this device yet, and dismiss, which
 // marks them told.
@@ -49,7 +33,7 @@ export function useNotices(): { notices: VideoCutNotice[]; dismiss: () => void }
       listNotices(asking.signal).then(
         (items) => {
           if (asking !== latest) return;
-          const told = seen();
+          const told = seen.read();
           setNotices(items.filter((notice) => !told.has(key(notice))));
         },
         () => undefined,
@@ -67,7 +51,7 @@ export function useNotices(): { notices: VideoCutNotice[]; dismiss: () => void }
   }, []);
 
   const dismiss = () => {
-    remember(notices.map(key));
+    seen.remember(notices.map(key));
     setNotices([]);
   };
   return { notices, dismiss };
