@@ -12,7 +12,11 @@ import { WINDOW_ID } from "../../desktop/windowSnapshot";
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLInputElement ||
   target instanceof HTMLTextAreaElement ||
+  target instanceof HTMLSelectElement ||
   (target instanceof HTMLElement && target.isContentEditable);
+
+// A dialog open in the window (a confirmation, say) has the keys: the film behind it is not changed.
+const dialogOpen = (scope: ParentNode) => scope.querySelector('[role="dialog"], [role="alertdialog"]') !== null;
 
 export function useShortcuts(page: RefObject<HTMLElement | null>, keys: { undo: () => void }) {
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
@@ -20,7 +24,7 @@ export function useShortcuts(page: RefObject<HTMLElement | null>, keys: { undo: 
     const frame = page.current?.closest(`[${WINDOW_ID}]`);
     // Inside a desktop window, only the focused one; a page on its own, as in a test, always.
     if (frame && focusedWindow()?.id !== frame.getAttribute(WINDOW_ID)) return;
-    if (typing(event.target)) return;
+    if (typing(event.target) || dialogOpen(frame ?? document)) return;
     event.preventDefault();
     keys.undo();
   });

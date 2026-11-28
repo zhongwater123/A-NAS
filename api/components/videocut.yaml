@@ -223,13 +223,13 @@ schemas:
   VideoCutShot:
     type: object
     additionalProperties: false
-    required: [slot, part, start, end, beats, beat, assetId, from, to, speed, anchor, fitted]
+    required: [slot, part, start, end, musicBeats, beat, assetId, from, to, speed, anchor, fitted]
     properties:
       slot: { type: integer, minimum: 1 }
       part: { type: integer, minimum: 1 }
       start: { type: number, minimum: 0, description: "Seconds into the film; the slot's." }
       end: { type: number, minimum: 0 }
-      beats: { type: integer, minimum: 1, maximum: 2, description: "拍数: the music's beats the slot takes." }
+      musicBeats: { type: integer, minimum: 1, maximum: 2, description: "拍数: how many beats of the music the slot takes; not to be confused with beat, the picture in it." }
       beat: { type: string, description: "The beat in the slot." }
       assetId: { type: string, description: "The video it comes from." }
       from: { type: number, minimum: 0, description: "Seconds into the video it plays from." }

@@ -16,6 +16,7 @@ export const cut = {
   candidates: "候选片段",
   candidate: (n: number) => `候选 ${n}`,
   noCandidates: "这一镜没有可替换的片段",
+  candidatesFailed: "没能读取候选片段",
   beats: (n: number) => `${n} 拍`,
   exported: "导出完成，正在下载",
   downloadFallback: "没有开始下载？点此下载",

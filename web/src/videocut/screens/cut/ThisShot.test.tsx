@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { http, server } from "../../../test/server";
@@ -76,6 +77,7 @@ describe("这一镜: replacing a shot with a candidate (M7-1)", () => {
       fake.export(workId, "e");
     });
     expect(await screen.findByText("导出中")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "这一镜" })).getByText("导出中，暂不能修改")).toBeInTheDocument();
     for (const candidate of candidatesIn(panel)) expect(candidate).toBeDisabled();
     expect(screen.getByRole("region", { name: "M6-1" })).toBeInTheDocument();
   });
@@ -96,6 +98,43 @@ describe("这一镜: replacing a shot with a candidate (M7-1)", () => {
       ),
     );
     const panel = await openShot(4);
+    expect(await within(panel).findByText("这一镜没有可替换的片段")).toBeInTheDocument();
+  });
+
+  it("sends nothing on Ctrl+Z with nothing to undo, or while a dialog is open", async () => {
+    let undos = 0;
+    server.events.on("request:start", ({ request }) => {
+      if (request.url.endsWith("/timeline/undo")) undos++;
+    });
+    const panel = await openShot(3);
+    await waitFor(() => expect(candidatesIn(panel)).toHaveLength(6));
+    await userEvent.keyboard("{Control>}z{/Control}");
+    expect(undos).toBe(0);
+    await userEvent.click(candidatesIn(panel)[0]);
+    expect(await screen.findByText("已替换镜头 3")).toBeInTheDocument();
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.append(dialog);
+    try {
+      await userEvent.keyboard("{Control>}z{/Control}");
+      await userEvent.keyboard("{Control>}{Shift>}z{/Shift}{/Control}");
+    } finally {
+      dialog.remove();
+    }
+    expect(undos).toBe(0);
+  });
+
+  it("says when the candidates could not be read, and reads them again", async () => {
+    let fail = true;
+    server.use(
+      http.get("/api/v1/videocut/projects/{projectId}/slots/{slot}/candidates", ({ params, response }) =>
+        fail ? response.untyped(HttpResponse.error()) : response(200).json({ slot: Number(params.slot), items: [] }),
+      ),
+    );
+    const panel = await openShot(4);
+    expect(await within(panel).findByText("没能读取候选片段", {}, { timeout: 5_000 })).toBeInTheDocument();
+    fail = false;
+    await userEvent.click(within(panel).getByRole("button", { name: "重试" }));
     expect(await within(panel).findByText("这一镜没有可替换的片段")).toBeInTheDocument();
   });
 });

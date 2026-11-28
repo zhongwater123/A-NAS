@@ -94,6 +94,8 @@ interface Stored {
   assets: VideoCutProjectAsset[];
   // The beats replace took out of each slot, latest first: candidates again.
   replaced?: Map<number, VideoCutCandidate[]>;
+  // replaced as it was before the last edit, for its undo.
+  undoReplaced?: Map<number, VideoCutCandidate[]>;
   // Retries made since the project last failed, kept once the failure clears.
   retries?: number;
 }
@@ -544,7 +546,7 @@ export class VenusFake {
           part: part.index,
           start: span.start,
           end: span.end,
-          beats: part.label === "副歌" ? 1 : 2,
+          musicBeats: part.label === "副歌" ? 1 : 2,
           beat: `${assetId}/${span.slot}`,
           assetId,
           from: 0,
@@ -591,6 +593,7 @@ export class VenusFake {
       if (!shot) throw new FakeError(422, "edit_refused");
       return shot;
     };
+    const replacedBefore = new Map(stored.replaced);
     let changed: number[];
     switch (edit.kind) {
       case "replace": {
@@ -609,6 +612,7 @@ export class VenusFake {
           assetId: picked?.assetId ?? edit.beat.split("/")[0],
           from: picked?.from ?? 0,
           to: picked?.to ?? SLOT_SECONDS,
+          fitted: picked?.fitted ?? false,
           anchor: true,
         });
         changed = [edit.slot];
@@ -643,9 +647,12 @@ export class VenusFake {
       }
       case "reorder_parts":
         changed = reorder(before.parts, shots, edit.from, edit.to);
+        // The shots moved to other slots: what each slot gave up is no longer its own.
+        stored.replaced = undefined;
         break;
     }
     stored.undo = before;
+    stored.undoReplaced = replacedBefore;
     stored.timeline = { ...before, revision: before.revision + 1, shots, canUndo: true, changedSlots: changed };
     if (stored.project.state === "exported") stored.project.state = "ready";
     this.touch(stored);
@@ -661,6 +668,8 @@ export class VenusFake {
     const changed = now.changedSlots;
     stored.timeline = { ...stored.undo, revision: now.revision + 1, canUndo: false, changedSlots: changed };
     stored.undo = undefined;
+    stored.replaced = stored.undoReplaced;
+    stored.undoReplaced = undefined;
     // Changed again after an export: 已完成, as an edit leaves it.
     if (stored.project.state === "exported") stored.project.state = "ready";
     this.touch(stored);
