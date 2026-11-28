@@ -15,6 +15,7 @@ import (
 	"github.com/zhongwater123/A-NAS/internal/accountsapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantapi"
 	"github.com/zhongwater123/A-NAS/internal/assistantkeyapi"
+	"github.com/zhongwater123/A-NAS/internal/device"
 	"github.com/zhongwater123/A-NAS/internal/filepreview"
 	"github.com/zhongwater123/A-NAS/internal/files"
 	"github.com/zhongwater123/A-NAS/internal/hoststate"
@@ -115,6 +116,9 @@ type ProductDependencies struct {
 	// Personalization keeps the device-wide 个性化 settings and wallpaper;
 	// nil answers personalization_unavailable.
 	Personalization *personalization.Store
+	// Device keeps the e-ink screens' runtime state and decides refreshes
+	// (ADR 0041); nil answers device_unavailable.
+	Device *device.Store
 	// FilesChanged, when set, is told after a Web upload, move, copy, delete
 	// or restore changed a space, so indexes over ordinary files (the media
 	// center) catch up without waiting for their periodic scan. The context

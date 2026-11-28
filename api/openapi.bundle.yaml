@@ -388,6 +388,217 @@ paths:
           description: Revoked
         '404':
           $ref: '#/components/responses/ProductError'
+  /api/v1/device-tokens:
+    get:
+      operationId: listDeviceTokens
+      x-anas-posture: admin
+      description: The family's e-ink screens (ADR 0041), newest first. A screen is not bound to any account, so only administrators see this list. Tokens nobody used for 90 days are gone.
+      responses:
+        '200':
+          description: The family's device tokens
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTokenList'
+        '403':
+          $ref: '#/components/responses/ProductError'
+    post:
+      operationId: createDeviceToken
+      x-anas-posture: admin
+      description: Register an e-ink screen for the whole family. The token in the answer is shown once. A family holds at most 10 screens (409 device_token_limit); a name of 1–40 characters and a poll interval of 15–3600 seconds are required (422 validation_failed).
+      parameters:
+        - $ref: '#/components/parameters/CSRFToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceTokenRequest'
+      responses:
+        '201':
+          description: The new token and its value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTokenCreated'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '409':
+          $ref: '#/components/responses/ProductError'
+        '422':
+          $ref: '#/components/responses/ProductError'
+  /api/v1/device-tokens/{tokenId}:
+    delete:
+      operationId: revokeDeviceToken
+      x-anas-posture: admin
+      description: Unregister one screen; its later calls answer 401.
+      parameters:
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/CSRFToken'
+      responses:
+        '204':
+          description: Revoked
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '404':
+          $ref: '#/components/responses/ProductError'
+  /api/device/next:
+    get:
+      operationId: getDeviceNext
+      summary: Ask the e-ink screen what to do next
+      security:
+        - bearerAuth: []
+      x-anas-posture: device
+      description: The screen polls this with its device token as a bearer token (ADR 0041). It reports its battery, radio and power state in query parameters, and the answer tells it whether to fetch /screen.bin, in how many seconds to ask again, and what it now shows. A browser's Origin or a request not naming this device in Host is 403 forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens 429 too_many_attempts.
+      parameters:
+        - name: bat
+          in: query
+          schema:
+            type: integer
+          description: Battery percent.
+        - name: mv
+          in: query
+          schema:
+            type: integer
+          description: Battery millivolts.
+        - name: chg
+          in: query
+          schema:
+            type: boolean
+          description: Charging.
+        - name: usb
+          in: query
+          schema:
+            type: boolean
+          description: On USB power.
+        - name: rssi
+          in: query
+          schema:
+            type: integer
+          description: Wi-Fi signal strength.
+        - name: awake_ms
+          in: query
+          schema:
+            type: integer
+          description: How long the screen was awake.
+        - name: fw
+          in: query
+          schema:
+            type: string
+          description: Firmware version.
+        - name: wake
+          in: query
+          schema:
+            type: string
+          description: What woke the screen.
+        - name: reset
+          in: query
+          schema:
+            type: string
+          description: Reset reason.
+        - name: fail
+          in: query
+          schema:
+            type: string
+          description: Failure reason.
+        - name: shown
+          in: query
+          schema:
+            type: boolean
+          description: Whether the screen shows a frame.
+        - name: dirty
+          in: query
+          schema:
+            type: boolean
+          description: The screen needs a catch-up refresh.
+        - name: force
+          in: query
+          schema:
+            type: boolean
+          description: A button press forces a refresh.
+        - name: partial
+          in: query
+          schema:
+            type: boolean
+          description: The screen supports partial refreshes.
+      responses:
+        '200':
+          description: What to do next
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceNextResponse'
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /screen.bin:
+    get:
+      operationId: getScreenBitmap
+      summary: Fetch the 800×480 1-bit screen frame
+      security:
+        - bearerAuth: []
+      x-anas-posture: device
+      description: The screen fetches the frame to draw after the answer names /screen.bin. 48000 bytes, one bit per pixel, most significant bit first; X-Content-Hash names the frame so the screen can compare it with the key it already shows (ADR 0041).
+      responses:
+        '200':
+          description: The 800×480 1-bit frame, 48000 bytes.
+          headers:
+            X-Content-Hash:
+              schema:
+                type: string
+              description: The frame's hash.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
+  /screen-bar.bin:
+    get:
+      operationId: getScreenBarBitmap
+      summary: Fetch the 592×80 bottom strip
+      security:
+        - bearerAuth: []
+      x-anas-posture: device
+      description: The bottom strip's 592×80 frame, 5920 bytes, one bit per pixel, most significant bit first, with X-Bar-Time naming when it was made (ADR 0041).
+      responses:
+        '200':
+          description: The 592×80 1-bit strip, 5920 bytes.
+          headers:
+            X-Bar-Time:
+              schema:
+                type: string
+                format: date-time
+              description: When the strip was made.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/ProductError'
+        '403':
+          $ref: '#/components/responses/ProductError'
+        '429':
+          $ref: '#/components/responses/ProductError'
+        '503':
+          $ref: '#/components/responses/ProductError'
   /api/v1/profiles:
     get:
       operationId: listProfiles
@@ -10182,7 +10393,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
+      description: A member's agent token (ADR 0040) or a family device token (ADR 0041), only on operations marked x-anas-posture agent or device.
   parameters:
     CSRFToken:
       name: X-CSRF-Token
@@ -11612,6 +11823,122 @@ components:
             at:
               type: string
               format: date-time
+    DeviceToken:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - name
+        - pollSeconds
+        - createdAt
+      description: One e-ink screen the family registered (ADR 0041); not bound to any account.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        pollSeconds:
+          type: integer
+          minimum: 15
+          maximum: 3600
+          description: How often the screen polls by day.
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: string
+          format: date-time
+          description: Updated at most every 5 minutes; absent until the screen's first call.
+    DeviceTokenList:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeviceToken'
+    DeviceTokenRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: 1–40 characters after trimming, without control characters.
+        pollSeconds:
+          type: integer
+          minimum: 15
+          maximum: 3600
+          default: 60
+          description: How often the screen polls by day; 60 when omitted.
+    DeviceTokenCreated:
+      type: object
+      additionalProperties: false
+      required:
+        - deviceToken
+        - token
+      properties:
+        deviceToken:
+          $ref: '#/components/schemas/DeviceToken'
+        token:
+          type: string
+          description: anas_dev_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash.
+    DeviceNextResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - action
+        - reason
+        - next_poll_seconds
+        - partials_left
+        - quiet
+        - key
+        - server_time
+        - next_at
+        - bar
+      description: /api/device/next's answer (ADR 0041).
+      properties:
+        action:
+          type: string
+          enum:
+            - none
+            - partial
+            - full
+          description: What the screen does next; none means it does not fetch a frame.
+        reason:
+          type: string
+          description: Why the action was chosen
+          in Chinese: null
+          for the administrator's logs.: null
+        next_poll_seconds:
+          type: integer
+          description: How many seconds until the screen asks again.
+        partials_left:
+          type: integer
+          description: How many partial refreshes remain before a full refresh is forced.
+        quiet:
+          type: boolean
+          description: True during the night window
+          when the screen stays silent.: null
+        key:
+          type: string
+          description: The hash of the frame the screen now shows; /screen.bin repeats it as X-Content-Hash.
+        server_time:
+          type: string
+          description: The server's clock in UTC.
+        next_at:
+          type: string
+          description: When the screen should ask again
+          in UTC.: null
+        bar:
+          type: boolean
+          description: Whether the bottom strip exists.
+        bin:
+          type: string
+          description: /screen.bin when the action is not none; absent otherwise.
     LocalDisplay:
       type: object
       additionalProperties: false

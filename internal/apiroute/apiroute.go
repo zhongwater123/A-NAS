@@ -42,6 +42,10 @@ const (
 	// sends is refused (ADR 0040). The service behind the route confirms the
 	// token again with the Host Agent.
 	Agent
+	// Device routes serve the e-ink screen (ADR 0041): a family device token
+	// as a bearer token, GET only, and only the three screen paths. They are
+	// LAN-only, never a session cookie, so no CSRF token either.
+	Device
 )
 
 func (p Posture) String() string {
@@ -56,6 +60,8 @@ func (p Posture) String() string {
 		return "admin"
 	case Agent:
 		return "agent"
+	case Device:
+		return "device"
 	}
 	return "unknown"
 }

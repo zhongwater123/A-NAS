@@ -212,3 +212,34 @@ schemas:
     properties:
       agentToken: { $ref: "#/schemas/AgentToken" }
       token: { type: string, description: "anas_ws_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash." }
+  DeviceToken:
+    type: object
+    additionalProperties: false
+    required: [id, name, pollSeconds, createdAt]
+    description: One e-ink screen the family registered (ADR 0041); not bound to any account.
+    properties:
+      id: { type: string }
+      name: { type: string }
+      pollSeconds: { type: integer, minimum: 15, maximum: 3600, description: "How often the screen polls by day." }
+      createdAt: { type: string, format: date-time }
+      lastUsedAt: { type: string, format: date-time, description: "Updated at most every 5 minutes; absent until the screen's first call." }
+  DeviceTokenList:
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items: { type: array, items: { $ref: "#/schemas/DeviceToken" } }
+  DeviceTokenRequest:
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name: { type: string, description: "1–40 characters after trimming, without control characters." }
+      pollSeconds: { type: integer, minimum: 15, maximum: 3600, default: 60, description: "How often the screen polls by day; 60 when omitted." }
+  DeviceTokenCreated:
+    type: object
+    additionalProperties: false
+    required: [deviceToken, token]
+    properties:
+      deviceToken: { $ref: "#/schemas/DeviceToken" }
+      token: { type: string, description: "anas_dev_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash." }
