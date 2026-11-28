@@ -1,94 +1,17 @@
 // 剪辑中心 tells a member on the desktop how their films go
 // (docs/specs/videocut-center.md, 桌面提示): a job waiting for VNAS to plan it
 // and why, a round of VNAS planning it, a job needing them, a film just
-// saved into the photo library, or a job that failed and why; one whose
-// planning failed is planned again from the notice. The desktop only shows
-// these; planning runs on the device whether it is open or not. Each notice
-// shows once on this device until the job moves on, or the reason it waits
-// changes.
+// saved into the photo library, or a job that failed and why. The desktop
+// only shows these; planning runs on the device whether it is open or not.
 import { Clapperboard } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import { DeskNotice } from "../../ui/DeskNotice";
-import { listNotices, replan, type VideoCutNotice } from "../api/client";
+import { useNotices, type VideoCutNotice } from "../app/notices";
 import { forMember } from "../lib/words";
 import styles from "./notices.module.css";
 
-const POLL_MS = 60_000;
-const SEEN = "videocut-notices-seen";
-
-const key = (notice: VideoCutNotice) => `${notice.jobId}:${notice.kind}:${notice.detail ?? ""}`;
-
-function seen(): Set<string> {
-  try {
-    return new Set(JSON.parse(localStorage.getItem(SEEN) ?? "[]") as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function remember(keys: string[]) {
-  try {
-    const all = [...seen(), ...keys].slice(-200);
-    localStorage.setItem(SEEN, JSON.stringify(all));
-  } catch {
-    // Without storage a notice may show again on the next visit.
-  }
-}
-
 export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
-  const [notices, setNotices] = useState<VideoCutNotice[]>([]);
-
-  // Asked once a minute while the page is visible, and when it becomes
-  // visible again; a hidden page asks nothing. Only the latest request is
-  // listened to: one still on its way when the next is sent is given up, so
-  // that an older answer arriving late does not put back what the newer one
-  // replaced (waiting for planning, after the film was saved).
-  useEffect(() => {
-    let latest: AbortController | undefined;
-    const load = () => {
-      if (document.visibilityState !== "visible") return;
-      latest?.abort();
-      const asking = new AbortController();
-      latest = asking;
-      listNotices(asking.signal).then(
-        (items) => {
-          if (asking !== latest) return;
-          const told = seen();
-          setNotices(items.filter((notice) => !told.has(key(notice))));
-        },
-        () => undefined,
-      );
-    };
-    load();
-    const timer = window.setInterval(load, POLL_MS);
-    document.addEventListener("visibilitychange", load);
-    return () => {
-      latest?.abort();
-      latest = undefined;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", load);
-    };
-  }, []);
-
-  const dismiss = () => {
-    remember(notices.map(key));
-    setNotices([]);
-  };
-  // One job whose planning failed: the notice plans it again, as the project page's 重新规划 does; when that
-  // cannot be done, VideoCut opens on where the job stands.
-  const failed = notices.filter((notice) => notice.kind === "failed" && notice.reason === "plan_failed");
-  const action =
-    failed.length === 1
-      ? {
-          label: "重新规划",
-          onClick: () => {
-            dismiss();
-            void replan(failed[0].jobId).catch(() => onOpen());
-          },
-        }
-      : undefined;
-
+  const { notices, dismiss } = useNotices();
   return (
     <DeskNotice
       className={styles.mnNotice}
@@ -96,7 +19,6 @@ export function VideoCutNotices({ onOpen }: { onOpen: () => void }) {
       source="剪辑中心"
       icon={<Clapperboard />}
       lines={summarize(notices)}
-      action={action}
       onOpen={onOpen}
       onDismiss={dismiss}
     />

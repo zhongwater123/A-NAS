@@ -162,32 +162,33 @@ paths:
   /api/v1/workspace/mcp: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1mcp" }
   /api/v1/workspace/transfers/{key}: { $ref: "paths/workspace.yaml#/~1api~1v1~1workspace~1transfers~1{key}" }
   /api/v1/videocut: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut" }
+  /api/v1/videocut/catalog: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1catalog" }
+  /api/v1/videocut/songs/{songId}/audio: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1songs~1{songId}~1audio" }
   /api/v1/videocut/projects: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects" }
   /api/v1/videocut/projects/{projectId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}" }
-  /api/v1/videocut/projects/{projectId}/assets: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assets" }
-  /api/v1/videocut/projects/{projectId}/generate: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1generate" }
-  /api/v1/videocut/jobs/{jobId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}" }
-  /api/v1/videocut/jobs/{jobId}/cancel: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1cancel" }
-  /api/v1/videocut/jobs/{jobId}/drop-assets: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1drop-assets" }
-  /api/v1/videocut/jobs/{jobId}/retry-analysis: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1retry-analysis" }
-  /api/v1/videocut/jobs/{jobId}/retry: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1retry" }
-  /api/v1/videocut/jobs/{jobId}/replan: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1jobs~1{jobId}~1replan" }
-  /api/v1/videocut/notices: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1notices" }
+  /api/v1/videocut/projects/{projectId}/files: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1files" }
+  /api/v1/videocut/projects/{projectId}/files/{fileId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1files~1{fileId}" }
+  /api/v1/videocut/projects/{projectId}/selection: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1selection" }
+  /api/v1/videocut/projects/{projectId}/settings: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1settings" }
   /api/v1/videocut/projects/{projectId}/song: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1song" }
+  /api/v1/videocut/projects/{projectId}/song/import: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1song~1import" }
   /api/v1/videocut/projects/{projectId}/song/audio: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1song~1audio" }
-  /api/v1/videocut/hero: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1hero" }
-  /api/v1/videocut/hero/poster: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1hero~1poster" }
-  /api/v1/videocut/versions/{versionId}/confirm: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1confirm" }
-  /api/v1/videocut/versions/{versionId}/recut: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1recut" }
-  /api/v1/videocut/versions/{versionId}/outline: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1outline" }
-  /api/v1/videocut/versions/{versionId}/draft: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1draft" }
-  /api/v1/videocut/drafts/{draftId}/ops: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1ops" }
-  /api/v1/videocut/drafts/{draftId}/save: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1save" }
-  /api/v1/videocut/drafts/{draftId}/song: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1song" }
-  /api/v1/videocut/drafts/{draftId}/candidates: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1candidates" }
-  /api/v1/videocut/versions/{versionId}/shots: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1versions~1{versionId}~1shots" }
-  /api/v1/videocut/drafts/{draftId}/shots: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1drafts~1{draftId}~1shots" }
-  /api/v1/videocut/projects/{projectId}/frames/{assetId}: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1frames~1{assetId}" }
+  /api/v1/videocut/projects/{projectId}/heartbeat: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1heartbeat" }
+  /api/v1/videocut/projects/{projectId}/generate: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1generate" }
+  /api/v1/videocut/projects/{projectId}/resume: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1resume" }
+  /api/v1/videocut/projects/{projectId}/retry: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1retry" }
+  /api/v1/videocut/projects/{projectId}/assets: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assets" }
+  /api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assets~1{assetId}~1proxy" }
+  /api/v1/videocut/projects/{projectId}/assets/{assetId}/frame: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assets~1{assetId}~1frame" }
+  /api/v1/videocut/projects/{projectId}/timeline: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1timeline" }
+  /api/v1/videocut/projects/{projectId}/timeline/edits: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1timeline~1edits" }
+  /api/v1/videocut/projects/{projectId}/timeline/undo: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1timeline~1undo" }
+  /api/v1/videocut/projects/{projectId}/slots/{slot}/candidates: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1slots~1{slot}~1candidates" }
+  /api/v1/videocut/assistant: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1assistant" }
+  /api/v1/videocut/projects/{projectId}/assistant: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1assistant" }
+  /api/v1/videocut/projects/{projectId}/export: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1export" }
+  /api/v1/videocut/projects/{projectId}/film: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1projects~1{projectId}~1film" }
+  /api/v1/videocut/notices: { $ref: "paths/videocut.yaml#/~1api~1v1~1videocut~1notices" }
   /api/v1/modules: { $ref: "paths/modules.yaml#/~1api~1v1~1modules" }
   /api/v1/modules/scoring/me: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1me" }
   /api/v1/modules/scoring/batches: { $ref: "paths/scoring.yaml#/~1api~1v1~1modules~1scoring~1batches" }

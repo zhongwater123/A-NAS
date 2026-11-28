@@ -1,0 +1,6 @@
+.shell {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  opacity: 0.7;
+}

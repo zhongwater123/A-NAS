@@ -42,15 +42,16 @@ check "without a key the model gateway is not running" \
 check "a member cannot open the key's page" test "$(status_of -b /tmp/alice.jar "$api/api/v1/assistant-key")" = 403
 # The requests that may lead to planning in VideoCut register a planning grant for
 # the member behind them first (docs/architecture/videocut-center.md, 规划授权): the File Broker
-# writes it into the Host Agent's own state, for root's planner alone. Here the job asked for does
-# not exist, so VideoCut answers 404 once the Product Service has passed the request
-# on; without VNAS it passes it on with no grant.
-replan() { # JAR CSRF: the status of asking to plan a job again
-  status_of -b "$1" -H "X-CSRF-Token: $2" -X POST "$api/api/v1/videocut/jobs/job:AAAAAAAAAAAAAAAAAAAAAAAA/replan" || true
+# writes it into the Host Agent's own state, for root's planner alone. VideoCut answers 501 once
+# the Product Service has passed the request on, as Venus's generating is not served yet (#694);
+# without VNAS it passes it on with no grant.
+replan() { # JAR CSRF: the status of asking to generate a film
+  status_of -b "$1" -H "X-CSRF-Token: $2" -H 'Content-Type: application/json' -d '{"requestKey":"system-test-grant"}' \
+    -X POST "$api/api/v1/videocut/projects/project:AAAAAAAAAAAAAAAAAAAAAAAA/generate" || true
 }
 plans=/var/lib/a-nas-host/assistant/plans
 check "without VNAS a planning request reaches VideoCut, and leaves no planning grant" \
-  test "$(replan /tmp/alice.jar "$alice_csrf")" = 404 -a ! -e "$plans/alice"
+  test "$(replan /tmp/alice.jar "$alice_csrf")" = 501 -a ! -e "$plans/alice"
 
 # The scripted model stands where the gateway would reach DeepSeek. Planning VideoCut's
 # job below, its first call takes longer than two minutes.
@@ -103,7 +104,7 @@ check "the members' settings are in the Host Agent's own state" \
   test "$(stat -c '%a %U' /var/lib/a-nas-host 2>/dev/null)" = "700 root" -a -f /var/lib/a-nas-host/assistant/members/alice/config.yaml
 check "alice now has VNAS" test "$(curl -fsS -b /tmp/alice.jar "$api/api/v1/assistant/status" | jq -r .available || true)" = true
 check "with VNAS a planning request registers her grant on its way to VideoCut" \
-  test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 404:404
+  test "$(replan /tmp/alice.jar "$alice_csrf"):$(replan /tmp/bob.jar "$bob_csrf")" = 501:501
 check "the grants are root's alone, in the Host Agent's own state" \
   test "$(stat -c '%a %U' "$plans" 2>/dev/null):$(stat -c '%a %U %F' "$plans/alice" 2>/dev/null):$(stat -c '%a %U %F' "$plans/bob" 2>/dev/null)" = \
   "700 root:600 root regular file:600 root regular file"
@@ -634,8 +635,13 @@ if "$real_runtime"; then
   # (scripts/system-test.sh). Nothing in the product is opened for the test. The real compute
   # Worker would take the four cards for real ones, so with the real content this is left out.
   for _ in $(seq 1 60); do round_over && break; sleep 2; done
+  # Venus's generating is not served yet (#694): no job can be started to plan, so the
+  # steps below, which start one through the first version's routes, wait for it.
+  videocut_generates=no
   if [[ "${ANAS_SYSTEM_TEST_AI:-}" == real ]]; then
     echo "INFO VideoCut planning: left out with the real compute Worker, which the seeded cards are not for"
+  elif [[ $videocut_generates != yes ]]; then
+    echo "INFO VideoCut planning: left out until Venus generates films (#694)"
   else
     videocut_job() { curl -fsS -b /tmp/alice.jar "$api/api/v1/videocut/jobs/$plan_job" || true; }
     plan_project=$(curl -fsS -b /tmp/alice.jar -H "X-CSRF-Token: $alice_csrf" -H 'Content-Type: application/json' \

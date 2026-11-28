@@ -724,6 +724,8 @@ videocut/
 
 ## 接口
 
+> 下表是首版的接口，2026-11-27 起已被 Venus 的契约原地取代（[#694](https://github.com/zhongwater123/A-NAS/issues/694)，见“Venus 改版的网页结构”的“接口契约”）：只有 `GET /api/v1/videocut` 与 `/notices` 还在，其余路径都换成了 Venus 的操作。表留作首版服务端的记录，后端改造时对照。
+
 新增 `api/paths/videocut.yaml`，挂在 `/api/v1/videocut`。约定：
 - 错误统一用 `ProductError`；
 - 创建类请求在请求体里带 `requestKey`，按成员限定唯一，沿用家庭中心的做法；
@@ -760,7 +762,7 @@ videocut/
 
 成片是相册资产，播放与下载都走相册现有的接口。
 
-规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。`generate`、`replan`、`drop-assets`、`retry-analysis` 与 `recut`（#596）这五条由 anas-api 先经文件代理登记规划授权再转发（见“规划授权”），登记不了时回答 503 `assistant_unavailable`，请求不转发；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这六条在 anas-api 里有自己的处理，不只是透传。
+规划的领取与报告（`claim`、`started`、`abandon`、`end`）只在剪辑的助手套接字上，浏览器调不到。首版的 `generate`、`replan`、`drop-assets`、`retry-analysis` 与 `recut`（#596）这五条由 anas-api 先经文件代理登记规划授权再转发（Venus 里是 `POST /projects/{id}/generate` 与 `/retry` 两条，`internal/videocut/protocol` 的 `PlanningRoutes`）（见“规划授权”），登记不了时回答 503 `assistant_unavailable`，请求不转发；`PUT /projects/{id}/song` 由 anas-api 经文件代理读出歌曲再交给剪辑中心（见“配乐”）。所以这六条在 anas-api 里有自己的处理，不只是透传。
 
 ## 网页
 
@@ -783,7 +785,7 @@ videocut/
 
 ### Venus 改版的网页结构
 
-[#690](https://github.com/zhongwater123/A-NAS/issues/690) 起，网页按 [Venus 规格](../specs/venus.md)改成开始页、准备页、成片页三个页面，仍在 A-NAS 桌面的剪辑中心窗口里，沿用 [#639](https://github.com/zhongwater123/A-NAS/issues/639) 的分层。新外壳接上后删除上面第八版的页面，不两套并存。窗口默认尺寸从 1080×720 改为 PRD 的基准宽度 1200。
+[#690](https://github.com/zhongwater123/A-NAS/issues/690) 起，网页按 [Venus 规格](../specs/venus.md)改成开始页、准备页、成片页三个页面，仍在 A-NAS 桌面的剪辑中心窗口里，沿用 [#639](https://github.com/zhongwater123/A-NAS/issues/639) 的分层。上面第八版的页面已随接口一起删除（[#694](https://github.com/zhongwater123/A-NAS/issues/694)），新外壳做好之前窗口里只有一句占位。窗口默认尺寸从 1080×720 改为 PRD 的基准宽度 1200×720。
 
 ```
 web/src/videocut/
@@ -853,7 +855,7 @@ web/src/videocut/
 
 窗口最小化时内容保持挂载（`Desktop.tsx`），轮询和播放按 `shown.ts` 暂停。新增资源先定级别，再写代码。
 
-**接口契约**：Venus 要用的接口先写进 `api/`，运行 `make api` 生成类型与校验，再写 MSW 替身。字段按规格的[每个状态服务端存什么](../specs/venus.md#每个状态服务端存什么)定：
+**接口契约**（[#694](https://github.com/zhongwater123/A-NAS/issues/694)）：Venus 要用的接口写在 `api/paths/videocut.yaml` 与 `api/components/videocut.yaml`，原地取代了首版的接口（2026-11-27 用户决定：首版的网页与接口不再有人用，不留两套）。字段按规格的[每个状态服务端存什么](../specs/venus.md#每个状态服务端存什么)定：
 
 - 项目与状态：列表含所有成员共用、只读的示例作品；导出失败的原因与重试次数、生成时跳过的段数也在项目上；
 - 只存文件清单的建项目：清单带名称、大小、修改时间，用来认文件；
@@ -863,6 +865,17 @@ web/src/videocut/
 - 镜头操作与撤销（按音乐槽，带修订号）；
 - 搜索与问答，以及检索服务是否可用；
 - 导出。
+
+契约里定下、规格没写的做法：
+
+- **上传**：网页用相册现有的上传把勾选的文件传进成员的个人图库，再用 `POST /projects/{id}/assets` 带上 `fileId` 交给项目，服务端从这时开始分析这一段。成片页“添加素材 · 本机文件”走同一个接口，不带 `fileId`。上传是否沿用传输中心的 tus 断点续传（T4）待后端确认。
+- **配乐**：内置的三首在 `PATCH /projects/{id}/settings` 里选；音乐库的歌沿用首版的 `PUT /projects/{id}/song`，由 anas-api 经文件代理读出再交给剪辑中心；导入的歌用 `POST /projects/{id}/song/import` 直接上传。
+- **导出**（T8 的默认做法）：渲染好的文件存在项目里，`GET /projects/{id}/film` 带 `Content-Disposition: attachment` 下载，支持 Range。
+- **报到**：沿用规格的默认做法，每 30 秒一次，2 分钟收不到即判定。
+
+**还没实现时**：剪辑服务给还没实现的操作挂一个回答 501 `not_implemented` 的路由，因为产品服务的路由测试要求契约里的每个操作都有路由；契约里这些操作也声明了 501，生成的类型与契约测试才认得这个回答。“开始生成”与“重试”的路由仍先记下 anas-api 登记的规划授权，再回答 501。网页在测试里用 `web/src/videocut/mocks/` 的 MSW 替身应答：`VenusFake` 在内存里按状态机走，读一次项目就前进一步，轮询的页面能从上传一路走到已完成、导出。`handlers.test.ts` 核对替身正好是契约里声明了 501 的那些操作（开关与桌面提示不声明 501，由桌面自己的处理器应答）。后端每接好一个操作，就删掉对应的替身、501 路由和契约里的 501，测试随之认得。
+
+在后端接好“生成”与“导出”之前，`videocut-center` 上没有能出片的接口，首版出片的系统测试与 VNAS 规划的端到端测试也先跳过（`scripts/system-test.sh`、`ai/assistant-spike/system-test.sh` 里写明了原因）。这期间不要用 `videocut-center` 重新部署实验 NAS，需要成片时用设备上已经装好的版本出。
 
 ## 出片后的二次编辑
 

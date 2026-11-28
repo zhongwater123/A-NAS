@@ -39,37 +39,39 @@ func New(store *app.Store, logger *slog.Logger) http.Handler {
 		logger = slog.Default()
 	}
 	h := &handler{store: store, logger: logger, mux: apiroute.NewMux()}
+	// Venus's operations (#694): the contract came first, and VideoCut
+	// serves an operation as it is built; until then it answers 501.
 	routes := map[string]route{
-		"GET /projects":                        h.projects,
-		"POST /projects":                       h.createProject,
-		"GET /projects/{projectID}":            h.project,
-		"PATCH /projects/{projectID}":          h.updateProject,
-		"DELETE /projects/{projectID}":         h.deleteProject,
-		"POST /projects/{projectID}/assets":    h.addAssets,
-		"GET /projects/{projectID}/song":       h.song,
-		"GET /projects/{projectID}/song/audio": h.songAudio,
-		"POST /projects/{projectID}/generate":  h.generate,
-		"GET /jobs/{jobID}":                    h.job,
-		"POST /jobs/{jobID}/cancel":            h.cancelJob,
-		"POST /jobs/{jobID}/drop-assets":       h.dropAssets,
-		"POST /jobs/{jobID}/retry-analysis":    h.retryAnalysis,
-		"POST /jobs/{jobID}/retry":             h.retryJob,
-		"POST /jobs/{jobID}/replan":            h.replan,
-		"GET /notices":                         h.notices,
-		"GET /hero":                            h.hero("film"),
-		"GET /hero/poster":                     h.hero("poster"),
-		// Editing a film after it was made (#596).
-		"POST /versions/{versionID}/confirm":         h.confirmVersion,
-		"POST /versions/{versionID}/recut":           h.recut,
-		"GET /versions/{versionID}/outline":          h.versionOutline,
-		"GET /versions/{versionID}/draft":            h.versionDraft,
-		"POST /drafts/{draftID}/ops":                 h.editDraft,
-		"POST /drafts/{draftID}/save":                h.saveDraft,
-		"GET /drafts/{draftID}/song":                 h.draftSong,
-		"GET /drafts/{draftID}/candidates":           h.draftCandidates,
-		"GET /versions/{versionID}/shots":            h.versionShots,
-		"GET /drafts/{draftID}/shots":                h.draftShots,
-		"GET /projects/{projectID}/frames/{assetID}": h.frame,
+		"GET /catalog":                                      notImplemented,
+		"GET /songs/{songID}/audio":                         notImplemented,
+		"GET /projects":                                     notImplemented,
+		"POST /projects":                                    notImplemented,
+		"GET /projects/{projectID}":                         notImplemented,
+		"DELETE /projects/{projectID}":                      notImplemented,
+		"POST /projects/{projectID}/files":                  notImplemented,
+		"DELETE /projects/{projectID}/files/{fileID}":       notImplemented,
+		"PATCH /projects/{projectID}/selection":             notImplemented,
+		"PATCH /projects/{projectID}/settings":              notImplemented,
+		"GET /projects/{projectID}/song":                    notImplemented,
+		"POST /projects/{projectID}/song/import":            notImplemented,
+		"GET /projects/{projectID}/song/audio":              notImplemented,
+		"POST /projects/{projectID}/heartbeat":              notImplemented,
+		"POST /projects/{projectID}/generate":               h.planningNotImplemented,
+		"POST /projects/{projectID}/resume":                 notImplemented,
+		"POST /projects/{projectID}/retry":                  h.planningNotImplemented,
+		"GET /projects/{projectID}/assets":                  notImplemented,
+		"POST /projects/{projectID}/assets":                 notImplemented,
+		"GET /projects/{projectID}/assets/{assetID}/proxy":  notImplemented,
+		"GET /projects/{projectID}/assets/{assetID}/frame":  notImplemented,
+		"GET /projects/{projectID}/timeline":                notImplemented,
+		"POST /projects/{projectID}/timeline/edits":         notImplemented,
+		"POST /projects/{projectID}/timeline/undo":          notImplemented,
+		"GET /projects/{projectID}/slots/{slot}/candidates": notImplemented,
+		"GET /assistant":                                    notImplemented,
+		"POST /projects/{projectID}/assistant":              notImplemented,
+		"POST /projects/{projectID}/export":                 notImplemented,
+		"GET /projects/{projectID}/film":                    notImplemented,
+		"GET /notices":                                      h.notices,
 	}
 	for pattern, serve := range routes {
 		method, path, _ := strings.Cut(pattern, " ")
@@ -77,7 +79,7 @@ func New(store *app.Store, logger *slog.Logger) http.Handler {
 	}
 	// The Product Service copies a song here itself (CopySong); the browser
 	// never reaches this route, so it is not one of the API's endpoints.
-	h.mux.ServeMux.HandleFunc("PUT "+PathPrefix+"/projects/{projectID}/song", h.withUser(h.putSong))
+	h.mux.ServeMux.HandleFunc("PUT "+PathPrefix+"/projects/{projectID}/song", h.withUser(notImplemented))
 	h.mux.HandleFunc(PathPrefix+"/", func(w http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
 	})
@@ -108,17 +110,7 @@ func (h *handler) withUser(next route) http.HandlerFunc {
 	}
 }
 
-// maxJSONBytes bounds a JSON request. The largest the contract allows is
-// about 34 KB: app.MaxAssets IDs of app.MaxIDLength printable ASCII
-// characters with their quotes and commas, a request key and a name of
-// app.MaxNameRunes characters, each escaped to six bytes at most
-// (TestTheLargestRequestFits).
-const maxJSONBytes = 64 << 10
-
 func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
-	if failEdit(w, err) {
-		return
-	}
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		httpjson.WriteError(w, http.StatusNotFound, "not_found", "resource not found")
@@ -166,82 +158,8 @@ func (h *handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-func (h *handler) projects(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	page, err := h.store.Projects(r.Context(), user.ID, r.URL.Query().Get("cursor"))
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, page)
-}
-
-type createRequest struct {
-	RequestKey string   `json:"requestKey"`
-	Name       string   `json:"name"`
-	AssetIDs   []string `json:"assetIds"`
-}
-
-func (h *handler) createProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	var request createRequest
-	if !httpjson.Read(w, r, maxJSONBytes, &request) {
-		return
-	}
-	detail, created, err := h.store.CreateProject(r.Context(), user.ID, accounts.SessionToken(r.Context()), request.RequestKey, request.Name, request.AssetIDs)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	status := http.StatusOK
-	if created {
-		status = http.StatusCreated
-	}
-	httpjson.Write(w, status, detail)
-}
-
-func (h *handler) project(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	detail, err := h.store.Project(r.Context(), user.ID, r.PathValue("projectID"))
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, detail)
-}
-
-func (h *handler) updateProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	var change domain.ProjectChange
-	if !httpjson.Read(w, r, maxJSONBytes, &change) {
-		return
-	}
-	detail, err := h.store.UpdateProject(r.Context(), user.ID, r.PathValue("projectID"), change)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, detail)
-}
-
-func (h *handler) deleteProject(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	if err := h.store.DeleteProject(r.Context(), user.ID, r.PathValue("projectID")); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type addRequest struct {
-	RequestKey string   `json:"requestKey"`
-	AssetIDs   []string `json:"assetIds"`
-}
-
-func (h *handler) addAssets(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	var request addRequest
-	if !httpjson.Read(w, r, maxJSONBytes, &request) {
-		return
-	}
-	detail, err := h.store.AddAssets(r.Context(), user.ID, accounts.SessionToken(r.Context()), r.PathValue("projectID"), request.RequestKey, request.AssetIDs)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, detail)
+// notImplemented answers an operation of the contract VideoCut does not
+// serve yet; the Web answers it from its MSW stand-ins meanwhile.
+func notImplemented(w http.ResponseWriter, _ *http.Request, _ accounts.User) {
+	httpjson.WriteError(w, http.StatusNotImplemented, "not_implemented", "VideoCut does not serve this yet")
 }

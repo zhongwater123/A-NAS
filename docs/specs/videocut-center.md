@@ -1,7 +1,9 @@
 # 剪辑中心
 
 状态：implemented（首版 M0–M10 于 2026-11-19 合入；2026-11-20 规划改为成员规划进程里的一次对话，[决定](../decisions/2026-11-20-montage-planning-as-a-vnas-session.md)，[#608](https://github.com/zhongwater123/A-NAS/pull/608)）
-更新时间：2026-11-20
+更新时间：2026-11-27
+
+> 2026-11-27 起网页与接口按 [Venus 规格](venus.md)改版，首版的页面与接口已删除（[#694](https://github.com/zhongwater123/A-NAS/issues/694)）。本规格保留首版服务端的规则，后端改造时对照。
 
 ## 目标
 

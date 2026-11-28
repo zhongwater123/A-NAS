@@ -70,15 +70,10 @@ export function shellHandlers(options: ShellOptions = {}) {
         ? response(204).empty()
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
-    http.get("/api/v1/videocut/projects", ({ response }) => response(200).json({ items: [] })),
     http.get("/api/v1/workspace", ({ response }) =>
       options.workspace
         ? response(200).json(options.workspace)
         : response(404).json({ error: { code: "not_found", message: "resource not found" } }),
-    ),
-    // The device keeps no film of its own for 剪辑中心's home page.
-    http.get("/api/v1/videocut/hero", ({ response }) =>
-      response(404).json({ error: { code: "not_found", message: "resource not found" } }),
     ),
     http.get("/api/v1/videocut/notices", ({ response }) => response(200).json({ items: [] })),
     // The rail's count of new shares, the transfer indicator and 问题反馈.

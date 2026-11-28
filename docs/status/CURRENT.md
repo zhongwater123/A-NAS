@@ -48,7 +48,7 @@
 6. 家庭局域网版的 NAS 侧（发现、配对、HTTPS）：等“开始做”（[决定](../decisions/2026-11-09-home-network-first.md)）。
 7. 硬盘用途 M3：更改冗余方式、移除硬盘（[规格](../specs/disk-roles-and-redundancy.md)）。
 8. 设备镜像：用存档密钥构建正式镜像，按[手册](../runbooks/build-device-image.md)写到真机试点；实验 NAS 改用镜像以 AI 助手 V1 验收通过为前提。
-9. 剪辑中心：allin1 版权待议；按《Venus PRD v3》改版为 Venus（[#689](https://github.com/zhongwater123/A-NAS/issues/689)），编辑与数据规则一律以 PRD 为准（[ADR 0041](../adr/0041-edit-venus-films-on-one-timeline-per-project.md)，取代 ADR 0039）；先定[规格](../specs/venus.md)的待定项，再按 [#690](https://github.com/zhongwater123/A-NAS/issues/690) 写接口契约与骨架。
+9. 剪辑中心：按 PRD v3 改版为 Venus（[#689](https://github.com/zhongwater123/A-NAS/issues/689)，[ADR 0041](../adr/0041-edit-venus-films-on-one-timeline-per-project.md)），契约已取代首版接口（[#694](https://github.com/zhongwater123/A-NAS/issues/694)）；下一步做外壳（[#695](https://github.com/zhongwater123/A-NAS/issues/695)），后端按契约实现。接好生成与导出前不要用它部署实验 NAS（[原因](../architecture/videocut-center.md#venus-改版的网页结构)）；allin1 版权待议。
 10. 家庭待办：随下次发布部署到实验 NAS，再把验收项写进[已部署功能的验收手册](../runbooks/accept-features-on-experimental-nas.md)（[规格](../specs/family-todos.md)，#503）。
 11. 共享工作区：M1（共享页面与 agent 修改）合入后部署并实机验收，再做 M2 的批注与版本对比（[规格](../specs/shared-workspace.md)）。
 12. 后续能力：外部备份（[#27](https://github.com/zhongwater123/A-NAS/issues/27)，依赖 USB 存储 [#25](https://github.com/zhongwater123/A-NAS/issues/25) 或第二块硬盘）；账号数据导出（[#26](https://github.com/zhongwater123/A-NAS/issues/26)）；运行中热插拔与自动恢复；把密码校验与会话签发移到 Host Agent（[#98](https://github.com/zhongwater123/A-NAS/issues/98) 的 E01）。

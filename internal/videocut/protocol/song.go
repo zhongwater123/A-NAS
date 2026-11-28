@@ -7,9 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
-	"strconv"
 
 	"github.com/zhongwater123/A-NAS/internal/accounts"
 	"github.com/zhongwater123/A-NAS/internal/apiroute"
@@ -124,89 +122,4 @@ func decodeSource(header string) (domain.SongSource, bool) {
 		return domain.SongSource{}, false
 	}
 	return source, true
-}
-
-// putSong takes the song CopySong streams.
-func (h *handler) putSong(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	source, ok := decodeSource(r.Header.Get(SongHeader))
-	if !ok {
-		httpjson.WriteError(w, http.StatusBadRequest, "validation_failed", "the request is not valid")
-		return
-	}
-	detail, err := h.store.PutSong(r.Context(), user.ID, r.PathValue("projectID"), source, r.Body)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, detail)
-}
-
-func (h *handler) song(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	detail, err := h.store.Song(r.Context(), user.ID, r.PathValue("projectID"))
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpjson.Write(w, http.StatusOK, detail)
-}
-
-// songAudio lets the member hear the copy: as it is with Range, or decoded
-// to FLAC from ?start= seconds when browsers cannot play it, as the music
-// library plays such tracks.
-func (h *handler) songAudio(w http.ResponseWriter, r *http.Request, user accounts.User) {
-	audio, err := h.store.OpenSongAudio(r.Context(), user.ID, r.PathValue("projectID"))
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	h.serveSong(w, r, audio)
-}
-
-// serveSong sends a song's copy with Range support when browsers play its
-// format, or decoded to FLAC from start.
-func (h *handler) serveSong(w http.ResponseWriter, r *http.Request, audio domain.SongAudio) {
-	defer func() { _ = audio.File.Close() }()
-	if audio.ContentType != "" {
-		w.Header().Set("Content-Type", audio.ContentType)
-		w.Header().Set("Cache-Control", "private, no-cache")
-		http.ServeContent(w, r, "", audio.ModifiedAt, audio.File)
-		return
-	}
-	start := 0.0
-	if value := r.URL.Query().Get("start"); value != "" {
-		parsed, err := strconv.ParseFloat(value, 64)
-		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
-			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request", "start must be a non-negative number of seconds")
-			return
-		}
-		start = parsed
-	}
-	body, err := h.store.DecodeSong(r.Context(), audio, start)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	defer func() { _ = body.Close() }()
-	w.Header().Set("Content-Type", "audio/flac")
-	w.Header().Set("Accept-Ranges", "none")
-	w.Header().Set("Cache-Control", "private, no-cache")
-	w.WriteHeader(http.StatusOK)
-	_, _ = io.Copy(w, body)
-}
-
-// hero serves the device's background film for the home page, or its
-// poster: 404 when the device has none, and the page plays the member's
-// videos instead.
-func (h *handler) hero(which string) route {
-	return func(w http.ResponseWriter, r *http.Request, _ accounts.User) {
-		file, err := h.store.OpenHero(which)
-		if err != nil {
-			h.fail(w, r, err)
-			return
-		}
-		defer func() { _ = file.File.Close() }()
-		w.Header().Set("Content-Type", file.ContentType)
-		w.Header().Set("Cache-Control", "private, max-age=3600")
-		http.ServeContent(w, r, "", file.Info.ModTime(), file.File)
-	}
 }

@@ -360,13 +360,14 @@ const definitions = {
     title: "剪辑中心",
     icon: Clapperboard,
     tone: "videocut",
-    bounds: { x: 220, y: 48, width: 1080, height: 720 },
+    // Venus's base width (docs/specs/venus.md#窗口大小).
+    bounds: { x: 160, y: 48, width: 1200, height: 720 },
     launcher: {
       id: "videocut",
       keywords: "剪辑 视频 成片 配乐 旅行 vlog montage videocut video",
       visible: ({ videocut }) => videocut,
     },
-    render: ({ session }) => <VideoCutPanel userId={session.user.id} />,
+    render: () => <VideoCutPanel />,
   },
   workspace: {
     title: "共享工作区",

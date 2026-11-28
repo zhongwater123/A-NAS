@@ -2572,6 +2572,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/videocut/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The three songs VideoCut has, the aspects and styles a film can take, and what a new project starts with (M4) */
+        get: operations["getVideoCutCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/songs/{songId}/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One of the catalog's songs, to listen to before choosing it (试听), with Range support */
+        get: operations["getVideoCutCatalogSongAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/videocut/projects": {
         parameters: {
             query?: never;
@@ -2579,10 +2613,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's VideoCut projects (剪辑中心, ADR 0038), newest first, 50 a page. Served only while ANAS_VIDEOCUT_ENABLED is on; otherwise the path answers 404 */
+        /** The caller's projects, newest first, and last the sample every member has (M1-1) */
         get: operations["listVideoCutProjects"];
         put?: never;
-        /** Make a project of videos the caller can see, registering the photo library's grant for them. The same requestKey again returns the same project (200), waiting for that request while it runs; the key of another request is a conflict. No videos is refused, never all of them (validation_failed); more than 500 is too_many_assets. A video that is missing, hidden, in the trash or not a video answers assets_unavailable alike */
+        /** @description Make a project of the files the browser has (M2-2): their list only, no video (docs/specs/venus.md#本机文件). It is importing while a file of the list is not read yet, and pending once all are, with the catalog's defaults as its settings. The same requestKey again returns the same project (200); the key of another request is a conflict. The same file twice in the list counts once. More than 200 files is too_many_files (422), a file over 4 GB file_too_large (422). */
         post: operations["createVideoCutProject"];
         delete?: never;
         options?: never;
@@ -2597,19 +2631,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One of the caller's projects, with where each video stands in the photo library now. Another member's project is not_found */
+        /** One project: its state, progress, settings and list of files. Another member's project is not_found; so is an importing one the browser stopped reporting for (docs/specs/venus.md#网页报到) */
         get: operations["getVideoCutProject"];
         put?: never;
         post?: never;
-        /** Delete the project. Its grant is revoked right after, without waiting for the photo library, and again until the photo library takes it. The videos and the films stay in the photo library */
+        /** Delete the project, stopping its work first: its film, timeline, candidates, anchors and imported song go with it; the videos uploaded stay in the photo library (ADR 0041). The sample is sample_read_only (403) */
         delete: operations["deleteVideoCutProject"];
         options?: never;
         head?: never;
-        /** Rename the project or change its request and whether it follows the time of capture. A job in progress keeps the settings it started with */
-        patch: operations["updateVideoCutProject"];
+        patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/projects/{projectId}/assets": {
+    "/api/v1/videocut/projects/{projectId}/files": {
         parameters: {
             query?: never;
             header?: never;
@@ -2618,8 +2651,128 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add videos to the project. The same requestKey again adds nothing more; the key of another request, another project or other videos is a conflict. A project whose grant the photo library revoked, as after videocut.db was restored to before its deletion, takes no more videos (grant_revoked). Films already made stay, and nothing is made anew */
-        post: operations["addVideoCutProjectAssets"];
+        /** @description Add files to the list, or what the browser has read of files already in it, told by name, size and modification time: 继续选择 on the start page, and each file as it is read. Only while importing or pending (project_state, 409); past 200 files is too_many_files (422). */
+        post: operations["addVideoCutProjectFiles"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/files/{fileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Take a file out of the list, while importing or pending (project_state, 409) */
+        delete: operations["deleteVideoCutProjectFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 勾选 and 星标 (M3-3), saved as they change, while importing or pending (project_state, 409). A sixth star is too_many_stars (422), and changes nothing */
+        patch: operations["updateVideoCutSelection"];
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** The aspect, the style, or one of the catalog's songs (M4), saved as they change, while importing or pending (project_state, 409). An id the catalog does not have is validation_failed (400) */
+        patch: operations["updateVideoCutSettings"];
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/song": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The film's parts and slots as the project's song makes them, before the timeline is made (M5-1, M6-3, M6-4). A song still being analysed is song_not_ready (409) */
+        get: operations["getVideoCutSongStructure"];
+        /** @description Choose a track of the caller's music library as the project's song, while importing or pending. The Product Service opens the track through the File Broker as the caller and streams it to VideoCut, which keeps a copy and analyses it in the background. Another member's track answers not_found, as a missing one; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length (422). */
+        put: operations["putVideoCutSong"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/song/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import a song file from the browser as the project's song (M4-1 导入), while importing or pending. Limits as for a track of the music library; a file with no audio is not_audio (422) */
+        post: operations["importVideoCutSong"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/song/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's song, to listen to and for the film page's preview, with Range support */
+        get: operations["getVideoCutSongAudio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 报到: the page that has an importing or uploading project open says so every 30 seconds (docs/specs/venus.md#网页报到). An importing project two minutes without it is dropped; an uploading one two minutes without it or an upload becomes upload_interrupted. Other states take it and change nothing. */
+        post: operations["reportVideoCutProject"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2635,7 +2788,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a job that makes a new version of the project's film from its videos and settings now. Answers 202 with the job, to poll; the same requestKey for this project returns the same job, and one used for another project, or to save a draft or recut a version, is a conflict (409). Choose a song first or the request answers no_song (404). A project with a job in progress answers job_in_progress (409). The job may come to planning, so a planning grant for the caller's VNAS is registered first: when that cannot be done right now the request answers assistant_unavailable (503) and starts nothing */
+        /** @description 开始生成 (M4-5): take a snapshot of the settings and start uploading the selected files; the project is uploading. Only while pending (project_state, 409), with a file selected (nothing_selected, 422) and a song that is not unusable (song_unusable, 422); a song still being analysed does not wait. The same requestKey again returns the project (200). */
         post: operations["generateVideoCutFilm"];
         delete?: never;
         options?: never;
@@ -2643,15 +2796,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}": {
+    "/api/v1/videocut/projects/{projectId}/resume": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** One of the caller's jobs: its state, its steps, why it waits or what it needs, and the version it saved. Another member's job is not_found */
-        get: operations["getVideoCutJob"];
+        get?: never;
+        put?: never;
+        /** Go on uploading an upload_interrupted project once its files are chosen again; it is uploading again. Other states are project_state (409) */
+        post: operations["resumeVideoCutUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go back to the step a failed project failed at. Other states are project_state (409); a fourth retry is too_many_retries (409) */
+        post: operations["retryVideoCutProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's videos in the photo library and how their analysis stands: 添加素材 · 已导入素材 (M7-4) lists the analysed ones */
+        get: operations["listVideoCutProjectAssets"];
+        put?: never;
+        /** @description Give the project a video the browser uploaded to the caller's photo library, and start its analysis. With fileId it is that file of the list, while uploading (project_state, 409); without, a video added on the film page (M7-4), while ready or exported, which the page puts in a slot with a place edit once analysed. The same requestKey again changes nothing more. A video the caller cannot see is assets_unavailable (422). */
+        post: operations["addVideoCutProjectAsset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/assets/{assetId}/proxy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The video's proxy, for the film page's preview, which plays the shots' proxies one after another, with Range support */
+        get: operations["getVideoCutProxy"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2660,41 +2865,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}/cancel": {
+    "/api/v1/videocut/projects/{projectId}/assets/{assetId}/frame": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for shot cards and candidates; the browser keeps it */
+        get: operations["getVideoCutFrame"];
         put?: never;
-        /** Cancel the job: a queued or waiting one at once, a running one once its step stops. An accepted cancellation saves no film. After dispatch to the photo library, or after the job ends, cancellation answers job_state (409). Poll the job for its outcome */
-        post: operations["cancelVideoCutJob"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}/drop-assets": {
+    "/api/v1/videocut/projects/{projectId}/timeline": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** The film as it is: its parts, one shot a slot, its revision and whether one step can be undone. A project whose film is not made yet is project_state (409) */
+        get: operations["getVideoCutTimeline"];
         put?: never;
-        /** Take videos that are missing, too long, or whose analysis failed, out of the job, its project and the grant, and go on; plans already taken are planned again. Dropping every video is job_state (409): the job can only be cancelled. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
-        post: operations["dropVideoCutJobAssets"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}/retry-analysis": {
+    "/api/v1/videocut/projects/{projectId}/timeline/edits": {
         parameters: {
             query?: never;
             header?: never;
@@ -2703,15 +2908,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Ask the photo library to analyse again the videos whose analysis failed, and go on. A planning grant is registered first, as for generating: assistant_unavailable (503) changes nothing */
-        post: operations["retryVideoCutJobAnalysis"];
+        /** @description One edit, made on baseRevision, at once (docs/specs/venus.md#镜头操作). A timeline that moved on since, as when another tab changed it, answers timeline_conflict (409) and changes nothing: read it again. A project that is not ready or exported is project_state (409): exporting reads only. An edit the rules do not allow answers edit_refused (422) with the reason to show, such as no candidate left to delete with. */
+        post: operations["editVideoCutTimeline"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}/retry": {
+    "/api/v1/videocut/projects/{projectId}/timeline/undo": {
         parameters: {
             query?: never;
             header?: never;
@@ -2720,15 +2925,49 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Go on from the step the job stopped at, once there is room for the film, the song is fixed or the local model is installed */
-        post: operations["retryVideoCutJob"];
+        /** Undo the last edit (M6-5), made on baseRevision; its anchors go with it. Nothing to undo is nothing_to_undo (409); conflicts and states as for an edit */
+        post: operations["undoVideoCutTimeline"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/v1/videocut/jobs/{jobId}/replan": {
+    "/api/v1/videocut/projects/{projectId}/slots/{slot}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The slot's candidates, at most six (M7-1): none already in the film, of another orientation, or of the same video as a shot beside it */
+        get: operations["listVideoCutCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/assistant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether the assistant can search the caller's videos now (M8) */
+        get: operations["getVideoCutAssistant"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/assistant": {
         parameters: {
             query?: never;
             header?: never;
@@ -2737,8 +2976,42 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Plan again from the step not yet taken: a job that failed its planning (plan_failed), one VNAS has not taken, or one stopped before 2026-11-25 because its plan was not handed back or kept failing its checks; a round still planning the job is over. A failed job goes on only as its project's latest while no other job of the project runs (job_state, job_active), and with its song still kept (no_song). The planning grant is registered anew first: assistant_unavailable (503) changes nothing */
-        post: operations["replanVideoCutJob"];
+        /** @description One sentence to the assistant (M8): a search of the project's videos, answered with groups of beats to put in a slot, or a question, answered in words. With slot it is about that shot, as from the box under 这一镜 (M8-2, M8-3). Nothing changes until the page makes an edit. Searching that does not work now is search_unavailable (503). */
+        post: operations["askVideoCutAssistant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 导出 (M9-1): render the timeline as it is at 1080p; the project is exporting and reads only until it is exported, or ready again with exportFailure. The new file takes the place of the last one. Only while ready or exported (project_state, 409); the same requestKey again returns the project (200). */
+        post: operations["exportVideoCutFilm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/videocut/projects/{projectId}/film": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The exported film, to download, with Range support. Before the first export it is not_found */
+        get: operations["getVideoCutFilm"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2754,262 +3027,6 @@ export interface paths {
         };
         /** The desktop's notices of the caller's jobs: waiting for VNAS to plan them (with why, when there is a reason), being planned by a round of VNAS, needing the member, and films saved or jobs failed in the last day */
         get: operations["listVideoCutNotices"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/projects/{projectId}/song": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The project's song: how its analysis stands, why it cannot be used, its beats, downbeats and sections, and the excerpt the project uses with its parts and slots. A project without a song is no_song (404) */
-        get: operations["getVideoCutSong"];
-        /** Choose the project's song from the caller's music library. The Product Service opens the track through the File Broker as the caller, as the music library plays it, and streams it to VideoCut, which keeps a copy of its own and analyses it in the background (allin1: beats, downbeats and sections; then the excerpt). Another member's track answers not_found, as a missing one, and so does a track whose file has gone since the library was scanned; one the caller may no longer open is forbidden (403). More than 100 MiB is song_too_large (413); shorter than 30 seconds or longer than 8 minutes is song_length, and a file with no audio not_audio (422). The excerpt starts from its default again */
-        put: operations["putVideoCutSong"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/projects/{projectId}/song/audio": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description VideoCut's copy of the project's song, to listen to: with Range support when browsers play its format, otherwise (the song's transcode) decoded to FLAC by the media worker from the start position; that stream cannot seek, so players request a new start. */
-        get: operations["getVideoCutSongAudio"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/hero": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description The device's background film for the 剪辑中心 home page, as the 第八版 prototype's hero: a file the device keeps under the VideoCut store (hero/hero.mp4), never part of the software. 404 without one; the page then plays the member's own videos. */
-        get: operations["getVideoCutHero"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/hero/poster": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description The background film's poster (hero/hero.jpg); 404 without one. */
-        get: operations["getVideoCutHeroPoster"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/versions/{versionId}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Choose this version as the project's film (#596): the project opens on it, and the list and the home page show it. No film is deleted; another version can be chosen later */
-        post: operations["confirmVideoCutVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/versions/{versionId}/recut": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Plan this version again from a sentence (#596): the member's VNAS starts from the plan it was cut by (a version edited by hand, from the plan it came from, without the hand edits) and changes only what change asks, one 方案. The videos, song, excerpt and order are the version's. Answers 202 with the recut job, to poll; the same requestKey for this version returns the same job, for another request it is a conflict. A project with a job in progress answers job_in_progress (409), and a version whose job made its analysis again after it was saved not_editable (409). It takes a round of the planning grant, which is registered first, as for generating: assistant_unavailable (503) changes nothing. Editing, searching, shuffling, previewing and saving a draft take none */
-        post: operations["recutVideoCutVersion"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/versions/{versionId}/outline": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The version as its film is: the plan it was cut by, its parts and its shots. It reads only: no draft is made, and an edit not saved yet does not show. A version whose timeline is not known, or whose job made its analysis again after it was saved (a version saved while its job went on to a second 方案), answers not_editable (409) */
-        get: operations["getVideoCutVersionOutline"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/versions/{versionId}/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The caller's draft of this version, made the first time as the version is: its parts, its shots slot by slot, and what the rough preview plays. A version whose timeline is not known, or whose job made its analysis again after it was saved, or whose draft has a shot with a beat the version's videos no longer have, can only be played (not_editable, 409); so can one whose videos the photo library analysed again with another model since (analysis_changed, 409), which can still be recut. Telling that asks the photo library for the videos' analysis: photos_unavailable (503) when it does not answer, grant_revoked (409) when the project can no longer reach its videos. Another member's version is not_found */
-        get: operations["getVideoCutVersionDraft"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/drafts/{draftId}/ops": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** One step of the edit, made on baseRevision. A draft that moved on since, as when another window changed it, answers draft_conflict (409) and changes nothing: read it again. A step the rules do not allow answers edit_refused (422) with the reason to show. Searching for a shuffle needs the photo library: search_unavailable (503) when it or its local AI cannot answer now, search_model_changed (409) until the videos are analysed with the new model, a shot whose picture the plan described with nothing to search for (empty, or longer than a search) stays as it was and the message says how many did, and with no unlocked shot to search for the shuffle is edit_refused (422). Deleting a shot between two that could each take its slots reads their videos' analysis (photos_unavailable, 503; edit_refused, 422, while their windows are made again; analysis_changed, 409, once made with another model) and asks the compute Worker which is more alike (compute_unavailable, 503). A project that can no longer reach its videos answers grant_revoked (409). Nothing here calls a model or renders */
-        post: operations["editVideoCutDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/drafts/{draftId}/save": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Render the draft as it stands as a new version (#596): its slots filled again with their beats, the film saved into the photo library first in the list, marked as an edit of the version. The version and its film stay; the draft stays, to edit on. Answers 202 with the edit job, to poll; the same requestKey returns the same job, and a requestKey used for another draft or another kind of job is a conflict (409). A revision that was saved already answers 202 with the job that saved it, done and with its version, whatever the requestKey: no new job, and nothing is filled or rendered again. A project with a job in progress answers job_in_progress (409), a draft changed while this was read draft_conflict (409), and one whose videos the photo library analysed again with another model since it was opened analysis_changed (409), with no job made. A video a shot leads with that goes missing needs the member; one in the trash makes the job wait, and missingAssetIds name them. Nothing here calls a model */
-        post: operations["saveVideoCutDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/drafts/{draftId}/song": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description The song of the version the draft edits, for the rough preview: the one the version was made with, whatever the project's song is now, as the project's song audio is sent (Range support, or decoded to FLAC from start). The excerpt starts at the draft's songStart. */
-        get: operations["getVideoCutDraftSong"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/drafts/{draftId}/candidates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The beats that could lead a shot: the rest of its card, the plan's spare beats for its picture, and with q the beats the photo library finds most like it (without q every beat in shooting order). Each says whether it is long enough and which shot has it. Only a search with q asks the photo library, and answers as a shuffle's does: search_unavailable (503), search_model_changed (409), validation_failed (400) for words it does not search for, grant_revoked (409) for a project that can no longer reach its videos */
-        get: operations["listVideoCutDraftCandidates"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/versions/{versionId}/shots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The version's shot list: CSV in UTF-8 with a byte order mark, a row a shot of the film */
-        get: operations["getVideoCutVersionShots"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/drafts/{draftId}/shots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** The draft's shot list, as the version's: a row a shot, the slots it covers, and for a shot that took a deleted shot's slots, which */
-        get: operations["getVideoCutDraftShots"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/videocut/projects/{projectId}/frames/{assetId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** A frame of one of the project's videos, a JPEG 320 on its longer side, for the thumbnails of an edit's shots and candidates. It is not kept: the video's content does not change, so the browser keeps it. A video that is not the project's is not_found (404), and so is one the photo library no longer has, holds in its trash, or holds as other content than the project took; a project that can no longer reach its videos answers grant_revoked (409). No frame for now is 503: media_unavailable when the media worker cannot take it, photos_unavailable when the photo library does not answer, videocut_unavailable where VideoCut has no media worker */
-        get: operations["getVideoCutFrame"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8911,132 +8928,330 @@ export interface components {
             title?: string;
             version: number;
         };
+        VideoCutCatalogSong: {
+            id: string;
+            title: string;
+            duration: number;
+        };
+        VideoCutCatalogItem: {
+            id: string;
+            label: string;
+        };
+        VideoCutCatalog: {
+            /** @description The three songs VideoCut has (M4-1). */
+            songs: components["schemas"]["VideoCutCatalogSong"][];
+            aspects: components["schemas"]["VideoCutCatalogItem"][];
+            styles: components["schemas"]["VideoCutCatalogItem"][];
+            /** @description What a new project starts with. */
+            defaults: {
+                /** @description A builtin song's id. */
+                song: string;
+                aspect: string;
+                style: string;
+            };
+        };
+        /**
+         * @description 导入中, 待生成, 上传中, 上传中断, 排队中, 生成中, 已完成, 导出中, 已导出, 失败 (docs/specs/venus.md#作品状态机). importing until every file of the list was read in the browser; pending once all were, until generating is asked for.
+         * @enum {string}
+         */
+        VideoCutProjectState: "importing" | "pending" | "uploading" | "upload_interrupted" | "queued" | "generating" | "ready" | "exporting" | "exported" | "failed";
+        /** @description The three bars of 生成中 (M5-1). */
+        VideoCutProgress: {
+            /** @description Files chosen to make the film from. */
+            files: number;
+            uploaded: number;
+            /** @description Analysed or skipped; analysis starts as each file is uploaded. */
+            analysed: number;
+            /** @description Files analysis could not read and left out: 'N 段无法分析，已跳过' once the film is made. */
+            skipped: number;
+            /** @description How far the film's making is, once uploading and analysis are done. */
+            percent: number;
+            /** @description The estimate, renewed every 30 seconds and never growing; absent while there is none. */
+            remainingSeconds?: number;
+            /** @description Past the estimate by half: 比预计慢，仍在处理. */
+            slow: boolean;
+        };
+        /**
+         * @description 网络中断, 文件损坏, 服务繁忙, 素材不足: the only four the page names.
+         * @enum {string}
+         */
+        VideoCutFailureReason: "network" | "corrupt_file" | "busy" | "too_few_assets";
+        VideoCutFailure: {
+            /**
+             * @description The step that failed, which a retry goes back to.
+             * @enum {string}
+             */
+            step: "upload" | "analysis" | "generate";
+            reason: components["schemas"]["VideoCutFailureReason"];
+            /** @description Retries made; at 3 the page says to contact us and offers none. */
+            retries: number;
+        };
+        VideoCutFilm: {
+            /** @description Seconds. */
+            duration: number;
+            /**
+             * Format: date-time
+             * @description When the file to download was made; absent before the first export.
+             */
+            exportedAt?: string;
+            /** @description Bytes of that file. */
+            size?: number;
+        };
         VideoCutProjectSummary: {
             id: string;
             name: string;
-            assetCount: number;
+            /** @description 示例作品: one for every member, read only, and last in the list. */
+            sample: boolean;
+            state: components["schemas"]["VideoCutProjectState"];
             /** Format: date-time */
             createdAt: string;
-            /** @description Up to six of its videos, spread over the order they were added, for thumbnails. */
-            previewAssetIds?: string[];
-            /** @description The version the member chose as the project's film (#596): the one shown when the project opens. */
-            chosenVersionId?: string;
-            /** @description The chosen version's film; the list and the home page show it first. */
-            chosenFilmAssetId?: string;
+            /** Format: date-time */
+            updatedAt: string;
+            fileCount: number;
+            progress: components["schemas"]["VideoCutProgress"];
+            failure?: components["schemas"]["VideoCutFailure"];
+            film?: components["schemas"]["VideoCutFilm"];
+            /** @description The video whose frame is the card's cover, once one is uploaded; before that the page shows the first frame it read. */
+            coverAssetId?: string;
         };
-        VideoCutProjectPage: {
+        VideoCutProjectList: {
+            /** @description The caller's projects, newest first, then the sample. */
             items: components["schemas"]["VideoCutProjectSummary"][];
-            next?: string;
         };
         /** @description Unique per member: the same key again repeats the same request and nothing more; with another request it is a conflict. */
         VideoCutRequestKey: string;
-        VideoCutAssetIDs: string[];
-        VideoCutProjectAsset: {
-            assetId: string;
+        /** @description A file as the browser has it. name, size and modifiedAt together tell it: the same three are the same file, once in the list, and a file chosen again after a reload is matched to its entry by them. The rest is what the browser read from it; the file itself stays in the browser until uploaded. */
+        VideoCutLocalFile: {
+            name: string;
+            /** @description Bytes. More than 4 GB is file_too_large (422), not validation_failed, so the page can say why. */
+            size: number;
+            /** Format: date-time */
+            modifiedAt: string;
+            /** @description Whether the browser has read it; the rest is there once it has. */
+            read: boolean;
+            /** @description Seconds. */
+            duration?: number;
+            /** @description As shown, after rotation. */
+            width?: number;
+            height?: number;
             /**
-             * @description unknown: the photo library did not answer this time.
+             * Format: date-time
+             * @description When it was shot; the modification time where the file does not say.
+             */
+            takenAt?: string;
+        };
+        VideoCutExportFailure: {
+            reason: components["schemas"]["VideoCutFailureReason"];
+            retries: number;
+            /**
+             * Format: date-time
+             * @description When it failed: the page tells it once, for the failure it has not told yet.
+             */
+            at: string;
+        };
+        /**
+         * @description One of the three songs VideoCut has, a track of the member's music library, or a song imported to this project.
+         * @enum {string}
+         */
+        VideoCutSongSource: "builtin" | "library" | "imported";
+        VideoCutProjectSong: {
+            source: components["schemas"]["VideoCutSongSource"];
+            id: string;
+            title: string;
+            /** @description Seconds of the whole song. */
+            duration?: number;
+            /**
+             * @description unusable: no beats in it. The page says to choose another and chooses the one before again.
              * @enum {string}
              */
-            status: "available" | "trashed" | "missing" | "unknown";
+            status: "analysing" | "ready" | "unusable";
+        };
+        VideoCutSettings: {
+            song?: components["schemas"]["VideoCutProjectSong"];
+            /** @description An aspect's id from the catalog. */
+            aspect: string;
+            /** @description A style's id from the catalog. */
+            style: string;
+            /** @description 长度 (M4-3), read only: the song's verse and chorus, once its analysis is done. */
+            filmDuration?: number;
+        };
+        VideoCutProjectFile: {
+            id: string;
+            name: string;
+            size: number;
+            /** Format: date-time */
+            modifiedAt: string;
+            read: boolean;
             duration?: number;
+            width?: number;
+            height?: number;
+            /** Format: date-time */
+            takenAt?: string;
+            /** @description 勾选: chosen to be uploaded and made a film of. New files are. */
+            selected: boolean;
+            /** @description 星标: the film puts it in. Five at most. */
+            starred: boolean;
+            /**
+             * @description done once its video is in the photo library and the project has it.
+             * @enum {string}
+             */
+            upload: "none" | "done";
+            /** @description The photo library's video, once uploaded. */
+            assetId?: string;
+            /** @enum {string} */
+            analysis: "none" | "running" | "done" | "skipped";
+        };
+        VideoCutProject: {
+            id: string;
+            name: string;
+            sample: boolean;
+            state: components["schemas"]["VideoCutProjectState"];
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            fileCount: number;
+            progress: components["schemas"]["VideoCutProgress"];
+            failure?: components["schemas"]["VideoCutFailure"];
+            /** @description The last export's failure; the state is ready again. */
+            exportFailure?: components["schemas"]["VideoCutExportFailure"];
+            film?: components["schemas"]["VideoCutFilm"];
+            coverAssetId?: string;
+            /** @description From uploading on, the snapshot taken when generating was asked for. */
+            settings: components["schemas"]["VideoCutSettings"];
+            files: components["schemas"]["VideoCutProjectFile"][];
+        };
+        VideoCutSlotSpan: {
+            /** @description From 1 over the whole film. */
+            slot: number;
+            /** @description Seconds into the film. */
+            start: number;
+            end: number;
+        };
+        VideoCutPart: {
+            index: number;
+            /** @description 前奏, 主歌, 副歌, 尾奏: the song's section. */
+            label: string;
+            /** @description Seconds into the film. */
+            start: number;
+            end: number;
+            slots: components["schemas"]["VideoCutSlotSpan"][];
+        };
+        /** @description The film's parts and slots as the song makes them, known before the timeline is: the tracks of 生成中 draw them. */
+        VideoCutSongStructure: {
+            song: components["schemas"]["VideoCutProjectSong"];
+            /** @description Seconds into the song the film starts at. */
+            from: number;
+            to: number;
+            parts: components["schemas"]["VideoCutPart"][];
+        };
+        VideoCutProjectAsset: {
+            assetId: string;
+            /** @description The file of the list it was uploaded from; absent for one added on the film page. */
+            fileId?: string;
+            /** @enum {string} */
+            analysis: "running" | "done" | "skipped";
+            duration?: number;
+            width?: number;
+            height?: number;
             /** Format: date-time */
             takenAt?: string;
             /** Format: date-time */
             addedAt: string;
         };
-        VideoCutVersion: {
-            id: string;
-            /** @description Counts from 1 within the project; the film is named "<project> v<number>.mp4". */
-            number: number;
-            /** @description The job that made it. */
-            jobId: string;
-            /** @description Which of the job's 方案 it is: a job makes two films to choose from, 方案一 and 方案二. */
-            plan: number;
-            /** @description The film in the caller's photo library; play and download it there. */
-            filmAssetId: string;
-            /** Format: date-time */
-            createdAt: string;
-            /** @description The member deleted the film from the photo library. */
-            gone?: boolean;
-            /** @description Its timeline is known, so it can be edited (#596). A version saved before timelines were kept takes its job's; without that it can only be played. */
-            editable: boolean;
-            /**
-             * @description plan: a 方案 a job planned; edit: a draft of sourceVersionId rendered (改自第 N 版); recut: sourceVersionId planned again.
-             * @enum {string}
-             */
-            kind: "plan" | "edit" | "recut";
-            /** @description The version an edit or a recut came from. */
-            sourceVersionId?: string;
-            /** @description That version's number, while it is recorded. */
-            sourceNumber?: number;
-            /** @description An edit: the draft's revision it was rendered from. */
-            draftRevision?: number;
-            /** @description A recut: the member's sentence, 按“<change>”重剪自第 N 版. */
-            change?: string;
+        VideoCutProjectAssets: {
+            items: components["schemas"]["VideoCutProjectAsset"][];
         };
-        VideoCutJobStep: {
-            /**
-             * @description The shared steps, then each 方案's: the first 方案's plain, the second's with -2. An edit's are source, fill, render and save.
-             * @enum {string}
-             */
-            name: "analysis" | "catalog" | "song" | "pick" | "shots" | "fill" | "render" | "save" | "pick-2" | "shots-2" | "fill-2" | "render-2" | "save-2" | "source";
-            /**
-             * @description A step that stopped with the job shows the job's state.
-             * @enum {string}
-             */
-            state: "pending" | "running" | "done" | "queued" | "waiting" | "needs_input" | "failed" | "cancelled";
+        VideoCutShot: {
+            slot: number;
+            part: number;
+            /** @description Seconds into the film; the slot's. */
+            start: number;
+            end: number;
+            /** @description The beat in the slot. */
+            beat: string;
+            /** @description The video it comes from. */
+            assetId: string;
+            /** @description Seconds into the video it plays from. */
+            from: number;
+            to: number;
+            /** @description Below 1 where the beat is slowed to fill the slot. */
+            speed: number;
+            /** @description 锚点: changed by the member, so automatic changes leave it. */
+            anchor: boolean;
+            /** @description Its video's orientation is not the film's: shown in the middle on a blurred fill. */
+            fitted: boolean;
             /** Format: date-time */
-            startedAt?: string;
-            /** Format: date-time */
-            finishedAt?: string;
+            takenAt?: string;
         };
-        VideoCutJob: {
-            id: string;
-            projectId: string;
-            /**
-             * @description generate makes the project's 方案; edit renders a draft as a new version (#596); recut plans a version again from a sentence.
-             * @enum {string}
-             */
-            kind: "generate" | "edit" | "recut";
-            /** @enum {string} */
-            state: "queued" | "running" | "waiting" | "needs_input" | "done" | "failed" | "cancelled";
-            /** @description The step the job is at or stopped at. */
-            step?: string;
-            /**
-             * @description Why a waiting job waits, what a job that needs input needs, or why a failed job failed. video_too_long: missingAssetIds are longer than the photo library analyses, and are dropped to go on. model_unavailable: the photo library lacks the local model that describes the videos; retry once it is installed. plan_failed (failed): VNAS was given three rounds and none finished the planning; error says how the last ended, and replanning goes on from there. vnas_unknown, plan_invalid and plan_error are those of jobs stopped before 2026-11-25, which replanning goes on with; no job stops for them since. A job waiting for vnas says in error what it waits for.
-             * @enum {string}
-             */
-            waitReason?: "analysis" | "asset_trashed" | "vnas" | "asset_missing" | "analysis_failed" | "no_usable_footage" | "music_invalid" | "vnas_unknown" | "plan_invalid" | "plan_error" | "storage_full" | "photos_unavailable" | "video_too_long" | "model_unavailable" | "plan_failed";
-            error?: string;
-            steps: components["schemas"]["VideoCutJobStep"][];
-            /** @description The videos missing, too long, or whose analysis failed; for an edit also those in the trash it waits for, so that the page marks the shots that use them. */
-            missingAssetIds?: string[];
-            /** @description The first 方案's film. */
-            version?: components["schemas"]["VideoCutVersion"];
-            /** @description Every 方案's film the job saved, in order. */
-            versions?: components["schemas"]["VideoCutVersion"][];
-            /** Format: date-time */
-            createdAt: string;
-            /** Format: date-time */
-            finishedAt?: string;
+        VideoCutTimeline: {
+            /** @description Every edit names the revision it was made on. */
+            revision: number;
+            duration: number;
+            parts: components["schemas"]["VideoCutPart"][];
+            /** @description One a slot, in order. */
+            shots: components["schemas"]["VideoCutShot"][];
+            /** @description One step back, in this opening of the project only. */
+            canUndo: boolean;
+            /** @description The slots the last edit or undo changed: the preview plays again from the first. */
+            changedSlots?: number[];
         };
-        VideoCutProject: {
-            id: string;
-            name: string;
-            assetCount: number;
+        /** @description One edit of the timeline, by music slot (docs/specs/venus.md#镜头操作). */
+        VideoCutEdit: {
+            /** @constant */
+            kind: "replace";
+            slot: number;
+            beat: string;
+        } | {
+            /** @constant */
+            kind: "remove";
+            slot: number;
+        } | {
+            /** @constant */
+            kind: "set_in_point";
+            slot: number;
+            from: number;
+        } | {
+            /** @constant */
+            kind: "reorder_parts";
+            from: number;
+            to: number;
+        } | {
+            /** @constant */
+            kind: "place";
+            slot: number;
+            assetId: string;
+        };
+        VideoCutCandidate: {
+            beat: string;
+            assetId: string;
+            /** @description The part of its video it would play. */
+            from: number;
+            to: number;
+            duration: number;
+            fitted: boolean;
             /** Format: date-time */
-            createdAt: string;
-            ask: string;
-            chronological: boolean;
-            assets: components["schemas"]["VideoCutProjectAsset"][];
-            /** @description The films saved, newest first. */
-            versions: components["schemas"]["VideoCutVersion"][];
-            /** @description The project's latest job, for the page to pick up where it was after a reload. */
-            job?: components["schemas"]["VideoCutJob"];
-            /** @description The version the member chose as the project's film; the other versions stay and can be chosen instead. */
-            chosenVersionId?: string;
-            /** @description The chosen version's film. */
-            chosenFilmAssetId?: string;
+            takenAt?: string;
+        };
+        VideoCutCandidates: {
+            slot: number;
+            /** @description Best first; the beat a replace took out comes first. */
+            items: components["schemas"]["VideoCutCandidate"][];
+        };
+        VideoCutAssistantStatus: {
+            /** @description Whether searching the member's videos works now; the page turns its box off while it does not. */
+            search: boolean;
+        };
+        VideoCutAssistantReply: {
+            /** @description What the assistant says back. */
+            text: string;
+            /** @description Beats it found, by what they answer; empty for a reply in words only. */
+            groups: {
+                title: string;
+                /** @description The slot they are for, where the member asked about one. */
+                slot?: number;
+                items: components["schemas"]["VideoCutCandidate"][];
+            }[];
         };
         VideoCutNotice: {
             /** @enum {string} */
@@ -9056,206 +9271,6 @@ export interface components {
         };
         VideoCutNotices: {
             items: components["schemas"]["VideoCutNotice"][];
-        };
-        VideoCutSongSection: {
-            start: number;
-            end: number;
-            /**
-             * @description allin1's label.
-             * @enum {string}
-             */
-            label: "start" | "end" | "intro" | "outro" | "break" | "bridge" | "inst" | "solo" | "verse" | "chorus";
-        };
-        VideoCutSongPart: {
-            /** @description Seconds from the excerpt's start. */
-            start: number;
-            end: number;
-            /**
-             * @description The part's level in the film: quiet, middle or climax.
-             * @enum {string}
-             */
-            level: "安静" | "中等" | "高潮";
-            label: string;
-            /** @description allin1's own label when the part was relabelled: a chorus quieter than the section after it is the build to it. */
-            allin1?: string;
-            /** @description The shots' slots, cut on the bar lines, in seconds from the excerpt's start. */
-            slots: number[][];
-        };
-        VideoCutSongSelection: {
-            tempo: number;
-            bar: number;
-            /** @description Its start and end in the song, in seconds. The film starts there and lasts as long. */
-            excerpt: number[];
-            seconds: number;
-            parts: components["schemas"]["VideoCutSongPart"][];
-            /** @description false: no chorus was found, and the loudest section stands in for it; the page asks the member to listen. */
-            chorus: boolean;
-        };
-        VideoCutSong: {
-            id: string;
-            /** @description The track of GET /api/v1/music/tracks the song was copied from: two tracks may share a title. */
-            trackId?: string;
-            title: string;
-            duration: number;
-            /** @description Browsers cannot play the copy: /song/audio decodes it to FLAC from ?start= and does not seek by Range. */
-            transcode: boolean;
-            /** @enum {string} */
-            state: "analyzing" | "ready" | "unusable";
-            /**
-             * @description Why an unusable song cannot be used: it cannot be decoded; it has fewer than 16 bars; no excerpt of 30 to 150 seconds; a slot longer than the 12 seconds a shot may last; its analysis failed three times, or found nothing an excerpt can be picked from.
-             * @enum {string}
-             */
-            reason?: "undecodable" | "few_bars" | "no_excerpt" | "long_slot" | "analysis_failed";
-            /**
-             * @description What the analysis waits for; it is tried again every few minutes. A Worker that is away is waited for as long as it takes; an analysis that fails is tried three times.
-             * @enum {string}
-             */
-            waiting?: "analyzer_unavailable" | "compute_unavailable" | "media_unavailable";
-            tempo?: number;
-            beats?: number[];
-            downbeats?: number[];
-            sections?: components["schemas"]["VideoCutSongSection"][];
-            /** @description Where the eighth version's rule starts the excerpt: around the first chorus. */
-            defaultStart?: number;
-            selection?: components["schemas"]["VideoCutSongSelection"];
-        };
-        /** @description The first step of the plan a version was cut by. */
-        VideoCutFilmPlan: {
-            design: string;
-            opening: string;
-            ending: string;
-        };
-        /** @description A part of the music and of the plan. */
-        VideoCutFilmPart: {
-            number: number;
-            name: string;
-            summary: string;
-            /** @description The music part's strength, from the song's analysis: 安静, 中等 or 高潮. */
-            level: string;
-            /** @description The music's section as analysed (intro, verse, chorus, build…); a build leads into a chorus, 铺垫. */
-            label: string;
-            start: number;
-            end: number;
-        };
-        VideoCutDraftShot: {
-            number: number;
-            /** @description card/n: the beat that leads the shot. */
-            beat: string;
-            /** @description The video it comes from. */
-            assetId: string;
-            part: number;
-            picture: number;
-            /** @description The music's slots it covers, from 1; more than one where it took a deleted shot's. */
-            slots: number[];
-            /** @description Seconds into the film. */
-            start: number;
-            end: number;
-            /** @description Seconds into its video the rough preview plays from: where the version had it, or the beat's piece. */
-            from: number;
-            to: number;
-            /** @description What the plan asked of its picture: 规划要. */
-            query: string;
-            shotSize: string;
-            what: string;
-            locked: boolean;
-            /** @description 已换: not a beat the version had in these slots. */
-            changed: boolean;
-            /** @description 延长: it took a deleted shot's slots. */
-            extended: boolean;
-            /** @description 竖: its video is narrower than 16:9 and is shown on a blurred background. */
-            portrait: boolean;
-        };
-        /** @description A film's shots, the videos they come from, and how many of those are 竖. */
-        VideoCutFilmCounts: {
-            shots: number;
-            videos: number;
-            portrait: number;
-        };
-        /** @description A version as its film is: the plan it was cut by and its shots, read without making a draft. Unlike the draft, an edit not saved yet does not show here. */
-        VideoCutVersionOutline: {
-            versionId: string;
-            projectId: string;
-            versionNumber: number;
-            /** @description How long the film is. */
-            seconds: number;
-            plan: components["schemas"]["VideoCutFilmPlan"];
-            parts: components["schemas"]["VideoCutFilmPart"][];
-            /** @description The film's shots, none of them changed, extended or locked. */
-            shots: components["schemas"]["VideoCutDraftShot"][];
-            counts: components["schemas"]["VideoCutFilmCounts"];
-            /** @description What the plan found the videos do not have, as the planner wrote it. */
-            unmet: string[];
-        };
-        VideoCutDraft: {
-            id: string;
-            versionId: string;
-            projectId: string;
-            versionNumber: number;
-            /** @description A step is made on this revision (baseRevision). */
-            revision: number;
-            canUndo: boolean;
-            /** @description Where the version's excerpt starts in its song, in seconds. */
-            songStart: number;
-            /** @description The draft's song is decoded on the way and cannot seek: the rough preview asks for it from ?start=, as the song page does. */
-            songTranscode: boolean;
-            /** @description How long the film is. */
-            seconds: number;
-            plan: components["schemas"]["VideoCutFilmPlan"];
-            parts: components["schemas"]["VideoCutFilmPart"][];
-            shots: components["schemas"]["VideoCutDraftShot"][];
-            counts: components["schemas"]["VideoCutFilmCounts"];
-            /** @description What the step did, for the page to say with 撤销: 第 3 镜已替换, 已删除，由前一镜延长补上. */
-            message?: string;
-            /** Format: date-time */
-            updatedAt: string;
-        };
-        /** @description One step of an edit (ADR 0039, decision 2; docs/architecture/videocut-center.md, 出片后的二次编辑). replace puts beat in shot; move moves shot to where shot to is, within its part, around the locked shots; delete gives a shot's slots to the shot before or after it; lock and unlock keep a shot from moves and shuffles; shuffle picks every unlocked shot again from the beats most like its picture's description, by seed when given; revert puts back the version's beat of shot; reset puts back the whole version; undo goes back a step, up to the last hundred. */
-        VideoCutDraftOp: {
-            /** @enum {string} */
-            type: "replace" | "move" | "delete" | "lock" | "unlock" | "shuffle" | "revert" | "reset" | "undo";
-            /** @description The shot's number, from 1: replace, move, delete, lock, unlock, revert. */
-            shot?: number;
-            /** @description move: the shot whose place it takes. */
-            to?: number;
-            /** @description replace: the beat, card/n, as a candidate names it. */
-            beat?: string;
-            /** @description shuffle: the same seed on the same draft picks the same beats. */
-            seed?: number;
-        };
-        VideoCutCandidate: {
-            beat: string;
-            assetId: string;
-            /** @description The part of its video a try plays, in seconds. */
-            from: number;
-            to: number;
-            shotSize: string;
-            what: string;
-            scene: string;
-            portrait: boolean;
-            /** @description Its card fills the shot, slowed at most 2.5 times; one that does not cannot be chosen. */
-            fits: boolean;
-            /** @description 已用在第 N 镜: the shot that has it; it cannot be chosen. */
-            usedBy?: number;
-            /** @description How alike the search found it; only to order by. */
-            score?: number;
-            /** Format: date-time */
-            takenAt?: string;
-        };
-        VideoCutCandidates: {
-            shot: number;
-            /** @description The picture's description, which the search box starts with. */
-            query: string;
-            /** @description The other beats of the shot's card. */
-            sameCard: components["schemas"]["VideoCutCandidate"][];
-            /** @description The plan's spare beats for its picture. */
-            planned: components["schemas"]["VideoCutCandidate"][];
-            /** @description With q, the beats most like it, best first (at most 60); without, every beat in shooting order. Filtered by size, scene and landscape. */
-            results: components["schemas"]["VideoCutCandidate"][];
-            /** @description The scenes the cards were described in, most cards first: eight, and the rest as 其他. */
-            scenes: {
-                scene: string;
-                cards: number;
-            }[];
         };
         /** @description What a photo is scored on (打分项): one of the built-in ones, overall (总体, named 总分 before), composition, light_color, quality (画质), emotion (情绪, calm to intense rather than poor to good), sharpness, narrative and preference, or custom_<n>, one an administrator made. An ID never changes meaning. */
         ScoringDimensionID: string;
@@ -9477,12 +9492,12 @@ export interface components {
         WorkspacePageID: string;
         /** @description A version number, or latest */
         WorkspaceVersionRef: string;
-        /** @description The `next` of the previous page. */
-        VideoCutCursor: string;
+        VideoCutSongID: string;
         VideoCutProjectID: string;
-        VideoCutJobID: string;
-        VideoCutVersionID: string;
-        VideoCutDraftID: string;
+        VideoCutFileID: string;
+        VideoCutAssetID: string;
+        /** @description The music slot, from 1 to the film's last. */
+        VideoCutSlot: number;
     };
     requestBodies: never;
     headers: never;
@@ -9766,30 +9781,38 @@ export type WorkspaceSelection = components['schemas']['WorkspaceSelection'];
 export type WorkspaceMemberAccount = components['schemas']['WorkspaceMemberAccount'];
 export type WorkspaceMemberList = components['schemas']['WorkspaceMemberList'];
 export type WorkspaceTransferSaved = components['schemas']['WorkspaceTransferSaved'];
+export type VideoCutCatalogSong = components['schemas']['VideoCutCatalogSong'];
+export type VideoCutCatalogItem = components['schemas']['VideoCutCatalogItem'];
+export type VideoCutCatalog = components['schemas']['VideoCutCatalog'];
+export type VideoCutProjectState = components['schemas']['VideoCutProjectState'];
+export type VideoCutProgress = components['schemas']['VideoCutProgress'];
+export type VideoCutFailureReason = components['schemas']['VideoCutFailureReason'];
+export type VideoCutFailure = components['schemas']['VideoCutFailure'];
+export type VideoCutFilm = components['schemas']['VideoCutFilm'];
 export type VideoCutProjectSummary = components['schemas']['VideoCutProjectSummary'];
-export type VideoCutProjectPage = components['schemas']['VideoCutProjectPage'];
+export type VideoCutProjectList = components['schemas']['VideoCutProjectList'];
 export type VideoCutRequestKey = components['schemas']['VideoCutRequestKey'];
-export type VideoCutAssetIDs = components['schemas']['VideoCutAssetIDs'];
-export type VideoCutProjectAsset = components['schemas']['VideoCutProjectAsset'];
-export type VideoCutVersion = components['schemas']['VideoCutVersion'];
-export type VideoCutJobStep = components['schemas']['VideoCutJobStep'];
-export type VideoCutJob = components['schemas']['VideoCutJob'];
+export type VideoCutLocalFile = components['schemas']['VideoCutLocalFile'];
+export type VideoCutExportFailure = components['schemas']['VideoCutExportFailure'];
+export type VideoCutSongSource = components['schemas']['VideoCutSongSource'];
+export type VideoCutProjectSong = components['schemas']['VideoCutProjectSong'];
+export type VideoCutSettings = components['schemas']['VideoCutSettings'];
+export type VideoCutProjectFile = components['schemas']['VideoCutProjectFile'];
 export type VideoCutProject = components['schemas']['VideoCutProject'];
-export type VideoCutNotice = components['schemas']['VideoCutNotice'];
-export type VideoCutNotices = components['schemas']['VideoCutNotices'];
-export type VideoCutSongSection = components['schemas']['VideoCutSongSection'];
-export type VideoCutSongPart = components['schemas']['VideoCutSongPart'];
-export type VideoCutSongSelection = components['schemas']['VideoCutSongSelection'];
-export type VideoCutSong = components['schemas']['VideoCutSong'];
-export type VideoCutFilmPlan = components['schemas']['VideoCutFilmPlan'];
-export type VideoCutFilmPart = components['schemas']['VideoCutFilmPart'];
-export type VideoCutDraftShot = components['schemas']['VideoCutDraftShot'];
-export type VideoCutFilmCounts = components['schemas']['VideoCutFilmCounts'];
-export type VideoCutVersionOutline = components['schemas']['VideoCutVersionOutline'];
-export type VideoCutDraft = components['schemas']['VideoCutDraft'];
-export type VideoCutDraftOp = components['schemas']['VideoCutDraftOp'];
+export type VideoCutSlotSpan = components['schemas']['VideoCutSlotSpan'];
+export type VideoCutPart = components['schemas']['VideoCutPart'];
+export type VideoCutSongStructure = components['schemas']['VideoCutSongStructure'];
+export type VideoCutProjectAsset = components['schemas']['VideoCutProjectAsset'];
+export type VideoCutProjectAssets = components['schemas']['VideoCutProjectAssets'];
+export type VideoCutShot = components['schemas']['VideoCutShot'];
+export type VideoCutTimeline = components['schemas']['VideoCutTimeline'];
+export type VideoCutEdit = components['schemas']['VideoCutEdit'];
 export type VideoCutCandidate = components['schemas']['VideoCutCandidate'];
 export type VideoCutCandidates = components['schemas']['VideoCutCandidates'];
+export type VideoCutAssistantStatus = components['schemas']['VideoCutAssistantStatus'];
+export type VideoCutAssistantReply = components['schemas']['VideoCutAssistantReply'];
+export type VideoCutNotice = components['schemas']['VideoCutNotice'];
+export type VideoCutNotices = components['schemas']['VideoCutNotices'];
 export type ScoringDimensionId = components['schemas']['ScoringDimensionID'];
 export type ScoringDimension = components['schemas']['ScoringDimension'];
 export type ScoringDimensions = components['schemas']['ScoringDimensions'];
@@ -9854,11 +9877,11 @@ export type ParameterAssistantRequestId = components['parameters']['AssistantReq
 export type ParameterFamilyReactionName = components['parameters']['FamilyReactionName'];
 export type ParameterWorkspacePageId = components['parameters']['WorkspacePageID'];
 export type ParameterWorkspaceVersionRef = components['parameters']['WorkspaceVersionRef'];
-export type ParameterVideoCutCursor = components['parameters']['VideoCutCursor'];
+export type ParameterVideoCutSongId = components['parameters']['VideoCutSongID'];
 export type ParameterVideoCutProjectId = components['parameters']['VideoCutProjectID'];
-export type ParameterVideoCutJobId = components['parameters']['VideoCutJobID'];
-export type ParameterVideoCutVersionId = components['parameters']['VideoCutVersionID'];
-export type ParameterVideoCutDraftId = components['parameters']['VideoCutDraftID'];
+export type ParameterVideoCutFileId = components['parameters']['VideoCutFileID'];
+export type ParameterVideoCutAssetId = components['parameters']['VideoCutAssetID'];
+export type ParameterVideoCutSlot = components['parameters']['VideoCutSlot'];
 export type $defs = Record<string, never>;
 export interface operations {
     getHealth: {
@@ -15008,29 +15031,90 @@ export interface operations {
             404: components["responses"]["ProductError"];
         };
     };
-    listVideoCutProjects: {
+    getVideoCutCatalog: {
         parameters: {
-            query?: {
-                /** @description The `next` of the previous page. */
-                cursor?: components["parameters"]["VideoCutCursor"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description A page of the caller's projects */
+            /** @description The catalog */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VideoCutProjectPage"];
+                    "application/json": components["schemas"]["VideoCutCatalog"];
                 };
             };
-            400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutCatalogSongAudio: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                songId: components["parameters"]["VideoCutSongID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audio content */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            /** @description Partial audio content */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/*": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the song. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["ProductError"];
+        };
+    };
+    listVideoCutProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The projects */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProjectList"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15047,9 +15131,8 @@ export interface operations {
             content: {
                 "application/json": {
                     requestKey: components["schemas"]["VideoCutRequestKey"];
-                    /** @description Empty names the project by its videos' dates. */
-                    name?: string;
-                    assetIds: components["schemas"]["VideoCutAssetIDs"];
+                    /** @description 200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why. */
+                    files: components["schemas"]["VideoCutLocalFile"][];
                 };
             };
         };
@@ -15073,9 +15156,10 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
-            401: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15100,6 +15184,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
@@ -15123,10 +15208,12 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
-    updateVideoCutProject: {
+    addVideoCutProjectFiles: {
         parameters: {
             query?: never;
             header: {
@@ -15140,11 +15227,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    name?: string;
-                    ask?: string;
-                    chronological?: boolean;
-                    /** @description Seconds into the song: the excerpt starts on the downbeat nearest it and ends on the downbeat nearest 90 seconds later, or at the music's end. The song must be ready (song_not_ready, 409); a start that leaves no usable excerpt is song_start_unusable (422) and changes nothing. A start nearest the downbeat of defaultStart returns the project to the default excerpt. */
-                    songStart?: number;
+                    /** @description 200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why. */
+                    files: components["schemas"]["VideoCutLocalFile"][];
                 };
             };
         };
@@ -15159,13 +15243,43 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
-    addVideoCutProjectAssets: {
+    deleteVideoCutProjectFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+                fileId: components["parameters"]["VideoCutFileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    updateVideoCutSelection: {
         parameters: {
             query?: never;
             header: {
@@ -15179,8 +15293,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    requestKey: components["schemas"]["VideoCutRequestKey"];
-                    assetIds: components["schemas"]["VideoCutAssetIDs"];
+                    files: {
+                        fileId: string;
+                        selected?: boolean;
+                        starred?: boolean;
+                    }[];
                 };
             };
         };
@@ -15195,14 +15312,14 @@ export interface operations {
                 };
             };
             400: components["responses"]["ProductError"];
-            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
-    generateVideoCutFilm: {
+    updateVideoCutSettings: {
         parameters: {
             query?: never;
             header: {
@@ -15216,210 +15333,31 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    requestKey: components["schemas"]["VideoCutRequestKey"];
+                    aspect?: string;
+                    style?: string;
+                    /** @description A song of the catalog; songs of the music library and imported ones have their own operations. */
+                    builtinSong?: string;
                 };
             };
         };
         responses: {
-            /** @description The job */
-            202: {
+            /** @description The project */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
+                    "application/json": components["schemas"]["VideoCutProject"];
                 };
             };
             400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
-    getVideoCutJob: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-        };
-    };
-    cancelVideoCutJob: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-        };
-    };
-    dropVideoCutJobAssets: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    assetIds: components["schemas"]["VideoCutAssetIDs"];
-                };
-            };
-        };
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    retryVideoCutJobAnalysis: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    retryVideoCutJob: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-        };
-    };
-    replanVideoCutJob: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                jobId: components["parameters"]["VideoCutJobID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The job */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    listVideoCutNotices: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The notices, newest first */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutNotices"];
-                };
-            };
-        };
-    };
-    getVideoCutSong: {
+    getVideoCutSongStructure: {
         parameters: {
             query?: never;
             header?: never;
@@ -15430,17 +15368,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The song */
+            /** @description The song's structure */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VideoCutSong"];
+                    "application/json": components["schemas"]["VideoCutSongStructure"];
                 };
             };
             404: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     putVideoCutSong: {
@@ -15463,29 +15402,66 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The song, being analysed or as analysed before */
+            /** @description The project with the song */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VideoCutSong"];
+                    "application/json": components["schemas"]["VideoCutProject"];
                 };
             };
             400: components["responses"]["ProductError"];
             403: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
             413: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
+        };
+    };
+    importVideoCutSong: {
+        parameters: {
+            query: {
+                /** @description The file's name, for the song's title. */
+                name: string;
+            };
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description The project with the song */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            413: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
     getVideoCutSongAudio: {
         parameters: {
-            query?: {
-                /** @description Seconds to start a decoded song from; ignored for other songs. */
-                start?: number;
-            };
+            query?: never;
             header?: {
                 Range?: string;
             };
@@ -15514,7 +15490,6 @@ export interface operations {
                     "audio/*": string;
                 };
             };
-            400: components["responses"]["ProductError"];
             404: components["responses"]["ProductError"];
             /** @description The range is outside the song. */
             416: {
@@ -15523,17 +15498,492 @@ export interface operations {
                 };
                 content?: never;
             };
+            501: components["responses"]["ProductError"];
+        };
+    };
+    reportVideoCutProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Noted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    generateVideoCutFilm: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["VideoCutRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
             422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
             503: components["responses"]["ProductError"];
         };
     };
-    getVideoCutHero: {
+    resumeVideoCutUpload: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    retryVideoCutProject: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    listVideoCutProjectAssets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The videos */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProjectAssets"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    addVideoCutProjectAsset: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["VideoCutRequestKey"];
+                    assetId: string;
+                    fileId?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The video */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProjectAsset"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutProxy: {
         parameters: {
             query?: never;
             header?: {
                 Range?: string;
             };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+                assetId: components["parameters"]["VideoCutAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The proxy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            /** @description Part of the proxy */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            404: components["responses"]["ProductError"];
+            /** @description The range is outside the proxy. */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutFrame: {
+        parameters: {
+            query: {
+                /** @description Milliseconds into the video. */
+                t: number;
+            };
+            header?: never;
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+                assetId: components["parameters"]["VideoCutAssetID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The frame */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutTimeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The timeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutTimeline"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    editVideoCutTimeline: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    baseRevision: number;
+                    edit: components["schemas"]["VideoCutEdit"];
+                };
+            };
+        };
+        responses: {
+            /** @description The timeline after the edit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutTimeline"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    undoVideoCutTimeline: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    baseRevision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The timeline after undoing */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutTimeline"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    listVideoCutCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+                /** @description The music slot, from 1 to the film's last. */
+                slot: components["parameters"]["VideoCutSlot"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The candidates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutCandidates"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutAssistant: {
+        parameters: {
+            query?: never;
+            header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What works */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutAssistantStatus"];
+                };
+            };
+            404: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+        };
+    };
+    askVideoCutAssistant: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    text: string;
+                    slot?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The reply */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutAssistantReply"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    exportVideoCutFilm: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    requestKey: components["schemas"]["VideoCutRequestKey"];
+                };
+            };
+        };
+        responses: {
+            /** @description The project */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoCutProject"];
+                };
+            };
+            400: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getVideoCutFilm: {
+        parameters: {
+            query?: never;
+            header?: {
+                Range?: string;
+            };
+            path: {
+                projectId: components["parameters"]["VideoCutProjectID"];
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -15541,6 +15991,8 @@ export interface operations {
             /** @description The film */
             200: {
                 headers: {
+                    /** @description attachment, named by the project. */
+                    "Content-Disposition"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15564,10 +16016,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            503: components["responses"]["ProductError"];
+            501: components["responses"]["ProductError"];
         };
     };
-    getVideoCutHeroPoster: {
+    listVideoCutNotices: {
         parameters: {
             query?: never;
             header?: never;
@@ -15576,359 +16028,15 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The poster */
+            /** @description The notices, newest first */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "image/jpeg": string;
+                    "application/json": components["schemas"]["VideoCutNotices"];
                 };
             };
-            404: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    confirmVideoCutVersion: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                versionId: components["parameters"]["VideoCutVersionID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The project */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutProject"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-        };
-    };
-    recutVideoCutVersion: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                versionId: components["parameters"]["VideoCutVersionID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    requestKey: components["schemas"]["VideoCutRequestKey"];
-                    /** @description What to change, as a member's ask: 结尾留长一点. Only its length is checked here; nothing holds it against what the first version cannot do yet, as the ask's page does for the ask. */
-                    change: string;
-                };
-            };
-        };
-        responses: {
-            /** @description The recut job */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutVersionOutline: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                versionId: components["parameters"]["VideoCutVersionID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The version's outline */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutVersionOutline"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutVersionDraft: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                versionId: components["parameters"]["VideoCutVersionID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The draft */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutDraft"];
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    editVideoCutDraft: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                draftId: components["parameters"]["VideoCutDraftID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    baseRevision: number;
-                    op: components["schemas"]["VideoCutDraftOp"];
-                };
-            };
-        };
-        responses: {
-            /** @description The draft after the step, with what it did */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutDraft"];
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            422: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    saveVideoCutDraft: {
-        parameters: {
-            query?: never;
-            header: {
-                "X-CSRF-Token": components["parameters"]["CSRFToken"];
-            };
-            path: {
-                draftId: components["parameters"]["VideoCutDraftID"];
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    requestKey: components["schemas"]["VideoCutRequestKey"];
-                };
-            };
-        };
-        responses: {
-            /** @description The edit job */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutJob"];
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutDraftSong: {
-        parameters: {
-            query?: {
-                /** @description Seconds to start a decoded song from; ignored for other songs. */
-                start?: number;
-            };
-            header?: {
-                Range?: string;
-            };
-            path: {
-                draftId: components["parameters"]["VideoCutDraftID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Audio content */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "audio/*": string;
-                };
-            };
-            /** @description Partial audio content */
-            206: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "audio/*": string;
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            /** @description The range is outside the song. */
-            416: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            422: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    listVideoCutDraftCandidates: {
-        parameters: {
-            query: {
-                /** @description The shot's number from 1. */
-                shot: number;
-                /** @description Words to search the project's videos for. */
-                q?: string;
-                /** @description Only this shot size (景别). */
-                size?: string;
-                /** @description Only this scene; 其他 for the scenes not listed. */
-                scene?: string;
-                /** @description Only 16:9 videos. */
-                landscape?: boolean;
-            };
-            header?: never;
-            path: {
-                draftId: components["parameters"]["VideoCutDraftID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The candidates */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VideoCutCandidates"];
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutVersionShots: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                versionId: components["parameters"]["VideoCutVersionID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The shot list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/csv": string;
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutDraftShots: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                draftId: components["parameters"]["VideoCutDraftID"];
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The shot list */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/csv": string;
-                };
-            };
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-        };
-    };
-    getVideoCutFrame: {
-        parameters: {
-            query: {
-                /** @description Milliseconds into the video. */
-                t: number;
-            };
-            header?: never;
-            path: {
-                projectId: components["parameters"]["VideoCutProjectID"];
-                assetId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The frame */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "image/jpeg": string;
-                };
-            };
-            400: components["responses"]["ProductError"];
-            404: components["responses"]["ProductError"];
-            409: components["responses"]["ProductError"];
-            503: components["responses"]["ProductError"];
         };
     };
     listModules: {
