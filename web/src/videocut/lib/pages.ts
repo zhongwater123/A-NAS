@@ -34,7 +34,6 @@ export const isMaking = (mode: CutMode) => mode === "generating" || mode === "fa
 // hasFilm is whether the project has a made film, exported or not.
 export const hasFilm = (state: VideoCutProjectState) => modes[state] === "ready" || modes[state] === "exporting";
 
-// The film page's status label (顶栏的状态标签); none while the film can be edited.
-export function statusLabel(mode: CutMode): string | undefined {
-  return { generating: "生成中", failed: "生成失败", exporting: "导出中", ready: undefined }[mode];
-}
+// The film page's status (顶栏的状态标签), which ui/messages words; none
+// while the film can be edited.
+export const statusOf = (mode: CutMode): Exclude<CutMode, "ready"> | undefined => (mode === "ready" ? undefined : mode);

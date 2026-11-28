@@ -4559,7 +4559,7 @@ paths:
                 files:
                   type: array
                   minItems: 1
-                  maxItems: 200
+                  description: '200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why.'
                   items:
                     $ref: '#/components/schemas/VideoCutLocalFile'
       responses:
@@ -4641,7 +4641,7 @@ paths:
                 files:
                   type: array
                   minItems: 1
-                  maxItems: 200
+                  description: '200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why.'
                   items:
                     $ref: '#/components/schemas/VideoCutLocalFile'
       responses:
@@ -18821,8 +18821,7 @@ components:
         size:
           type: integer
           minimum: 1
-          maximum: 4294967296
-          description: Bytes; 4 GB at most.
+          description: Bytes. More than 4 GB is file_too_large (422), not validation_failed, so the page can say why.
         modifiedAt:
           type: string
           format: date-time

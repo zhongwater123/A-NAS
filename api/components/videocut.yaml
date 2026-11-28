@@ -58,7 +58,7 @@ schemas:
       browser read from it; the file itself stays in the browser until uploaded.
     properties:
       name: { type: string, minLength: 1, maxLength: 255 }
-      size: { type: integer, minimum: 1, maximum: 4294967296, description: "Bytes; 4 GB at most." }
+      size: { type: integer, minimum: 1, description: "Bytes. More than 4 GB is file_too_large (422), not validation_failed, so the page can say why." }
       modifiedAt: { type: string, format: date-time }
       read: { type: boolean, description: "Whether the browser has read it; the rest is there once it has." }
       duration: { type: number, minimum: 0, description: Seconds. }

@@ -2,7 +2,7 @@
 // other is the player feature's; the skeleton has where the playhead is and
 // that it follows the selected shot: clicking a shot card only selects it,
 // and the player, not the shot track, moves to its start.
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 import type { Shot } from "../api/client";
 import { useCut, useCutStore } from "./cutStore";
@@ -27,8 +27,11 @@ export function useFollowSelection(workId: string) {
   const store = useCutStore();
   const selected = useCut((state) => state.selectedSlot);
   const shots = useTimeline(workId, false).data?.shots;
-  useEffect(() => {
-    const start = startOf(shots, selected);
+  // Only a new selection moves it: an edit changes the shots, and the
+  // editor has put the playhead where the film plays again from.
+  const follow = useEffectEvent((slot: number | null) => {
+    const start = startOf(shots, slot);
     if (start !== undefined) store.set({ playhead: start });
-  }, [selected, shots, store]);
+  });
+  useEffect(() => follow(selected), [selected]);
 }

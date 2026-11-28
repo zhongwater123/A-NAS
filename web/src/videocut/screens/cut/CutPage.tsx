@@ -8,7 +8,7 @@ import { useSongStructure, useTimeline } from "../../app/features";
 import { useNav } from "../../app/nav";
 import { useFollowSelection } from "../../app/player";
 import { useShortcuts } from "../../app/shortcuts";
-import { type CutMode, cutModeOf, isMaking, statusLabel } from "../../lib/pages";
+import { type CutMode, cutModeOf, isMaking, statusOf } from "../../lib/pages";
 import { clock } from "../../lib/time";
 import { ActionLock } from "../../ui/lock";
 import { messages } from "../../ui/messages";
@@ -38,11 +38,16 @@ function Film({ work }: { work: Project }) {
   useTimeline(work.id, !isMaking(mode));
   useFollowSelection(work.id);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const label = statusLabel(mode);
+  const status = statusOf(mode);
+  const label = status && messages.status[status];
 
   // Ctrl+Z (⌘Z) undoes (app/shortcuts.ts).
   const page = useRef<HTMLDivElement>(null);
-  useShortcuts(page, { undo: () => void editor.undo() });
+  useShortcuts(page, {
+    undo: () => {
+      if (editor.canUndo) void editor.undo();
+    },
+  });
 
   return (
     <ActionLock.Provider value={editor.locked}>

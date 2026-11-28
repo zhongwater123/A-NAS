@@ -10,6 +10,7 @@ export const shared = {
   readOnly: "导出中，暂不能修改",
   sampleReadOnly: "示例作品不能修改",
   retry: "重试",
+  cancel: "取消",
   tooManyRetries: "多次失败，请联系我们",
   uploadInterrupted: "上传中断，重新选择文件继续",
   queued: "排队中 · 上一条完成后自动开始",

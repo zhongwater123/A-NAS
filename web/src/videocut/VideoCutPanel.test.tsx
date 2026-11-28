@@ -113,6 +113,21 @@ describe("what the shell tells once", () => {
   });
 });
 
+describe("starting a film", () => {
+  it("says why generating was refused", async () => {
+    const { project } = fake.create("k9", [file("h.mp4")]);
+    server.use(
+      http.post("/api/v1/videocut/projects/{projectId}/generate", ({ response }) =>
+        response(503).json({ error: { code: "videocut_unavailable", message: "x" } }),
+      ),
+    );
+    render(<VideoCutPanel poll={30} />);
+    await userEvent.click(await screen.findByRole("button", { name: project.name }));
+    await userEvent.click(await screen.findByRole("button", { name: "开始生成" }));
+    expect(await screen.findByText("剪辑中心暂不可用，请稍后重试")).toBeInTheDocument();
+  });
+});
+
 describe("useEditor", () => {
   async function readyWork() {
     const project = fake.made("k2", [file("c.mp4")]);

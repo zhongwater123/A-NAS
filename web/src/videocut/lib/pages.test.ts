@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { VideoCutProjectState } from "../../api.generated";
-import { cutModeOf, hasFilm, isMaking, pageOf, statusLabel } from "./pages";
+import { cutModeOf, hasFilm, isMaking, pageOf, statusOf } from "./pages";
 
 describe("the page a project opens on", () => {
   // Every state of docs/specs/venus.md#作品状态机, with its page and view.
@@ -36,10 +36,10 @@ describe("the page a project opens on", () => {
   });
 
   it("labels the film page only while it cannot be edited", () => {
-    expect([statusLabel("generating"), statusLabel("failed"), statusLabel("exporting"), statusLabel("ready")]).toEqual([
-      "生成中",
-      "生成失败",
-      "导出中",
+    expect([statusOf("generating"), statusOf("failed"), statusOf("exporting"), statusOf("ready")]).toEqual([
+      "generating",
+      "failed",
+      "exporting",
       undefined,
     ]);
   });

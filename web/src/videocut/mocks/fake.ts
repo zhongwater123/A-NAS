@@ -94,6 +94,8 @@ interface Stored {
   assets: VideoCutProjectAsset[];
   // The beats replace took out of each slot, latest first: candidates again.
   replaced?: Map<number, VideoCutCandidate[]>;
+  // Retries made since the project last failed, kept once the failure clears.
+  retries?: number;
 }
 
 const sameFile = (a: VideoCutLocalFile, b: VideoCutLocalFile) =>
@@ -432,7 +434,7 @@ export class VenusFake {
   fail(id: string, step: VideoCutFailure["step"], reason: VideoCutFailure["reason"]): VideoCutProject {
     const stored = this.find(id);
     stored.project.state = "failed";
-    stored.project.failure = { step, reason, retries: stored.project.failure?.retries ?? 0 };
+    stored.project.failure = { step, reason, retries: stored.retries ?? 0 };
     this.touch(stored);
     return stored.project;
   }
@@ -442,8 +444,11 @@ export class VenusFake {
     this.inState(stored, "failed");
     const failure = stored.project.failure;
     if (!failure || failure.retries >= MAX_RETRIES) throw new FakeError(409, "too_many_retries");
-    failure.retries += 1;
-    stored.project.state = failure.step === "upload" ? "uploading" : "generating";
+    stored.retries = failure.retries + 1;
+    // Back to the step that failed; generating waits its turn like any other.
+    stored.project.failure = undefined;
+    const busy = [...this.stored.values()].some((s) => s !== stored && s.project.state === "generating");
+    stored.project.state = failure.step === "upload" ? "uploading" : busy ? "queued" : "generating";
     this.touch(stored);
     return stored.project;
   }
@@ -656,6 +661,8 @@ export class VenusFake {
     const changed = now.changedSlots;
     stored.timeline = { ...stored.undo, revision: now.revision + 1, canUndo: false, changedSlots: changed };
     stored.undo = undefined;
+    // Changed again after an export: 已完成, as an edit leaves it.
+    if (stored.project.state === "exported") stored.project.state = "ready";
     this.touch(stored);
     return stored.timeline;
   }

@@ -62,7 +62,7 @@
             required: [requestKey, files]
             properties:
               requestKey: { $ref: "../components/videocut.yaml#/schemas/VideoCutRequestKey" }
-              files: { type: array, minItems: 1, maxItems: 200, items: { $ref: "../components/videocut.yaml#/schemas/VideoCutLocalFile" } }
+              files: { type: array, minItems: 1, description: "200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why.", items: { $ref: "../components/videocut.yaml#/schemas/VideoCutLocalFile" } }
     responses:
       "200": { description: The project the same requestKey made before, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProject" } } } }
       "201": { description: The new project, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProject" } } } }
@@ -108,7 +108,7 @@
             additionalProperties: false
             required: [files]
             properties:
-              files: { type: array, minItems: 1, maxItems: 200, items: { $ref: "../components/videocut.yaml#/schemas/VideoCutLocalFile" } }
+              files: { type: array, minItems: 1, description: "200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why.", items: { $ref: "../components/videocut.yaml#/schemas/VideoCutLocalFile" } }
     responses:
       "200": { description: The project, content: { application/json: { schema: { $ref: "../components/videocut.yaml#/schemas/VideoCutProject" } } } }
       "400": { $ref: "../components/common.yaml#/responses/ProductError" }

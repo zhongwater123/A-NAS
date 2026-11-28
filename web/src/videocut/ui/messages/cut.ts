@@ -8,6 +8,8 @@ export const cut = {
   generated: "成片已生成",
   skipped: (count: number) => `${count} 段无法分析，已跳过`,
   pickShotFirst: "先在时间轴上点一个镜头",
+  notMade: "成片生成后才能修改",
+  status: { generating: "生成中", failed: "生成失败", exporting: "导出中" },
   undone: "已撤销",
   undo: "撤销",
   thisShot: "这一镜",

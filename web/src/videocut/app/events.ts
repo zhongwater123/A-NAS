@@ -8,6 +8,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
+import { errorText } from "../../api/errorMessages";
 import { exportFilm, filmURL, type Project } from "../api/client";
 import { hasFilm } from "../lib/pages";
 import { useBanner } from "../ui/Banner";
@@ -56,7 +57,7 @@ export function useWorkEvents(work: Project | undefined) {
 
     if (last && making.has(last.state) && work.state === "ready") toast(messages.generated);
     if (work.progress.skipped > 0 && hasFilm(work.state)) {
-      if (tell(`skipped:${work.id}`)) toast(messages.skipped(work.progress.skipped));
+      if (tell(`skipped:${work.id}:${work.progress.skipped}`)) toast(messages.skipped(work.progress.skipped));
     }
 
     const exportedAt = work.film?.exportedAt;
@@ -78,7 +79,11 @@ export function useWorkEvents(work: Project | undefined) {
       else
         toast(`${messages.exportFailed}：${reason}`, {
           label: messages.retry,
-          run: () => void exportFilm(work.id).then((next) => client.setQueryData(keys.work(next.id), next)),
+          run: () =>
+            void exportFilm(work.id).then(
+              (next) => client.setQueryData(keys.work(next.id), next),
+              (error: unknown) => toast(errorText(error, "videocut")),
+            ),
         });
     }
   }, [work, toast, banner, client]);

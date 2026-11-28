@@ -1,9 +1,11 @@
 // The capabilities feature components get, each over the VideoCut API. The
 // signatures are the skeleton's (#695); what is marked for a feature is
 // filled in by that feature's issue without changing how pages call it.
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { errorText } from "../../api/errorMessages";
 import {
   ask,
   createProject,
@@ -21,6 +23,7 @@ import {
   updateSelection,
   updateSettings,
 } from "../api/client";
+import { useToast } from "../ui/Toast";
 import { useCutStore } from "./cutStore";
 import { keys, useSetWork } from "./works";
 
@@ -82,9 +85,20 @@ export function useSettings(workId: string) {
 
 /** 开始生成 (M4-5) and retrying a failed project (M5-3). */
 export function useGenerate(workId: string) {
+  const toast = useToast();
   const start = useWorkMutation(() => generate(workId));
   const again = useWorkMutation(() => retry(workId));
-  return { start: start.mutateAsync, retry: again.mutateAsync, starting: start.isPending || again.isPending };
+  // The page fires these and forgets them: a refusal is said here, never thrown at it.
+  const said = (call: () => Promise<unknown>) => () =>
+    call().then(
+      () => undefined,
+      (error: unknown) => toast(errorText(error, "videocut")),
+    );
+  return {
+    start: said(() => start.mutateAsync()),
+    retry: said(() => again.mutateAsync()),
+    starting: start.isPending || again.isPending,
+  };
 }
 
 /**
