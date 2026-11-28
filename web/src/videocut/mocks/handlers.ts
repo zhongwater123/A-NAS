@@ -163,8 +163,8 @@ export function videocutHandlers(fake: VenusFake, http: OpenApiHttpHandlers<path
     ),
     http.get("/api/v1/videocut/projects/{projectId}/film", ({ params }) =>
       answer(() => {
-        if (!fake.hasFilm(params.projectId)) throw new FakeError(404, "not_found");
-        return binary("video/mp4", new Uint8Array(0), { "Content-Disposition": 'attachment; filename="film.mp4"' });
+        fake.film(params.projectId);
+        return binary("video/mp4", undefined, { "Content-Disposition": 'attachment; filename="film.mp4"' });
       }),
     ),
   ];

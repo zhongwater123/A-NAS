@@ -883,7 +883,7 @@ web/src/videocut/
 - **导出**（T8 的默认做法）：渲染好的文件存在项目里，`GET /projects/{id}/film` 带 `Content-Disposition: attachment` 下载，支持 Range。
 - **报到**：沿用规格的默认做法，每 30 秒一次，2 分钟收不到即判定。
 
-**还没实现时**：剪辑服务给还没实现的操作挂一个回答 501 `not_implemented` 的路由，因为产品服务的路由测试要求契约里的每个操作都有路由；契约里这些操作也声明了 501，生成的类型与契约测试才认得这个回答。“开始生成”与“重试”的路由仍先记下 anas-api 登记的规划授权，再回答 501。网页在测试里用 `web/src/videocut/mocks/` 的 MSW 替身应答：`VenusFake` 在内存里按状态机走，读一次项目就前进一步，轮询的页面能从上传一路走到已完成、导出。`handlers.test.ts` 核对替身覆盖了契约里的每个操作（开关与桌面提示由桌面自己的处理器应答）。后端每接好一个操作，就删掉对应的替身、501 路由和契约里的 501。Fake 预览构建网页时设 `VITE_VIDEOCUT_STANDINS=1`，页面的 `fetch` 先问替身（`mocks/browser.ts`，用 MSW 的 `getResponse`），替身不答的才发给服务端；不用 Service Worker，因为桌面只发 `/assets/` 下的文件。别的构建不带替身。
+**还没实现时**：剪辑服务给还没实现的操作挂一个回答 501 `not_implemented` 的路由，因为产品服务的路由测试要求契约里的每个操作都有路由；契约里这些操作也声明了 501，生成的类型与契约测试才认得这个回答。“开始生成”与“重试”的路由仍先记下 anas-api 登记的规划授权，再回答 501。网页在测试里用 `web/src/videocut/mocks/` 的 MSW 替身应答：`VenusFake` 在内存里按状态机走，读一次项目就前进一步，轮询的页面能从上传一路走到已完成、导出。`handlers.test.ts` 核对替身正好是契约里声明了 501 的那些操作（开关与桌面提示不声明 501，由桌面自己的处理器应答）。后端每接好一个操作，就删掉对应的替身、501 路由和契约里的 501，测试随之认得。Fake 预览构建网页时设 `VITE_VIDEOCUT_STANDINS=1`，页面的 `fetch` 先问替身（`mocks/browser.ts`，用 MSW 的 `getResponse`），替身不答的才发给服务端；不用 Service Worker，因为桌面只发 `/assets/` 下的文件。别的构建不带替身。
 
 在后端接好“生成”与“导出”之前，`videocut-center` 上没有能出片的接口，首版出片的系统测试与 VNAS 规划的端到端测试也先跳过（`scripts/system-test.sh`、`ai/assistant-spike/system-test.sh` 里写明了原因）。这期间不要用 `videocut-center` 重新部署实验 NAS，需要成片时用设备上已经装好的版本出。
 
