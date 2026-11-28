@@ -10,6 +10,9 @@
 .thisShot h2,
 .candidates h3 {
   margin: 0;
+}
+
+.thisShot h2 {
   font-size: var(--vn-text-14);
 }
 

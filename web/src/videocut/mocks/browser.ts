@@ -14,12 +14,10 @@ export function startStandIns(): void {
   const fake = new VenusFake();
   // Besides the sample, which reads only, a made film to edit: the start
   // page cannot make one until the import feature lands.
-  const { project } = fake.create("preview", [
+  fake.made("preview", [
     { name: "海边.mp4", size: 1, modifiedAt: "2026-11-20T08:00:00Z", read: true },
     { name: "古镇.mp4", size: 1, modifiedAt: "2026-11-20T09:00:00Z", read: true },
   ]);
-  fake.generate(project.id, "preview");
-  while (fake.step(project.id).state !== "ready");
   const handlers = videocutHandlers(fake, http);
   const serverFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
