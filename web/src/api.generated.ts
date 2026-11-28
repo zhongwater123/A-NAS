@@ -269,6 +269,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/device-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The family's e-ink screens (ADR 0041), newest first. A screen is not bound to any account, so only administrators see this list. Tokens nobody used for 90 days are gone. */
+        get: operations["listDeviceTokens"];
+        put?: never;
+        /** @description Register an e-ink screen for the whole family. The token in the answer is shown once. A family holds at most 10 screens (409 device_token_limit); a name of 1–40 characters and a poll interval of 15–3600 seconds are required (422 validation_failed). */
+        post: operations["createDeviceToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/device-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description Unregister one screen; its later calls answer 401. */
+        delete: operations["revokeDeviceToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/device/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ask the e-ink screen what to do next
+         * @description The screen polls this with its device token as a bearer token (ADR 0041). It reports its battery, radio and power state in query parameters, and the answer tells it whether to fetch /screen.bin, in how many seconds to ask again, and what it now shows. A browser's Origin or a request not naming this device in Host is 403 forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens 429 too_many_attempts.
+         */
+        get: operations["getDeviceNext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screen.bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the 800×480 1-bit screen frame
+         * @description The screen fetches the frame to draw after the answer names /screen.bin. 48000 bytes, one bit per pixel, most significant bit first; X-Content-Hash names the frame so the screen can compare it with the key it already shows (ADR 0041).
+         */
+        get: operations["getScreenBitmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/screen-bar.bin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the 592×80 bottom strip
+         * @description The bottom strip's 592×80 frame, 5920 bytes, one bit per pixel, most significant bit first, with X-Bar-Time naming when it was made (ADR 0041).
+         */
+        get: operations["getScreenBarBitmap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/profiles": {
         parameters: {
             query?: never;
@@ -6132,6 +6227,63 @@ export interface components {
                 at: string;
             };
         };
+        /** @description One e-ink screen the family registered (ADR 0041); not bound to any account. */
+        DeviceToken: {
+            id: string;
+            name: string;
+            /** @description How often the screen polls by day. */
+            pollSeconds: number;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Updated at most every 5 minutes; absent until the screen's first call.
+             */
+            lastUsedAt?: string;
+        };
+        DeviceTokenList: {
+            items: components["schemas"]["DeviceToken"][];
+        };
+        DeviceTokenRequest: {
+            /** @description 1–40 characters after trimming, without control characters. */
+            name: string;
+            /**
+             * @description How often the screen polls by day; 60 when omitted.
+             * @default 60
+             */
+            pollSeconds: number;
+        };
+        DeviceTokenCreated: {
+            deviceToken: components["schemas"]["DeviceToken"];
+            /** @description anas_dev_ and 64 hexadecimal digits. Returned only here; A-NAS keeps its hash. */
+            token: string;
+        };
+        /** @description /api/device/next's answer (ADR 0041). */
+        DeviceNextResponse: {
+            /**
+             * @description What the screen does next; none means it does not fetch a frame.
+             * @enum {string}
+             */
+            action: "none" | "partial" | "full";
+            /** @description Why the action was chosen */
+            reason: string;
+            /** @description How many seconds until the screen asks again. */
+            next_poll_seconds: number;
+            /** @description How many partial refreshes remain before a full refresh is forced. */
+            partials_left: number;
+            /** @description True during the night window */
+            quiet: boolean;
+            /** @description The hash of the frame the screen now shows; /screen.bin repeats it as X-Content-Hash. */
+            key: string;
+            /** @description The server's clock in UTC. */
+            server_time: string;
+            /** @description When the screen should ask again */
+            next_at: string;
+            /** @description Whether the bottom strip exists. */
+            bar: boolean;
+            /** @description /screen.bin when the action is not none; absent otherwise. */
+            bin?: string;
+        };
         LocalDisplay: {
             /**
              * @description Minutes the screen saver plays before the screen turns black; 0 keeps it on. Defaults to 30. The server refuses other values with 422 validation_failed.
@@ -9625,6 +9777,11 @@ export type Notification = components['schemas']['Notification'];
 export type ViewingRequest = components['schemas']['ViewingRequest'];
 export type ViewingGrant = components['schemas']['ViewingGrant'];
 export type Session = components['schemas']['Session'];
+export type DeviceToken = components['schemas']['DeviceToken'];
+export type DeviceTokenList = components['schemas']['DeviceTokenList'];
+export type DeviceTokenRequest = components['schemas']['DeviceTokenRequest'];
+export type DeviceTokenCreated = components['schemas']['DeviceTokenCreated'];
+export type DeviceNextResponse = components['schemas']['DeviceNextResponse'];
 export type LocalDisplay = components['schemas']['LocalDisplay'];
 export type WallpaperStyle = components['schemas']['WallpaperStyle'];
 export type Wallpaper = components['schemas']['Wallpaper'];
@@ -10465,6 +10622,185 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["ProductError"];
+        };
+    };
+    listDeviceTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The family's device tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceTokenList"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+        };
+    };
+    createDeviceToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description The new token and its value */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceTokenCreated"];
+                };
+            };
+            403: components["responses"]["ProductError"];
+            409: components["responses"]["ProductError"];
+            422: components["responses"]["ProductError"];
+        };
+    };
+    revokeDeviceToken: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-CSRF-Token": components["parameters"]["CSRFToken"];
+            };
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["ProductError"];
+            404: components["responses"]["ProductError"];
+        };
+    };
+    getDeviceNext: {
+        parameters: {
+            query?: {
+                /** @description Battery percent. */
+                bat?: number;
+                /** @description Battery millivolts. */
+                mv?: number;
+                /** @description Charging. */
+                chg?: boolean;
+                /** @description On USB power. */
+                usb?: boolean;
+                /** @description Wi-Fi signal strength. */
+                rssi?: number;
+                /** @description How long the screen was awake. */
+                awake_ms?: number;
+                /** @description Firmware version. */
+                fw?: string;
+                /** @description What woke the screen. */
+                wake?: string;
+                /** @description Reset reason. */
+                reset?: string;
+                /** @description Failure reason. */
+                fail?: string;
+                /** @description Whether the screen shows a frame. */
+                shown?: boolean;
+                /** @description The screen needs a catch-up refresh. */
+                dirty?: boolean;
+                /** @description A button press forces a refresh. */
+                force?: boolean;
+                /** @description The screen supports partial refreshes. */
+                partial?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What to do next */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceNextResponse"];
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getScreenBitmap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The 800×480 1-bit frame, 48000 bytes. */
+            200: {
+                headers: {
+                    /** @description The frame's hash. */
+                    "X-Content-Hash"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
+        };
+    };
+    getScreenBarBitmap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The 592×80 1-bit strip, 5920 bytes. */
+            200: {
+                headers: {
+                    /** @description When the strip was made. */
+                    "X-Bar-Time"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["ProductError"];
+            403: components["responses"]["ProductError"];
+            429: components["responses"]["ProductError"];
+            503: components["responses"]["ProductError"];
         };
     };
     listProfiles: {

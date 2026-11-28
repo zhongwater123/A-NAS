@@ -35,6 +35,11 @@ paths:
   /api/v1/session/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1avatar" }
   /api/v1/session/agent-tokens: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens" }
   /api/v1/session/agent-tokens/{tokenId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1session~1agent-tokens~1{tokenId}" }
+  /api/v1/device-tokens: { $ref: "paths/accounts.yaml#/~1api~1v1~1device-tokens" }
+  /api/v1/device-tokens/{tokenId}: { $ref: "paths/accounts.yaml#/~1api~1v1~1device-tokens~1{tokenId}" }
+  /api/device/next: { $ref: "paths/device.yaml#/~1api~1device~1next" }
+  /screen.bin: { $ref: "paths/device.yaml#/~1screen.bin" }
+  /screen-bar.bin: { $ref: "paths/device.yaml#/~1screen-bar.bin" }
   /api/v1/profiles: { $ref: "paths/accounts.yaml#/~1api~1v1~1profiles" }
   /api/v1/users/{userId}/avatar: { $ref: "paths/accounts.yaml#/~1api~1v1~1users~1{userId}~1avatar" }
   /api/v1/notifications: { $ref: "paths/accounts.yaml#/~1api~1v1~1notifications" }
@@ -346,7 +351,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: A member's agent token (ADR 0040), only on operations marked x-anas-posture agent.
+      description: A member's agent token (ADR 0040) or a family device token (ADR 0041), only on operations marked x-anas-posture agent or device.
   parameters:
     CSRFToken: { $ref: "components/common.yaml#/parameters/CSRFToken" }
     UserID: { $ref: "components/accounts.yaml#/parameters/UserID" }
@@ -454,6 +459,11 @@ components:
     ViewingRequest: { $ref: "components/accounts.yaml#/schemas/ViewingRequest" }
     ViewingGrant: { $ref: "components/accounts.yaml#/schemas/ViewingGrant" }
     Session: { $ref: "components/accounts.yaml#/schemas/Session" }
+    DeviceToken: { $ref: "components/accounts.yaml#/schemas/DeviceToken" }
+    DeviceTokenList: { $ref: "components/accounts.yaml#/schemas/DeviceTokenList" }
+    DeviceTokenRequest: { $ref: "components/accounts.yaml#/schemas/DeviceTokenRequest" }
+    DeviceTokenCreated: { $ref: "components/accounts.yaml#/schemas/DeviceTokenCreated" }
+    DeviceNextResponse: { $ref: "components/device.yaml#/schemas/DeviceNextResponse" }
     LocalDisplay: { $ref: "components/desktop.yaml#/schemas/LocalDisplay" }
     WallpaperStyle: { $ref: "components/desktop.yaml#/schemas/WallpaperStyle" }
     Wallpaper: { $ref: "components/desktop.yaml#/schemas/Wallpaper" }

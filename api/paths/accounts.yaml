@@ -120,6 +120,42 @@
     responses:
       "204": { description: Revoked }
       "404": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/device-tokens:
+  get:
+    operationId: listDeviceTokens
+    x-anas-posture: admin
+    description: >-
+      The family's e-ink screens (ADR 0041), newest first. A screen is not bound to any account, so only
+      administrators see this list. Tokens nobody used for 90 days are gone.
+    responses:
+      "200": { description: The family's device tokens, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/DeviceTokenList" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+  post:
+    operationId: createDeviceToken
+    x-anas-posture: admin
+    description: >-
+      Register an e-ink screen for the whole family. The token in the answer is shown once. A family holds at most
+      10 screens (409 device_token_limit); a name of 1–40 characters and a poll interval of 15–3600 seconds are
+      required (422 validation_failed).
+    parameters: [{ $ref: "../components/common.yaml#/parameters/CSRFToken" }]
+    requestBody: { required: true, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/DeviceTokenRequest" } } } }
+    responses:
+      "201": { description: The new token and its value, content: { application/json: { schema: { $ref: "../components/accounts.yaml#/schemas/DeviceTokenCreated" } } } }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "409": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "422": { $ref: "../components/common.yaml#/responses/ProductError" }
+/api/v1/device-tokens/{tokenId}:
+  delete:
+    operationId: revokeDeviceToken
+    x-anas-posture: admin
+    description: Unregister one screen; its later calls answer 401.
+    parameters:
+      - { name: tokenId, in: path, required: true, schema: { type: string } }
+      - { $ref: "../components/common.yaml#/parameters/CSRFToken" }
+    responses:
+      "204": { description: Revoked }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "404": { $ref: "../components/common.yaml#/responses/ProductError" }
 /api/v1/profiles:
   get:
     operationId: listProfiles

@@ -1,0 +1,74 @@
+/api/device/next:
+  get:
+    operationId: getDeviceNext
+    summary: Ask the e-ink screen what to do next
+    security: [{ bearerAuth: [] }]
+    x-anas-posture: device
+    description: >-
+      The screen polls this with its device token as a bearer token (ADR 0041). It reports its battery, radio and
+      power state in query parameters, and the answer tells it whether to fetch /screen.bin, in how many seconds to
+      ask again, and what it now shows. A browser's Origin or a request not naming this device in Host is 403
+      forbidden, a missing or bad token 401 with WWW-Authenticate, and a client that keeps presenting bad tokens
+      429 too_many_attempts.
+    parameters:
+      - { name: bat, in: query, schema: { type: integer }, description: Battery percent. }
+      - { name: mv, in: query, schema: { type: integer }, description: Battery millivolts. }
+      - { name: chg, in: query, schema: { type: boolean }, description: Charging. }
+      - { name: usb, in: query, schema: { type: boolean }, description: On USB power. }
+      - { name: rssi, in: query, schema: { type: integer }, description: Wi-Fi signal strength. }
+      - { name: awake_ms, in: query, schema: { type: integer }, description: How long the screen was awake. }
+      - { name: fw, in: query, schema: { type: string }, description: Firmware version. }
+      - { name: wake, in: query, schema: { type: string }, description: What woke the screen. }
+      - { name: reset, in: query, schema: { type: string }, description: Reset reason. }
+      - { name: fail, in: query, schema: { type: string }, description: Failure reason. }
+      - { name: shown, in: query, schema: { type: boolean }, description: Whether the screen shows a frame. }
+      - { name: dirty, in: query, schema: { type: boolean }, description: The screen needs a catch-up refresh. }
+      - { name: force, in: query, schema: { type: boolean }, description: A button press forces a refresh. }
+      - { name: partial, in: query, schema: { type: boolean }, description: The screen supports partial refreshes. }
+    responses:
+      "200": { description: What to do next, content: { application/json: { schema: { $ref: "../components/device.yaml#/schemas/DeviceNextResponse" } } } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "429": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/screen.bin:
+  get:
+    operationId: getScreenBitmap
+    summary: Fetch the 800×480 1-bit screen frame
+    security: [{ bearerAuth: [] }]
+    x-anas-posture: device
+    description: >-
+      The screen fetches the frame to draw after the answer names /screen.bin. 48000 bytes, one bit per pixel,
+      most significant bit first; X-Content-Hash names the frame so the screen can compare it with the key it
+      already shows (ADR 0041).
+    responses:
+      "200":
+        description: The 800×480 1-bit frame, 48000 bytes.
+        headers:
+          X-Content-Hash: { schema: { type: string }, description: The frame's hash. }
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "429": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }
+/screen-bar.bin:
+  get:
+    operationId: getScreenBarBitmap
+    summary: Fetch the 592×80 bottom strip
+    security: [{ bearerAuth: [] }]
+    x-anas-posture: device
+    description: >-
+      The bottom strip's 592×80 frame, 5920 bytes, one bit per pixel, most significant bit first, with X-Bar-Time
+      naming when it was made (ADR 0041).
+    responses:
+      "200":
+        description: The 592×80 1-bit strip, 5920 bytes.
+        headers:
+          X-Bar-Time: { schema: { type: string, format: date-time }, description: When the strip was made. }
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      "401": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "403": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "429": { $ref: "../components/common.yaml#/responses/ProductError" }
+      "503": { $ref: "../components/common.yaml#/responses/ProductError" }

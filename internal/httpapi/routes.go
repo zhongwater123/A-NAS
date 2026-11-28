@@ -44,6 +44,7 @@ func (h *productHandler) table() []apiroute.Route {
 		session  = apiroute.Session
 		mutation = apiroute.Mutation
 		admin    = apiroute.Admin
+		device   = apiroute.Device
 	)
 	get, post, del := http.MethodGet, http.MethodPost, http.MethodDelete
 	routes := []apiroute.Route{
@@ -63,6 +64,10 @@ func (h *productHandler) table() []apiroute.Route {
 		{Method: get, Pattern: "/api/v1/terminal/session", Posture: admin, Handler: h.handleTerminal},
 
 		{Method: get, Pattern: modules.PathPrefix, Posture: session, Handler: serve(modules.List(h.Modules))},
+
+		{Method: get, Pattern: "/api/device/next", Posture: device, Handler: h.handleDeviceNext},
+		{Method: get, Pattern: "/screen.bin", Posture: device, Handler: h.serveScreen},
+		{Method: get, Pattern: "/screen-bar.bin", Posture: device, Handler: h.serveScreenBar},
 	}
 	logger := h.Logger
 	// The task manager needs a reader that also observes tasks, as the Host
@@ -72,6 +77,7 @@ func (h *productHandler) table() []apiroute.Route {
 		accountsapi.NewUsers(h.Accounts, logger),
 		accountsapi.NewProfiles(h.Accounts, h.pictures, logger),
 		accountsapi.NewAgentTokens(h.Accounts, logger),
+		accountsapi.NewDeviceTokens(h.Accounts, logger),
 		storageapi.New(h.Storage, logger),
 		filesapi.New(h.Files, h.FilesChanged, logger),
 		filepreviewapi.New(h.FilePreviews, logger),
@@ -211,11 +217,18 @@ func (h *productHandler) register(routes []apiroute.Route) {
 // mounted route lists the operations it serves.
 func checkPosture(route apiroute.Route) error {
 	switch {
-	case route.Posture < apiroute.Public || route.Posture > apiroute.Agent:
+	case route.Posture < apiroute.Public || route.Posture > apiroute.Device:
 		return fmt.Errorf("route %s %s has no valid posture (%d)", route.Method, route.Pattern, route.Posture)
 	case route.Posture == apiroute.Agent && route.Method == "":
 		return fmt.Errorf("route %s is mounted for every method as agent; give each agent operation its method", route.Pattern)
 	case route.Posture == apiroute.Agent:
+		return nil
+	case route.Posture == apiroute.Device && route.Method == "":
+		return fmt.Errorf("route %s is mounted for every method as device; give each device operation its method", route.Pattern)
+	case route.Posture == apiroute.Device:
+		if !apiroute.Safe(route.Method) || !devicePath(route.Pattern) {
+			return fmt.Errorf("route %s %s is not one of the three device reads", route.Method, route.Pattern)
+		}
 		return nil
 	case route.Method == "" && (route.Posture == apiroute.Public || route.Posture == apiroute.Mutation):
 		return fmt.Errorf("route %s is mounted for every method as %s; mount it as session or admin", route.Pattern, route.Posture)
@@ -231,6 +244,16 @@ func checkPosture(route apiroute.Route) error {
 	return nil
 }
 
+// devicePath reports whether pattern is one of the three device routes the
+// guard serves (ADR 0041): nothing else may claim the device posture.
+func devicePath(pattern string) bool {
+	switch pattern {
+	case "/api/device/next", "/screen.bin", "/screen-bar.bin":
+		return true
+	}
+	return false
+}
+
 // guard enforces a route's posture: a session cookie of this client, a new
 // password where an administrator reset it, the CSRF token for anything but
 // a read, and the administrator's role. The handler then finds the session
@@ -241,6 +264,9 @@ func (h *productHandler) guard(route apiroute.Route) http.HandlerFunc {
 	}
 	if route.Posture == apiroute.Agent {
 		return h.guardAgent(route)
+	}
+	if route.Posture == apiroute.Device {
+		return h.guardDevice(route)
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.Accounts == nil {

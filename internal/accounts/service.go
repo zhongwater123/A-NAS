@@ -200,6 +200,19 @@ var databaseSchema = sqlitedb.Schema{
 );
 CREATE INDEX agent_tokens_user_id ON agent_tokens(user_id);`,
 		Down: "DROP TABLE agent_tokens;",
+	}, {
+		// Device tokens (ADR 0041): one per e-ink screen the family registers.
+		// Family-level, so no user_id; the token's SHA-256 hash is all that is
+		// kept, and the daytime poll interval the screen asks next with.
+		Up: `CREATE TABLE device_tokens (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    poll_seconds INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+);`,
+		Down: "DROP TABLE device_tokens;",
 	}},
 }
 

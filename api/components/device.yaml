@@ -1,0 +1,20 @@
+schemas:
+  DeviceNextResponse:
+    type: object
+    additionalProperties: false
+    required: [action, reason, next_poll_seconds, partials_left, quiet, key, server_time, next_at, bar]
+    description: /api/device/next's answer (ADR 0041).
+    properties:
+      action:
+        type: string
+        enum: [none, partial, full]
+        description: What the screen does next; none means it does not fetch a frame.
+      reason: { type: string, description: Why the action was chosen, in Chinese, for the administrator's logs. }
+      next_poll_seconds: { type: integer, description: How many seconds until the screen asks again. }
+      partials_left: { type: integer, description: How many partial refreshes remain before a full refresh is forced. }
+      quiet: { type: boolean, description: True during the night window, when the screen stays silent. }
+      key: { type: string, description: The hash of the frame the screen now shows; /screen.bin repeats it as X-Content-Hash. }
+      server_time: { type: string, description: The server's clock in UTC. }
+      next_at: { type: string, description: When the screen should ask again, in UTC. }
+      bar: { type: boolean, description: Whether the bottom strip exists. }
+      bin: { type: string, description: "/screen.bin when the action is not none; absent otherwise." }

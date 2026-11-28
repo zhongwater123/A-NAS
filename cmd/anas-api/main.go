@@ -36,6 +36,7 @@ import (
 	fakecontainers "github.com/zhongwater123/A-NAS/internal/containers/fake"
 	"github.com/zhongwater123/A-NAS/internal/containersapi"
 	"github.com/zhongwater123/A-NAS/internal/datavolume"
+	"github.com/zhongwater123/A-NAS/internal/device"
 	"github.com/zhongwater123/A-NAS/internal/envconfig"
 	"github.com/zhongwater123/A-NAS/internal/feedback"
 	"github.com/zhongwater123/A-NAS/internal/feedbackapi"
@@ -320,6 +321,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer closeAtExit(logger, "personalization.db", personalizationStore)
+	deviceStore, err := device.Open(filepath.Join(stateDirectory, "device.db"))
+	if err != nil {
+		return err
+	}
+	defer closeAtExit(logger, "device.db", deviceStore)
 	webSearchStore, err := websearch.OpenStore(filepath.Join(stateDirectory, "web-search.db"))
 	if err != nil {
 		return err
@@ -403,7 +409,7 @@ func run(logger *slog.Logger) error {
 		updateWork(storageService, appStore), accountService, logger)
 	apiHandler := httpapi.NewProduct(httpapi.ProductDependencies{
 		Reader: reader, DataSource: dataSource, ProductVersion: version,
-		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore,
+		Accounts: accountService, Files: fileService, Storage: storageService, Personalization: personalizationStore, Device: deviceStore,
 		Terminal:     terminals,
 		Containers:   containersapi.New(containerManager, containerSource, logger),
 		Apps:         appstoreapi.New(appStore, appstoreapi.DataSource(containerSource), appOptions),
