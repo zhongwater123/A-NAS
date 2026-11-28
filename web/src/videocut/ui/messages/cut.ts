@@ -1,0 +1,28 @@
+// The film page (M5–M9).
+export const cut = {
+  inspector: "检查器",
+  playhead: "播放头",
+  shot: (slot: number) => `镜头 ${slot}`,
+  shotsAfterGenerating: "生成完成后出现",
+  slow: "比预计慢，仍在处理",
+  generated: "成片已生成",
+  skipped: (count: number) => `${count} 段无法分析，已跳过`,
+  pickShotFirst: "先在时间轴上点一个镜头",
+  undone: "已撤销",
+  undo: "撤销",
+  thisShot: "这一镜",
+  candidates: "候选片段",
+  candidate: (n: number) => `候选 ${n}`,
+  noCandidates: "这一镜没有可替换的片段",
+  beats: (n: number) => `${n} 拍`,
+  exported: "导出完成，正在下载",
+  downloadBlocked: "下载被浏览器拦截，点此下载",
+  exportFailed: "导出失败",
+  done: {
+    replace: (slot: number) => `已替换镜头 ${slot}`,
+    remove: (slot: number) => `已删除镜头 ${slot}`,
+    set_in_point: (slot: number) => `已调整镜头 ${slot} 的入点`,
+    reorder_parts: () => "已调整段落顺序",
+    place: (slot: number) => `已放入镜头 ${slot}`,
+  },
+} as const;

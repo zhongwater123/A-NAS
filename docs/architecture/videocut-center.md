@@ -825,7 +825,7 @@ web/src/videocut/
 - 数据都经 TanStack Query，查询键集中在 `app/works.ts`；项目每 5 秒读一次，窗口最小化时停；`VideoCutPanel` 的 `poll` 只给测试缩短间隔。
 - `useCutStore` 是一个小的外部存储，用 `useCut(取值函数)` 按字段订阅（`useSyncExternalStore`），不引入状态库。
 - 操作锁经 `ui/lock.ts` 的 `ActionLock` 传给 `ActionButton`：成片页按“处理中或不是可改状态”设锁，`ui/` 不必依赖 `app/`。
-- 提示文案都在 `ui/messages.ts`；骨架先放了它自己用到的句子，各功能落地时补上附录 A 的其余部分。
+- 提示文案都在 `ui/messages/`，按页面分文件，几个人加文案时不在同一个文件里冲突；键名不能重复，由测试检查。骨架先放了它自己用到的句子，各功能落地时补上附录 A 的其余部分。分头开发时各守的约定见 [web/src/videocut/AGENTS.md](../../web/src/videocut/AGENTS.md)。
 - `useLocalImport`、`useUpload`、`usePlayer`、`useFeedback` 只有签名和最小实现，真实逻辑在各功能 issue 里补；`useFeedback` 要等桌面的问题反馈能从外部打开（T11）。
 - 镜头轨、段落总览和作品卡片的插槽里先放了最简单的按钮，只为走通流程和测试，功能落地时整块替换。
 - 快捷键在 `app/shortcuts.ts`：监听整个文档，不只页面，因为点过的按钮在处理中会变灰，焦点就落到了页面外；只在剪辑中心是桌面的焦点窗口时响应，输入框里的按键不算。
