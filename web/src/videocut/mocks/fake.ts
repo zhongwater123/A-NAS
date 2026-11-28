@@ -24,6 +24,7 @@ import type {
   VideoCutSongStructure,
   VideoCutTimeline,
 } from "../../api.generated";
+import { formatDate } from "../../lib/time";
 
 // FakeError is an answer other than success: its status and error code.
 export class FakeError extends Error {
@@ -67,7 +68,7 @@ const SECTIONS: [label: string, slots: number][] = [
 ];
 const SLOT_SECONDS = 2;
 
-export function partsOfSong(): VideoCutPart[] {
+function partsOfSong(): VideoCutPart[] {
   const parts: VideoCutPart[] = [];
   let slot = 1;
   let at = 0;
@@ -270,7 +271,7 @@ export class VenusFake {
     const at = this.now();
     const project: VideoCutProject = {
       id: this.nextId("project"),
-      name: new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric" }).format(new Date(at)),
+      name: formatDate(at, { month: "long", day: "numeric" }),
       sample: false,
       state: "importing",
       createdAt: at,
@@ -659,8 +660,9 @@ export class VenusFake {
     return stored.project;
   }
 
-  hasFilm(id: string): boolean {
-    return this.find(id).project.film?.exportedAt !== undefined;
+  // film says whether the project has an exported film to download.
+  film(id: string) {
+    if (this.find(id).project.film?.exportedAt === undefined) throw new FakeError(404, "not_found");
   }
 
   remove(id: string) {
