@@ -7,7 +7,7 @@ import { useEditor } from "../../app/editor";
 import { useSongStructure, useTimeline } from "../../app/features";
 import { useNav } from "../../app/nav";
 import { useFollowSelection } from "../../app/player";
-import { type CutMode, cutModeOf, isMaking, statusLabel } from "../../lib/pages";
+import { type CutMode, cutModeOf, isMaking, statusOf } from "../../lib/pages";
 import { ActionLock } from "../../ui/lock";
 import { messages } from "../../ui/messages";
 import { Slot } from "../../ui/Slot";
@@ -34,24 +34,29 @@ function Film({ work }: { work: Project }) {
   useTimeline(work.id, !isMaking(mode));
   useFollowSelection(work.id);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const label = statusLabel(mode);
+  const status = statusOf(mode);
+  const label = status && messages.status[status];
 
   // Ctrl+Z (⌘Z) undoes, from anywhere on the page but a text field; the
   // shortcut goes with the page (页面级).
   const page = useRef<HTMLDivElement>(null);
-  const undo = useRef(editor.undo);
+  const latest = useRef(editor);
   useEffect(() => {
-    undo.current = editor.undo;
+    latest.current = editor;
   });
   useEffect(() => {
     const element = page.current;
     if (!element) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
-      if (!typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        void undo.current();
-      }
+      const target = event.target;
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement;
+      const undo = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z";
+      if (typing || !undo) return;
+      event.preventDefault();
+      if (latest.current.canUndo) void latest.current.undo();
     };
     element.addEventListener("keydown", onKeyDown);
     return () => element.removeEventListener("keydown", onKeyDown);

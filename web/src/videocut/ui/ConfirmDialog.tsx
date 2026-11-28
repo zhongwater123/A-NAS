@@ -4,6 +4,7 @@
 import { AlertDialog } from "radix-ui";
 import type { ReactNode } from "react";
 
+import { messages } from "./messages";
 import styles from "./venus.module.css";
 import { useWindowRoot } from "./windowRoot";
 
@@ -36,7 +37,7 @@ export function ConfirmDialog({
           <AlertDialog.Title>{title}</AlertDialog.Title>
           <AlertDialog.Description>{message}</AlertDialog.Description>
           <div className={styles.dialogActions}>
-            <AlertDialog.Cancel className={styles.action}>取消</AlertDialog.Cancel>
+            <AlertDialog.Cancel className={styles.action}>{messages.cancel}</AlertDialog.Cancel>
             <AlertDialog.Action className={`${styles.action} ${styles.danger}`} onClick={onConfirm}>
               {confirm}
             </AlertDialog.Action>

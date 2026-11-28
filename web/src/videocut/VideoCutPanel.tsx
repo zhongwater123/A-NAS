@@ -74,7 +74,7 @@ function WorkRoute({ workId }: { workId: string }) {
   useWorkEvents(work.data);
   // Only the server's not_found says the project is gone; a failed read
   // keeps what was read before, or offers to read again.
-  const gone = work.error instanceof APIError && work.error.status === 404;
+  const gone = work.error instanceof APIError && work.error.code === "not_found";
   if (gone) return <Empty text={messages.workGone} />;
   if (!work.data) {
     if (!work.isError) return null;
