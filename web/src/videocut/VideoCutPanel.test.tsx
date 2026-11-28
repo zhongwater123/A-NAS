@@ -62,12 +62,7 @@ describe("Venus's shell", () => {
 });
 
 describe("what the shell tells once", () => {
-  function madeFilm(key: string) {
-    const { project } = fake.create(key, [file("e.mp4")]);
-    fake.generate(project.id, "g");
-    while (fake.step(project.id).state !== "ready");
-    return project;
-  }
+  const madeFilm = (key: string) => fake.made(key, [file("e.mp4")]);
 
   it("offers the download of a film exported while the page was not open, once", async () => {
     const project = madeFilm("k3");
@@ -120,9 +115,7 @@ describe("what the shell tells once", () => {
 
 describe("useEditor", () => {
   async function readyWork() {
-    const { project } = fake.create("k2", [file("c.mp4")]);
-    fake.generate(project.id, "g");
-    while (fake.step(project.id).state !== "ready");
+    const project = fake.made("k2", [file("c.mp4")]);
     const client = new QueryClient();
     client.setQueryData(keys.timeline(project.id), await getTimeline(project.id));
     return { id: project.id, client };

@@ -112,7 +112,7 @@ export class VenusFake {
   private readonly stored = new Map<string, Stored>();
   private clock = Date.parse("2026-12-01T09:00:00Z");
   private ids = 0;
-  options: Required<FakeOptions>;
+  readonly options: Required<FakeOptions>;
 
   constructor(options: FakeOptions = {}) {
     this.options = { advanceOnRead: true, uploadsArrive: true, ...options };
@@ -213,6 +213,15 @@ export class VenusFake {
     const stored = this.find(id);
     this.advance(stored);
     return stored.project;
+  }
+
+  // made creates a project from files and steps it until its film is made.
+  made(requestKey: string, files: VideoCutLocalFile[]): VideoCutProject {
+    const { project } = this.create(requestKey, files);
+    this.generate(project.id, requestKey);
+    for (let i = 0; i < 20 && project.state !== "ready"; i++) this.step(project.id);
+    if (project.state !== "ready") throw new Error(`fake: ${project.id} stopped at ${project.state}`);
+    return project;
   }
 
   private touch(stored: Stored) {
@@ -583,14 +592,8 @@ export class VenusFake {
         const shot = at(edit.slot);
         // The candidate's piece, as 取段规则 picked it; a search result's from its start.
         const picked = this.candidates(id, edit.slot).items.find((c) => c.beat === edit.beat);
-        const out = {
-          beat: shot.beat,
-          assetId: shot.assetId,
-          from: shot.from,
-          to: shot.to,
-          duration: shot.to - shot.from,
-          fitted: shot.fitted,
-        };
+        const { beat, assetId, from, to, fitted } = shot;
+        const out = { beat, assetId, from, to, fitted, duration: to - from };
         stored.replaced ??= new Map();
         stored.replaced.set(edit.slot, [
           out,

@@ -16,12 +16,9 @@ let workId: string;
 beforeEach(() => {
   fake = new VenusFake();
   server.use(...videocutHandlers(fake, http));
-  const { project } = fake.create("k", [
+  workId = fake.made("k", [
     { name: "a.mp4", size: 1000, modifiedAt: "2026-11-20T08:00:00Z", read: true, duration: 8 },
-  ]);
-  fake.generate(project.id, "g");
-  while (fake.step(project.id).state !== "ready");
-  workId = project.id;
+  ]).id;
 });
 
 async function openShot(slot: number) {
@@ -79,8 +76,7 @@ describe("这一镜: replacing a shot with a candidate (M7-1)", () => {
       fake.export(workId, "e");
     });
     expect(await screen.findByText("导出中")).toBeInTheDocument();
-    for (const candidate of candidatesIn(screen.getByRole("region", { name: "这一镜" })))
-      expect(candidate).toBeDisabled();
+    for (const candidate of candidatesIn(panel)) expect(candidate).toBeDisabled();
     expect(screen.getByRole("region", { name: "M6-1" })).toBeInTheDocument();
   });
 

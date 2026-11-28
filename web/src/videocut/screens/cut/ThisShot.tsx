@@ -18,7 +18,7 @@ export function ThisShot({ workId, slot }: { workId: string; slot: number }) {
   return (
     <section className={styles.thisShot} aria-label={messages.thisShot}>
       <h2>{messages.shot(slot)}</h2>
-      <img className={styles.still} src={frameURL(workId, shot.assetId, Math.round(shot.from * 1000))} alt="" />
+      <img className={styles.still} src={frameURL(workId, shot.assetId, shot.from)} alt="" />
       <p className={styles.facts}>
         <span>{`${clock(shot.start)}–${clock(shot.end)}`}</span>
         <span>{duration(shot.end - shot.start)}</span>
@@ -51,7 +51,7 @@ function Candidates({ workId, slot }: { workId: string; slot: number }) {
             aria-label={messages.candidate(i + 1)}
             onClick={() => void editor.replace(slot, candidate.beat)}
           >
-            <img src={frameURL(workId, candidate.assetId, Math.round(candidate.from * 1000))} alt="" />
+            <img src={frameURL(workId, candidate.assetId, candidate.from)} alt="" />
             <span>{duration(candidate.duration)}</span>
           </ActionButton>
         ))}
