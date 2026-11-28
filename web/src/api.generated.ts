@@ -9168,6 +9168,8 @@ export interface components {
             /** @description Seconds into the film; the slot's. */
             start: number;
             end: number;
+            /** @description 拍数: the music's beats the slot takes. */
+            beats: number;
             /** @description The beat in the slot. */
             beat: string;
             /** @description The video it comes from. */

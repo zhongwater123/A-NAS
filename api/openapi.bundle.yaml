@@ -19153,6 +19153,7 @@ components:
         - part
         - start
         - end
+        - beats
         - beat
         - assetId
         - from
@@ -19174,6 +19175,11 @@ components:
         end:
           type: number
           minimum: 0
+        beats:
+          type: integer
+          minimum: 1
+          maximum: 2
+          description: '拍数: the music''s beats the slot takes.'
         beat:
           type: string
           description: The beat in the slot.

@@ -91,6 +91,8 @@ interface Stored {
   timeline?: VideoCutTimeline;
   undo?: VideoCutTimeline;
   assets: VideoCutProjectAsset[];
+  // The beats replace took out of each slot, latest first: candidates again.
+  replaced?: Map<number, VideoCutCandidate[]>;
 }
 
 const sameFile = (a: VideoCutLocalFile, b: VideoCutLocalFile) =>
@@ -109,7 +111,7 @@ export class VenusFake {
   private readonly stored = new Map<string, Stored>();
   private clock = Date.parse("2026-12-01T09:00:00Z");
   private ids = 0;
-  readonly options: Required<FakeOptions>;
+  options: Required<FakeOptions>;
 
   constructor(options: FakeOptions = {}) {
     this.options = { advanceOnRead: true, uploadsArrive: true, ...options };
@@ -527,6 +529,7 @@ export class VenusFake {
           part: part.index,
           start: span.start,
           end: span.end,
+          beats: part.label === "副歌" ? 1 : 2,
           beat: `${assetId}/${span.slot}`,
           assetId,
           from: 0,
@@ -553,10 +556,10 @@ export class VenusFake {
     const shot = timeline.shots.find((s) => s.slot === slot);
     if (!shot) throw new FakeError(404, "not_found");
     const used = new Set(timeline.shots.map((s) => s.beat));
-    const items: VideoCutCandidate[] = [];
+    const items: VideoCutCandidate[] = (this.find(id).replaced?.get(slot) ?? []).filter((c) => !used.has(c.beat));
     for (let k = 1; items.length < CANDIDATES && k <= CANDIDATES * 2; k++) {
       const beat = `${shot.assetId}/${slot}-${k}`;
-      if (used.has(beat)) continue;
+      if (used.has(beat) || items.some((c) => c.beat === beat)) continue;
       items.push({ beat, assetId: shot.assetId, from: k, to: k + SLOT_SECONDS, duration: SLOT_SECONDS, fitted: false });
     }
     return { slot, items };
@@ -577,11 +580,26 @@ export class VenusFake {
     switch (edit.kind) {
       case "replace": {
         const shot = at(edit.slot);
+        // The candidate's piece, as 取段规则 picked it; a search result's from its start.
+        const picked = this.candidates(id, edit.slot).items.find((c) => c.beat === edit.beat);
+        const out = {
+          beat: shot.beat,
+          assetId: shot.assetId,
+          from: shot.from,
+          to: shot.to,
+          duration: shot.to - shot.from,
+          fitted: shot.fitted,
+        };
+        stored.replaced ??= new Map();
+        stored.replaced.set(edit.slot, [
+          out,
+          ...(stored.replaced.get(edit.slot) ?? []).filter((c) => c.beat !== out.beat),
+        ]);
         Object.assign(shot, {
           beat: edit.beat,
-          assetId: edit.beat.split("/")[0],
-          from: 0,
-          to: SLOT_SECONDS,
+          assetId: picked?.assetId ?? edit.beat.split("/")[0],
+          from: picked?.from ?? 0,
+          to: picked?.to ?? SLOT_SECONDS,
           anchor: true,
         });
         changed = [edit.slot];

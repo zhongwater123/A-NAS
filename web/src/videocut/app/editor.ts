@@ -28,7 +28,7 @@ export function useEditor(workId: string) {
   const run = async (done: string, call: (revision: number) => Promise<Timeline>): Promise<boolean> => {
     const state = store.get();
     if (readOnly(state)) {
-      toast(state.busy ? messages.busy : messages.readOnly);
+      toast(state.busy ? messages.busy : state.sample ? messages.sampleReadOnly : messages.readOnly);
       return false;
     }
     const revision = client.getQueryData<Timeline>(keys.timeline(workId))?.revision;
@@ -37,6 +37,8 @@ export function useEditor(workId: string) {
     try {
       const timeline = await call(revision);
       client.setQueryData(keys.timeline(workId), timeline);
+      // What a slot may take changes with the film: a beat taken out is a candidate again.
+      void client.invalidateQueries({ queryKey: [...keys.work(workId), "candidates"] });
       const first = timeline.changedSlots?.[0];
       const shot = timeline.shots.find((s) => s.slot === first);
       if (shot) store.set({ playhead: shot.start });

@@ -13,6 +13,7 @@ export interface CutState {
   playhead: number; // seconds into the film; the player writes, the tracks read
   busy: boolean; // an edit is being made: one at a time
   mode: CutMode; // from the project's state; the shell writes it
+  sample: boolean; // the sample every member has: it plays, and nothing changes it
   waitingSlots: number[]; // slots waiting for a video from this computer (M7-4)
 }
 
@@ -29,6 +30,7 @@ export function createCutStore(initial: Partial<CutState> = {}): CutStore {
     playhead: 0,
     busy: false,
     mode: "generating",
+    sample: false,
     waitingSlots: [],
     ...initial,
   };
@@ -46,9 +48,9 @@ export function createCutStore(initial: Partial<CutState> = {}): CutStore {
   };
 }
 
-// readOnly is whether edits are held back: while one is being made, and
-// whenever the film is not there to edit.
-export const readOnly = (state: CutState) => state.busy || state.mode !== "ready";
+// readOnly is whether edits are held back: while one is being made,
+// whenever the film is not there to edit, and always for the sample.
+export const readOnly = (state: CutState) => state.busy || state.mode !== "ready" || state.sample;
 
 const StoreContext = createContext<CutStore | null>(null);
 

@@ -7,17 +7,21 @@ import { useEditor } from "../../app/editor";
 import { useSongStructure, useTimeline } from "../../app/features";
 import { useNav } from "../../app/nav";
 import { useFollowSelection, usePlayer } from "../../app/player";
+import { useShortcuts } from "../../app/shortcuts";
 import { type CutMode, cutModeOf, statusLabel } from "../../lib/pages";
+import { clock } from "../../lib/time";
 import { ActionLock } from "../../ui/lock";
 import { messages } from "../../ui/messages";
 import { Slot } from "../../ui/Slot";
 import styles from "../layout.module.css";
+import { ThisShot } from "./ThisShot";
+import { UndoButton } from "./UndoButton";
 
 // The film page (M5–M9): top bar, player, inspector and tracks. The layout,
 // the shared state, the 生成中 tracks and the folding inspector are the
 // skeleton's; each feature replaces its slot.
 export function CutPage({ work }: { work: Project }) {
-  const [store] = useState(() => createCutStore({ mode: cutModeOf(work.state) }));
+  const [store] = useState(() => createCutStore({ mode: cutModeOf(work.state), sample: work.sample }));
   // The page's mode is the project's state, and only the shell writes it.
   useEffect(() => store.set({ mode: cutModeOf(work.state) }), [store, work.state]);
   return (
@@ -37,26 +41,9 @@ function Film({ work }: { work: Project }) {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const label = statusLabel(mode);
 
-  // Ctrl+Z (⌘Z) undoes, from anywhere on the page but a text field; the
-  // shortcut goes with the page (页面级).
+  // Ctrl+Z (⌘Z) undoes (app/shortcuts.ts).
   const page = useRef<HTMLDivElement>(null);
-  const undo = useRef(editor.undo);
-  useEffect(() => {
-    undo.current = editor.undo;
-  });
-  useEffect(() => {
-    const element = page.current;
-    if (!element) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement;
-      if (!typing && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        void undo.current();
-      }
-    };
-    element.addEventListener("keydown", onKeyDown);
-    return () => element.removeEventListener("keydown", onKeyDown);
-  }, []);
+  useShortcuts(page, { undo: () => void editor.undo() });
 
   return (
     <ActionLock.Provider value={locked}>
@@ -68,7 +55,7 @@ function Film({ work }: { work: Project }) {
           <h1>{work.name}</h1>
           {label && <span className={styles.status}>{label}</span>}
           <span className={styles.spacer} />
-          <Slot id="M6-5" />
+          <UndoButton workId={work.id} />
           <Slot id="M9-1" />
           <Slot id="M9-3" />
         </header>
@@ -88,7 +75,7 @@ function Film({ work }: { work: Project }) {
             </button>
           </div>
           <aside className={styles.inspector} data-open={inspectorOpen} aria-label={messages.inspector}>
-            <Inspector mode={mode} />
+            <Inspector mode={mode} workId={work.id} />
           </aside>
           {mode === "exporting" && (
             <div className={styles.overlay}>
@@ -101,8 +88,6 @@ function Film({ work }: { work: Project }) {
     </ActionLock.Provider>
   );
 }
-
-const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 
 function Center({ mode, workId }: { mode: CutMode; workId: string }) {
   const { playhead } = usePlayer(workId);
@@ -117,10 +102,10 @@ function Center({ mode, workId }: { mode: CutMode; workId: string }) {
 
 // The inspector shows 这一镜 while a shot is selected, the assistant
 // otherwise, and the settings read only while the film is being made.
-function Inspector({ mode }: { mode: CutMode }) {
+function Inspector({ mode, workId }: { mode: CutMode; workId: string }) {
   const selected = useCut((state) => state.selectedSlot);
   if (mode === "generating" || mode === "failed") return <Slot id="M5-2" />;
-  if (selected !== null) return <Slot id="M7">{messages.shot(selected)}</Slot>;
+  if (selected !== null) return <ThisShot workId={workId} slot={selected} />;
   return <Slot id="M8" />;
 }
 

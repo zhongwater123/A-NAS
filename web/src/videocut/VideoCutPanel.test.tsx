@@ -54,7 +54,7 @@ describe("Venus's shell", () => {
     await userEvent.click(await screen.findByRole("button", { name: "示例" }));
     await userEvent.click(await screen.findByRole("button", { name: "镜头 3" }));
     expect(screen.getByRole("button", { name: "镜头 3" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(screen.getByRole("region", { name: "M7" })).getByText("镜头 3")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "这一镜" })).getByText("镜头 3")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "M8" })).toBeNull();
     // Slot 3 starts 4 seconds in: two 2-second slots of 前奏 before it.
     expect(screen.getByRole("status", { name: "播放头" })).toHaveTextContent("0:04");
