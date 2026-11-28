@@ -164,4 +164,29 @@ describe("VenusFake behind the stand-ins", () => {
     }
     expect(states).toEqual(["generating", "generating", "ready"]);
   });
+
+  it("says why a list is too long or a file too large, as the page shows it", async () => {
+    const many = Array.from({ length: 201 }, (_, i) => file(`${i}.mp4`));
+    expect((await send("POST", "/projects", { requestKey: "k6", files: many })).body.error.code).toBe("too_many_files");
+    const huge = { ...file("big.mp4"), size: 5 * 1024 ** 3 };
+    expect((await send("POST", "/projects", { requestKey: "k7", files: [huge] })).body.error.code).toBe(
+      "file_too_large",
+    );
+  });
+
+  it("is 已完成 again after undoing an edit of an exported film", async () => {
+    const { body } = await send("POST", "/projects", { requestKey: "k8", files: [file("g.mp4")] });
+    await send("POST", `/projects/${body.id}/generate`, { requestKey: "g8" });
+    while ((await send("GET", `/projects/${body.id}`)).body.state !== "ready");
+    await send("POST", `/projects/${body.id}/export`, { requestKey: "e8" });
+    expect((await send("GET", `/projects/${body.id}`)).body.state).toBe("exported");
+    const edited = await send("POST", `/projects/${body.id}/timeline/edits`, {
+      baseRevision: 1,
+      edit: { kind: "remove", slot: 1 },
+    });
+    await send("POST", `/projects/${body.id}/export`, { requestKey: "e9" });
+    expect((await send("GET", `/projects/${body.id}`)).body.state).toBe("exported");
+    await send("POST", `/projects/${body.id}/timeline/undo`, { baseRevision: edited.body.revision });
+    expect((await send("GET", `/projects/${body.id}`)).body.state).toBe("ready");
+  });
 });

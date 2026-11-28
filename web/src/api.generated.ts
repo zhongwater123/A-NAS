@@ -9023,7 +9023,7 @@ export interface components {
         /** @description A file as the browser has it. name, size and modifiedAt together tell it: the same three are the same file, once in the list, and a file chosen again after a reload is matched to its entry by them. The rest is what the browser read from it; the file itself stays in the browser until uploaded. */
         VideoCutLocalFile: {
             name: string;
-            /** @description Bytes; 4 GB at most. */
+            /** @description Bytes. More than 4 GB is file_too_large (422), not validation_failed, so the page can say why. */
             size: number;
             /** Format: date-time */
             modifiedAt: string;
@@ -15131,6 +15131,7 @@ export interface operations {
             content: {
                 "application/json": {
                     requestKey: components["schemas"]["VideoCutRequestKey"];
+                    /** @description 200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why. */
                     files: components["schemas"]["VideoCutLocalFile"][];
                 };
             };
@@ -15226,6 +15227,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
+                    /** @description 200 files at most in a project: more is too_many_files (422), not validation_failed, so the page can say why. */
                     files: components["schemas"]["VideoCutLocalFile"][];
                 };
             };
