@@ -758,14 +758,14 @@ describe("A-NAS v1.0.1 desktop", () => {
     expect(screen.queryByRole("button", { name: "打开照片打分" })).not.toBeInTheDocument();
   });
 
-  it("shows 剪辑中心 only while the device turns it on, and opens its window", async () => {
+  it("shows 剪辑中心 only while the device turns it on, and opens its start page", async () => {
     serveDesktop({ videocut: true });
     serveWindows();
     const user = userEvent.setup();
     const { unmount } = render(<App />);
     const icons = await screen.findAllByRole("button", { name: "打开剪辑中心" });
     await user.click(icons[0]);
-    expect(await screen.findByText("新版剪辑中心正在开发中")).toBeInTheDocument();
+    expect(await screen.findByText("还没有作品")).toBeInTheDocument();
     unmount();
 
     serveDesktop({ videocut: false });

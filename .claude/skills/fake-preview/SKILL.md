@@ -37,6 +37,7 @@ description: 在开发机上启动一套 Fake 模式的 A-NAS 预览栈：模拟
 
    - `ANAS_STATE_DIR` 必须是绝对路径，每套栈各用一个。账号、文件目录与各模块的 SQLite 都在其中，模拟数据卷在其下的 `development-volume`。不设时所有栈共用 `~/.config/a-nas/state`。
    - 构建需要 Node（`make web-build` 在副本中按锁文件安装依赖）与 gcc（cgo SQLite）。
+   - 看剪辑中心（Venus）时：运行 `anas-api` 时加 `ANAS_VIDEOCUT_ENABLED=1`；后端还没实现的接口由网页里的替身应答，构建时用 `VITE_VIDEOCUT_STANDINS=1 make web-build`（[技术设计](../../../docs/architecture/videocut-center.md#venus-改版的网页结构)）。
    - 改了代码就停掉这套栈，再运行同一命令。
    - 副本与 check-in-wsl 共用，不要在同一检出的门禁运行期间构建，否则两边同时改写 `internal/webui/dist`。
 3. 首次启用管理员。只接受直接的回环请求，所以在 WSL 中对 `127.0.0.1` 发请求。用测试账号与 12–64 个字符的测试密码，不要用真实密码：
